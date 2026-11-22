@@ -1,10 +1,24 @@
-// 일괄 내보내기 열 표(P2-54b, Phase 2 C6) — 구간 7개·열 124개·order 고유. 값은 G2·G4·P2-54a 골든이 지킨다.
+// 일괄 내보내기 열 표(P2-54b·55a, Phase 2 C6) — 구간·열 수·order. 값은 G2·G4·P2-54a 골든이 지킨다.
 import { describe, expect, it } from 'vitest';
-import { BATCH_COLUMN_SECTIONS, BATCH_COLUMNS } from '../batchColumns';
+import { assembleBatchColumnSections, getBatchColumnSections, getBatchHeaders, type BatchColumnSection } from '../batchColumns';
 
-describe('BATCH_COLUMN_SECTIONS', () => {
-  it('구간 7개, 지금 열 순서(core → knee → shoulder → cervical → elbow → wrist → spine)와 구간별 열 수', () => {
-    expect(BATCH_COLUMN_SECTIONS.map(section => [section.id, section.order, section.columns.length])).toEqual([
+const columns = (count: number) => Array.from({ length: count }, (_, index) => ({ header: `h${index}`, cell: () => '' }));
+
+describe('모듈 미등록', () => {
+  it('core가 들고 있는 구간만(core·cervical·elbow·wrist — P2-55b 전)', () => {
+    expect(getBatchColumnSections().map(section => [section.id, section.order, section.columns.length])).toEqual([
+      ['core', 0, 32],
+      ['cervical', 30, 9],
+      ['elbow', 40, 31],
+      ['wrist', 50, 31],
+    ]);
+  });
+});
+
+describe('6모듈 등록', () => {
+  it('구간 7개(지금 열 순서), 열 124개, 머리글 고유', async () => {
+    for (const id of ['knee', 'shoulder', 'elbow', 'wrist', 'spine', 'cervical']) await import(`../../../modules/${id}/index.js`);
+    expect(getBatchColumnSections().map(section => [section.id, section.order, section.columns.length])).toEqual([
       ['core', 0, 32],
       ['knee', 10, 8],
       ['shoulder', 20, 6],
@@ -13,15 +27,40 @@ describe('BATCH_COLUMN_SECTIONS', () => {
       ['wrist', 50, 31],
       ['spine', 60, 7],
     ]);
+    const headers = getBatchHeaders();
+    expect(headers).toHaveLength(124);
+    expect(new Set(headers).size).toBe(124);
+  });
+});
+
+describe('assembleBatchColumnSections', () => {
+  it('order 순으로 끼워 넣는다(넘긴 순서와 무관)', () => {
+    const sections: BatchColumnSection[] = [
+      { id: 'late', order: 70, columns: columns(1) },
+      { id: 'early', order: 5, columns: columns(1) },
+    ];
+    expect(assembleBatchColumnSections(sections).map(section => section.id))
+      .toEqual(['core', 'early', 'cervical', 'elbow', 'wrist', 'late']);
   });
 
-  it('열 124개, 머리글은 서로 다르다', () => {
-    expect(BATCH_COLUMNS).toHaveLength(124);
-    expect(new Set(BATCH_COLUMNS.map(column => column.header)).size).toBe(124);
+  it('order가 겹치면 throw', () => {
+    expect(() => assembleBatchColumnSections([{ id: 'x', order: 30, columns: columns(1) }]))
+      .toThrow("[batchColumns] 구간 order 30이 'cervical'와 'x'에 겹칩니다");
+    expect(() => assembleBatchColumnSections([
+      { id: 'a', order: 10, columns: columns(1) },
+      { id: 'b', order: 10, columns: columns(1) },
+    ])).toThrow("[batchColumns] 구간 order 10이 'a'와 'b'에 겹칩니다");
   });
 
-  it('order는 서로 다르다', () => {
-    const orders = BATCH_COLUMN_SECTIONS.map(section => section.order);
-    expect(new Set(orders).size).toBe(orders.length);
+  it('order가 없거나 숫자가 아니면 throw', () => {
+    expect(() => assembleBatchColumnSections([{ id: 'x', order: Number.NaN, columns: columns(1) }]))
+      .toThrow("[batchColumns] 구간 'x'의 order가 숫자가 아닙니다");
+    expect(() => assembleBatchColumnSections([{ id: 'y', columns: columns(1) } as unknown as BatchColumnSection]))
+      .toThrow("[batchColumns] 구간 'y'의 order가 숫자가 아닙니다");
+  });
+
+  it('같은 id가 둘이면 throw', () => {
+    expect(() => assembleBatchColumnSections([{ id: 'elbow', order: 45, columns: columns(1) }]))
+      .toThrow("[batchColumns] 구간 'elbow'가 두 번 있습니다");
   });
 });

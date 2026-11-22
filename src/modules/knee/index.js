@@ -4,6 +4,7 @@ import { createKneeModuleData, createKneeJobExtras } from './utils/data';
 import { computeKneeCalc, isKneeAssessmentComplete } from './utils/calculations';
 import { parseKlg, parseBool, ensureModule } from '../../core/utils/batchImportHelpers';
 import { jobScopeWriteField, stringCoerce } from '../../core/utils/videoMapping';
+import { kneeBatchExport } from './batchExport';
 
 registerModule({
   id: 'knee',
@@ -65,6 +66,7 @@ registerModule({
       return { ...moduleData, jobExtras: extras };
     },
   },
+  batchExport: kneeBatchExport,
   batchImportConfig: {
     columns: {
       klgRight: ['klg(우)', 'klg_right'],

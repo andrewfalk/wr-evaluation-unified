@@ -4,6 +4,7 @@ import { createShoulderModuleData, createShoulderJobExtras } from './utils/data'
 import { computeShoulderCalc, isShoulderAssessmentComplete } from './utils/calculations';
 import { ensureModule } from '../../core/utils/batchImportHelpers';
 import { jobScopeWriteField, stringCoerce } from '../../core/utils/videoMapping';
+import { shoulderBatchExport } from './batchExport';
 
 registerModule({
   id: 'shoulder',
@@ -62,6 +63,7 @@ registerModule({
       return { ...moduleData, jobExtras: extras };
     },
   },
+  batchExport: shoulderBatchExport,
   batchImportConfig: {
     columns: {
       ellmanRight: ['ellman(우)', 'ellman_right'],

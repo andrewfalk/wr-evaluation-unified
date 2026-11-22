@@ -1,13 +1,16 @@
-// 일괄 입력(엑셀) 내보내기 열 표 — REFACTORING_ROADMAP Phase 2 C6, P2-54b.
+// 일괄 입력(엑셀) 내보내기 열 표 — REFACTORING_ROADMAP Phase 2 C6, P2-54b·55a.
 //
 // 옛 generateBatchRows(src/core/utils/exportService.js)의 row.push 126개(근무기간 if/else 때문에 열은 124)를 열 하나 = { header, cell(ctx) }
 // 한 항목으로 1:1 옮겼다. 열은 구간 7개(core · knee · shoulder · cervical · elbow · wrist · spine)로 나누고, 구간마다 같은 번호 공간의 order를
 // 준다 — 열 순서는 order가 정하고 모듈 등록 순서와는 무관하다(지금 순서 그대로: core 32열 → knee → shoulder → cervical → elbow → wrist → spine).
 // 행 짝짓기(상병·직업·작업·팔꿈치/손목 항목을 한 행에 묶는 일)는 exportService가 그대로 하고, 한 행의 재료를 BatchRowContext로 넘긴다.
-// P2-55a·55b가 모듈 구간을 각 모듈 매니페스트(batchExport)로 옮긴다.
+// P2-55a: knee·shoulder·spine 구간은 각 모듈 매니페스트의 batchExport(src/modules/*/batchExport.js)가 낸다 — 등록된 모듈의 구간만 붙고,
+// 순서는 order가 정한다(등록 순서와 무관). 등록되지 않은 모듈의 구간·선택 함수는 없는 것으로 처리한다. P2-55b가 나머지 셋을 옮긴다.
 import { getReasonText, getStatusText } from '../assessment/vocabulary';
 import { getWorkPeriodYearMonth } from '../utils/workPeriod';
 import { selectModuleNote } from '../utils/moduleNotes';
+import { getAllModules } from '../moduleRegistry';
+import type { ModuleManifest } from '../modules/manifest';
 import { getBk2101RepetitionPerHour } from '../../modules/elbow/utils/calculations';
 import { EXPOSURE_TYPE_LABELS as CERVICAL_EXPOSURE_TYPE_LABELS } from '../../modules/cervical/utils/data';
 
@@ -132,28 +135,6 @@ const CORE_COLUMNS: readonly BatchColumn[] = [
   { header: '근무기간(개월)', cell: ({ job }) => (job ? getWorkPeriodYearMonth(job).months || '' : '') },
 ];
 
-// --- knee 8열 ---
-const KNEE_COLUMNS: readonly BatchColumn[] = [
-  { header: '중량물(kg)', cell: ({ kneeExtra }) => kneeExtra?.weight || '' },
-  { header: '쪼그려앉기(분)', cell: ({ kneeExtra }) => kneeExtra?.squatting || '' },
-  { header: '계단오르내리기', cell: ({ kneeExtra }) => (kneeExtra?.stairs ? 'O' : '') },
-  { header: '무릎비틀기', cell: ({ kneeExtra }) => (kneeExtra?.kneeTwist ? 'O' : '') },
-  { header: '출발정지반복', cell: ({ kneeExtra }) => (kneeExtra?.startStop ? 'O' : '') },
-  { header: '좁은공간', cell: ({ kneeExtra }) => (kneeExtra?.tightSpace ? 'O' : '') },
-  { header: '무릎접촉충격', cell: ({ kneeExtra }) => (kneeExtra?.kneeContact ? 'O' : '') },
-  { header: '점프착지', cell: ({ kneeExtra }) => (kneeExtra?.jumpDown ? 'O' : '') },
-];
-
-// --- shoulder 6열 ---
-const SHOULDER_COLUMNS: readonly BatchColumn[] = [
-  { header: '오버헤드(시간/일)', cell: ({ shoulderExtra }) => shoulderExtra?.overheadHours ?? '' },
-  { header: '반복중간(시간/일)', cell: ({ shoulderExtra }) => shoulderExtra?.repetitiveMediumHours ?? '' },
-  { header: '반복빠름(시간/일)', cell: ({ shoulderExtra }) => shoulderExtra?.repetitiveFastHours ?? '' },
-  { header: '중량물횟수(회/일)', cell: ({ shoulderExtra }) => shoulderExtra?.heavyLoadCount ?? '' },
-  { header: '중량물시간(초/회)', cell: ({ shoulderExtra }) => shoulderExtra?.heavyLoadSeconds ?? '' },
-  { header: '진동(시간/일)', cell: ({ shoulderExtra }) => shoulderExtra?.vibrationHours ?? '' },
-];
-
 // --- cervical 9열 ---
 const CERVICAL_COLUMNS: readonly BatchColumn[] = [
   { header: '경추_작업명', cell: ({ cervicalTask }) => cervicalTask?.name || '' },
@@ -230,28 +211,45 @@ const WRIST_COLUMNS: readonly BatchColumn[] = [
   { header: '손목_BK2106_압박원인', cell: ({ wristEntry }) => (wristEntry?.bk2106_pressure_source || []).join('|') },
 ];
 
-// --- spine 7열 ---
-const SPINE_COLUMNS: readonly BatchColumn[] = [
-  { header: '작업명', cell: ({ task }) => task?.name || '' },
-  { header: '자세코드', cell: ({ task }) => task?.posture || '' },
-  { header: '작업중량(kg)', cell: ({ task }) => task?.weight ?? '' },
-  { header: '횟수/분', cell: ({ task }) => task?.frequency ?? '' },
-  { header: '시간값', cell: ({ task }) => task?.timeValue ?? '' },
-  { header: '시간단위', cell: ({ task }) => task?.timeUnit || '' },
-  { header: '보정계수', cell: ({ task }) => task?.correctionFactor ?? '' },
-];
-
-/** 구간 7개 — order 순(지금 열 순서). */
-export const BATCH_COLUMN_SECTIONS: readonly BatchColumnSection[] = [
+/** core가 아직 들고 있는 구간(P2-55b에서 cervical·elbow·wrist가 모듈로 간다). */
+const CORE_SECTIONS: readonly BatchColumnSection[] = [
   { id: 'core', order: 0, columns: CORE_COLUMNS },
-  { id: 'knee', order: 10, columns: KNEE_COLUMNS },
-  { id: 'shoulder', order: 20, columns: SHOULDER_COLUMNS },
   { id: 'cervical', order: 30, columns: CERVICAL_COLUMNS },
   { id: 'elbow', order: 40, columns: ELBOW_COLUMNS },
   { id: 'wrist', order: 50, columns: WRIST_COLUMNS },
-  { id: 'spine', order: 60, columns: SPINE_COLUMNS },
 ];
 
-export const BATCH_COLUMNS: readonly BatchColumn[] = [...BATCH_COLUMN_SECTIONS]
-  .sort((left, right) => left.order - right.order)
-  .flatMap(section => section.columns);
+/** core 구간 + 모듈 구간을 order 순으로. 같은 order나 같은 id가 둘이면 throw(열 순서가 등록 순서에 기대지 않도록). */
+export function assembleBatchColumnSections(moduleSections: readonly BatchColumnSection[]): BatchColumnSection[] {
+  const sections = [...CORE_SECTIONS, ...moduleSections];
+  const seenOrders = new Map<number, string>();
+  const seenIds = new Set<string>();
+  for (const section of sections) {
+    if (typeof section.order !== 'number' || !Number.isFinite(section.order)) {
+      throw new TypeError(`[batchColumns] 구간 '${section.id}'의 order가 숫자가 아닙니다`);
+    }
+    const other = seenOrders.get(section.order);
+    if (other !== undefined) throw new Error(`[batchColumns] 구간 order ${section.order}이 '${other}'와 '${section.id}'에 겹칩니다`);
+    if (seenIds.has(section.id)) throw new Error(`[batchColumns] 구간 '${section.id}'가 두 번 있습니다`);
+    seenOrders.set(section.order, section.id);
+    seenIds.add(section.id);
+  }
+  return sections.sort((left, right) => left.order - right.order);
+}
+
+/** 지금 등록된 모듈의 batchExport를 붙인 구간 목록. */
+export function getBatchColumnSections(): BatchColumnSection[] {
+  const modules = getAllModules() as ModuleManifest[];
+  return assembleBatchColumnSections(modules.flatMap(mod => (
+    mod.batchExport ? [{ id: mod.id, order: mod.batchExport.order, columns: mod.batchExport.columns }] : []
+  )));
+}
+
+export function getBatchColumns(): BatchColumn[] {
+  return getBatchColumnSections().flatMap(section => section.columns);
+}
+
+/** 일괄 입력 시트 머리글(구간 order 순). 6모듈이 모두 등록돼 있으면 124개. */
+export function getBatchHeaders(): string[] {
+  return getBatchColumns().map(column => column.header);
+}

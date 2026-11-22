@@ -4,6 +4,7 @@
 // 같은 모양을 실행 중에 확인한다 — 타입과 검사가 같은 목록(MANIFEST_KEYS 등)을 보도록 이 파일 하나에 둔다.
 // 새 최상위 키는 그 키를 쓰기 시작하는 PR에서 MANIFEST_KEYS에 더한다(계획 phase2-c5c6-plan.md 원칙 4).
 import type { ComponentType } from 'react';
+import type { BatchColumn } from '../export/batchColumns';
 
 /** 평가 화면 탭 — 모듈마다 단계(step) 하나씩이 된다(src/core/utils/steps.js). */
 export interface ModuleTab {
@@ -91,6 +92,17 @@ export interface ModuleDevFixtures {
   createDiagnosisEntry?: (diagnosis: unknown) => unknown;
 }
 
+/**
+ * 일괄 내보내기(엑셀 일괄 입력 형식) 구간(선택, P2-55a). 열 순서는 order가 정한다(core 0, 모듈은 같은 번호 공간 — 등록 순서와 무관).
+ * 열 정의는 첫 화면 청크에 들어가므로 exportService·xlsx를 import하지 않는다.
+ */
+export interface BatchExportConfig {
+  order: number;
+  columns: readonly BatchColumn[];
+  /** 행 짝짓기에 쓸 작업 목록(spine — MDDM이 평가된 경우만). 없으면 이 모듈은 작업 행을 만들지 않는다. */
+  rowTasks?: (moduleData: unknown) => unknown[];
+}
+
 export interface ModuleManifest {
   id: string;
   name: string;
@@ -105,12 +117,13 @@ export interface ModuleManifest {
   batchImportConfig?: BatchImportConfig;
   videoMappingConfig?: VideoMappingConfig;
   devFixtures?: ModuleDevFixtures;
+  batchExport?: BatchExportConfig;
 }
 
 export const REQUIRED_MANIFEST_KEYS = [
   'id', 'name', 'icon', 'description', 'EvaluationComponent', 'createModuleData', 'computeCalc', 'isComplete', 'tabs',
 ] as const;
-export const OPTIONAL_MANIFEST_KEYS = ['presetConfig', 'batchImportConfig', 'videoMappingConfig', 'devFixtures'] as const;
+export const OPTIONAL_MANIFEST_KEYS = ['presetConfig', 'batchImportConfig', 'videoMappingConfig', 'devFixtures', 'batchExport'] as const;
 export const MANIFEST_KEYS: readonly string[] = [...REQUIRED_MANIFEST_KEYS, ...OPTIONAL_MANIFEST_KEYS];
 
 const PRESET_CONFIG_KEYS: readonly string[] = ['label', 'fields', 'extractFromModule', 'applyToModule'];
@@ -118,6 +131,8 @@ const PRESET_FIELD_KEYS: readonly string[] = ['key', 'label', 'type'];
 const BATCH_IMPORT_CONFIG_KEYS: readonly string[] = ['columns', 'applyRow'];
 const VIDEO_MAPPING_CONFIG_KEYS: readonly string[] = ['scope', 'featureKeys', 'coerce', 'writeField', 'taskFallbackUnlinked'];
 const DEV_FIXTURE_KEYS: readonly string[] = ['createJobEvaluation', 'createDiagnosisEntry'];
+const BATCH_EXPORT_KEYS: readonly string[] = ['order', 'columns', 'rowTasks'];
+const BATCH_COLUMN_KEYS: readonly string[] = ['header', 'cell'];
 
 type Fields = Record<string, unknown>;
 
@@ -230,6 +245,30 @@ function checkDevFixtures(fixtures: unknown, problems: string[]): void {
   }
 }
 
+function checkBatchExport(config: unknown, problems: string[]): void {
+  if (!isRecord(config)) {
+    problems.push('batchExport는 객체여야 합니다');
+    return;
+  }
+  for (const key of unknownKeys(config, BATCH_EXPORT_KEYS)) problems.push(`batchExport에 모르는 키 '${key}'`);
+  if (typeof config.order !== 'number' || !Number.isFinite(config.order)) problems.push('batchExport.order는 유한한 숫자여야 합니다');
+  if (!Array.isArray(config.columns) || config.columns.length === 0) {
+    problems.push('batchExport.columns는 비어 있지 않은 배열이어야 합니다');
+  } else {
+    config.columns.forEach((column: unknown, index) => {
+      const where = `batchExport.columns[${index}]`;
+      if (!isRecord(column)) {
+        problems.push(`${where}는 객체여야 합니다`);
+        return;
+      }
+      for (const key of unknownKeys(column, BATCH_COLUMN_KEYS)) problems.push(`${where}에 모르는 키 '${key}'`);
+      if (!isNonEmptyString(column.header)) problems.push(`${where}.header는 빈 문자열이 아닌 문자열이어야 합니다`);
+      if (typeof column.cell !== 'function') problems.push(`${where}.cell은 함수여야 합니다`);
+    });
+  }
+  if (config.rowTasks !== undefined && typeof config.rowTasks !== 'function') problems.push('batchExport.rowTasks는 함수여야 합니다');
+}
+
 /**
  * 매니페스트의 문제 목록(없으면 빈 배열). 순수 함수 — 등록 여부는 레지스트리(registry.ts)가 정한다.
  * 문장 앞에 모듈 id를 붙이지 않는다(레지스트리가 붙인다).
@@ -268,5 +307,6 @@ export function validateManifest(manifest: unknown): string[] {
   if (manifest.batchImportConfig !== undefined) checkBatchImportConfig(manifest.batchImportConfig, problems);
   if (manifest.videoMappingConfig !== undefined) checkVideoMappingConfig(manifest.videoMappingConfig, problems);
   if (manifest.devFixtures !== undefined) checkDevFixtures(manifest.devFixtures, problems);
+  if (manifest.batchExport !== undefined) checkBatchExport(manifest.batchExport, problems);
   return problems;
 }
