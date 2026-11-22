@@ -127,4 +127,22 @@ describe('G1b — batch import applyRow (all modules)', () => {
     await expect(goldenJson({ stats, patients: patients.map((p) => ({ id: p.id, data: p.data })) }))
       .toMatchFileSnapshot('./__goldens__/batch-import-applyRow.extra.json');
   });
+
+  // P2-56 이행 확인(다음 커밋에서 사본과 함께 지운다): 이 파일의 사본(importRows) 결과 = 새 함수 runBatchImport 결과.
+  it.each([['golden', () => loadGoldenPatients()], ['extra', () => loadGoldenBatchPatients()]])(
+    'P2-56: importRows(%s) equals runBatchImport',
+    async (_name, load) => {
+      const { runBatchImport } = await import('../../services/batchImport');
+      const rows = [batch.getBatchHeaders(), ...batch.generateBatchRows(load())];
+      const copy = importRows(rows);
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+      useGoldenEnvironment(); // 같은 고정 UUID·시계에서 다시 시작
+      const result = runBatchImport({ rows, existingPatients: [], errorRowIndexes: new Set(), session: null });
+      expect(result.empty).toBe(false);
+      expect(result.changed).toEqual([]);
+      expect(result.stats).toEqual(copy.stats);
+      expect(goldenJson(result.newPatients)).toBe(goldenJson(copy.patients));
+    },
+  );
 });
