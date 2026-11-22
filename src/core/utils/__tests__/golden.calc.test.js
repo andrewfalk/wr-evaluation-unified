@@ -4,7 +4,7 @@
 // Rules (update only for intended output changes, never in a refactor): src/core/fixtures/goldenEnv.js
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { useGoldenEnvironment } from '../../fixtures/goldenEnv';
-import { loadGoldenPatients } from '../../fixtures/goldenPatients';
+import { loadGoldenBatchPatients, loadGoldenPatients } from '../../fixtures/goldenPatients';
 
 const MODULE_IDS = ['knee', 'shoulder', 'elbow', 'wrist', 'spine', 'cervical'];
 
@@ -118,5 +118,13 @@ describe('G1b — batch import applyRow (all modules)', () => {
     const { patients, stats } = importRows(rows);
     await expect(goldenJson({ stats, patients: patients.map((p) => ({ id: p.id, data: p.data })) }))
       .toMatchFileSnapshot('./__goldens__/batch-import-applyRow.json');
+  });
+
+  // P2-54a: the extra batch cases (src/core/fixtures/goldenPatientsBatch.json) exported and imported back the same way.
+  it('extra cases: rows from generateBatchRows(extra patients) imported through every module applyRow', async () => {
+    const rows = [batch.BATCH_HEADERS, ...batch.generateBatchRows(loadGoldenBatchPatients())];
+    const { patients, stats } = importRows(rows);
+    await expect(goldenJson({ stats, patients: patients.map((p) => ({ id: p.id, data: p.data })) }))
+      .toMatchFileSnapshot('./__goldens__/batch-import-applyRow.extra.json');
   });
 });

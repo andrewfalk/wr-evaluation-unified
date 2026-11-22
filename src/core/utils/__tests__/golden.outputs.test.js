@@ -6,7 +6,7 @@
 // Rules (update only for intended output changes, never in a refactor): src/core/fixtures/goldenEnv.js
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useGoldenEnvironment } from '../../fixtures/goldenEnv';
-import { loadGoldenPatients } from '../../fixtures/goldenPatients';
+import { loadGoldenBatchPatients, loadGoldenPatients } from '../../fixtures/goldenPatients';
 
 // Capture what the export functions hand to SheetJS / JSZip instead of writing files.
 const captured = vi.hoisted(() => ({ writeFile: [], write: [], zips: [] }));
@@ -75,6 +75,12 @@ describe('G2 — batch sheet', () => {
   it('BATCH_HEADERS and every generateBatchRows row', async () => {
     const rows = exportService.generateBatchRows(loadGoldenPatients());
     await expect(goldenJson({ headers: exportService.BATCH_HEADERS, rows })).toMatchFileSnapshot('./__goldens__/batch-rows.json');
+  });
+
+  // P2-54a: branches the golden patients do not reach (src/core/fixtures/goldenPatientsBatch.json).
+  it('extra cases: every generateBatchRows row', async () => {
+    const rows = exportService.generateBatchRows(loadGoldenBatchPatients());
+    await expect(goldenJson({ rows })).toMatchFileSnapshot('./__goldens__/batch-rows.extra.json');
   });
 });
 
