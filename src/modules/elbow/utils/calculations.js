@@ -26,9 +26,6 @@ export {
 } from '@wr/analytics-core/modules/elbow/index';
 
 // UI 라벨 매핑 함수 — analytics-core로 이동하지 않음(UI 전용, 계산에 관여 안 함).
-export const getSideText = (side) =>
-  side === 'right' ? '우측' : side === 'left' ? '좌측' : side === 'both' ? '양측' : '-';
-
 export const getStatusText = (status) =>
   status === 'confirmed' ? '확인' : status === 'unconfirmed' ? '미확인' : '-';
 

@@ -1,5 +1,6 @@
 import { BK_TYPE_LABELS } from '../utils/data';
 import { formatCommonExposureTypeText, groupSummariesByBkType, mergeBkGroupSummaries } from '../utils/calculations';
+import { getSideText } from '../../../core/i18n/sideLabels';
 
 const TASK_CHANGE_OPTIONS = [
   { value: 'none', label: '변화 없음' },
@@ -31,10 +32,6 @@ function MissingList({ title, items }) {
       <div className="wrist-note-list">{items.join(', ')}</div>
     </div>
   );
-}
-
-function getSideLabel(side) {
-  return side === 'right' ? '우측' : side === 'left' ? '좌측' : side === 'both' ? '양측' : '-';
 }
 
 function TemporalSequenceSection({ temporalSequence, onChange }) {
@@ -117,7 +114,7 @@ function SummaryCard({ summary }) {
       <div className="result-card-meta">
         {summary.jobName || '직업 미입력'}
         {' · '}
-        {getSideLabel(diag.side)}
+        {getSideText(diag.side)}
         {' · '}
         {BK_TYPE_LABELS[entry.selectedBkType] || 'BK 유형 미선택'}
         {' · '}

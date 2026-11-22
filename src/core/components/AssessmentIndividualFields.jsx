@@ -1,5 +1,5 @@
 import { KLG_OPTIONS } from '../../modules/knee/utils/data';
-import { getSideText } from '../../modules/knee/utils/calculations';
+import { getSideText } from '../i18n/sideLabels';
 import { resolveDiagnosisModule, supportsKlGrade, supportsEllmanClass } from '../utils/diagnosisMapping';
 import { ELLMAN_OPTIONS } from './AssessmentTab';
 

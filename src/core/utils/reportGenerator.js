@@ -1,5 +1,5 @@
 import { getModule } from '../moduleRegistry';
-import { getSideText } from '../../modules/knee/utils/calculations';
+import { getSideText } from '../i18n/sideLabels';
 import { AUX_LABELS } from '../../modules/knee/utils/data';
 import { buildSpineSectionText } from '../../modules/spine/utils/sectionText';
 import { buildAssessmentBlocks, formatGroupedAssessment } from './assessmentGroups';
