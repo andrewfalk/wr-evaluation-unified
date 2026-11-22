@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
-import { getStatusText, getReasonText } from '../../modules/knee/utils/calculations';
+import { getStatusText, getReasonText } from '../assessment/vocabulary';
 import { getBk2101RepetitionPerHour } from '../../modules/elbow/utils/calculations';
 import { resolveMddmStatus } from '../../modules/spine/utils/calculations';
 import { EXPOSURE_TYPE_LABELS as CERVICAL_EXPOSURE_TYPE_LABELS } from '../../modules/cervical/utils/data';

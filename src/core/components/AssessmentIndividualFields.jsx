@@ -1,4 +1,4 @@
-import { KLG_OPTIONS } from '../../modules/knee/utils/data';
+import { KLG_OPTIONS } from '../assessment/vocabulary';
 import { getSideText } from '../i18n/sideLabels';
 import { resolveDiagnosisModule, supportsKlGrade, supportsEllmanClass } from '../utils/diagnosisMapping';
 import { ELLMAN_OPTIONS } from './AssessmentTab';

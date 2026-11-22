@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { LOW_REASON_OPTIONS } from '../../modules/knee/utils/data';
+import { LOW_REASON_OPTIONS } from '../assessment/vocabulary';
 import { assessmentLabel, statusText } from '../utils/assessmentGroups';
 
 // 그룹(또는 그룹 내 선택 항목)에 상병 상태·업무관련성·낮음 사유를 일괄 입력하는 모달.

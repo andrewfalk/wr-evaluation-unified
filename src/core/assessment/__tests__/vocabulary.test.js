@@ -1,8 +1,9 @@
-// 평가 어휘 특성화(P2-52, Phase 2 C6) — core가 쓰는 선택지·문구 함수(지금은 무릎 모듈 것)의 값을 고정한다.
-// P2-52가 이것들을 src/core/assessment/vocabulary.ts로 옮길 때 값이 같은지 본다.
+// 평가 어휘(P2-52, Phase 2 C6) — core가 쓰는 선택지·문구 함수. 첫 커밋에서 무릎 모듈의 값으로 고정한 표를 그대로 두고
+// 대상을 src/core/assessment/vocabulary.ts로 바꿨다(값이 같다). 무릎·어깨 data.js의 옛 경로는 같은 객체를 다시 내보낸다.
 import { describe, expect, it } from 'vitest';
-import { KLG_OPTIONS, LOW_REASON_OPTIONS } from '../../../modules/knee/utils/data';
-import { getReasonText, getStatusText } from '../../../modules/knee/utils/calculations';
+import { KLG_OPTIONS, LOW_REASON_OPTIONS, getReasonText, getStatusText } from '../vocabulary';
+import * as kneeData from '../../../modules/knee/utils/data';
+import * as shoulderData from '../../../modules/shoulder/utils/data';
 
 describe('평가 어휘(특성화)', () => {
   it('KLG_OPTIONS', () => {
@@ -44,5 +45,11 @@ describe('평가 어휘(특성화)', () => {
     expect(getReasonText([])).toBe('-');
     expect(getReasonText(null)).toBe('-');
     expect(getReasonText(undefined)).toBe('-');
+  });
+
+  it('무릎·어깨 옛 경로는 같은 객체를 다시 내보낸다', () => {
+    expect(kneeData.KLG_OPTIONS).toBe(KLG_OPTIONS);
+    expect(kneeData.LOW_REASON_OPTIONS).toBe(LOW_REASON_OPTIONS);
+    expect(shoulderData.LOW_REASON_OPTIONS).toBe(LOW_REASON_OPTIONS);
   });
 });
