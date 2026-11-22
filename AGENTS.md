@@ -24,7 +24,8 @@ vercel deploy            # Vercel 배포
 ```
 src/
 ├── core/                    # 공유 프레임워크
-│   ├── moduleRegistry.js    # registerModule(), getModule(), getAllModules()
+│   ├── moduleRegistry.js    # registerModule(), getModule(), getAllModules() — shim, 구현은 modules/registry.ts
+│   ├── modules/             # manifest.ts(매니페스트 타입·validateManifest), registry.ts
 │   ├── components/          # BasicInfoForm, DiagnosisForm, AIAnalysisPanel, ModuleSelector, SettingsModal
 │   ├── hooks/               # useAIAnalysis (web/electron 자동 분기), usePatientList
 │   └── utils/               # storage, platform, common, data
@@ -50,6 +51,7 @@ registerModule({
   EvaluationComponent: MyComponent,
   computeCalc: computeFn,
   isComplete: checkFn,
+  tabs: [{ id: 'main', label: '평가' }],   // 필수 — 탭마다 평가 단계 하나
   batchImportConfig: {                     // BatchImportModal 일괄 import 연동 (선택)
     columns: { fieldKey: ['엑셀헤더후보1', 'header_candidate2'] },  // findCol 후보 목록
     applyRow({ patient, row, diagnosis, job, colMap, getCell, rowIndex }) {
@@ -60,7 +62,9 @@ registerModule({
 });
 ```
 
-그리고 `src/App.jsx`에서 `import './modules/<name>'` 추가.
+그리고 `src/modules/index.ts`에 `import './<name>';` 한 줄 추가(이 파일의 순서가 화면 목록·일괄 가져오기 순서다).
+등록할 때 `src/core/modules/manifest.ts`의 `validateManifest()`가 매니페스트를 검사한다 — 필수 키(`tabs` 포함)가 없거나
+모르는 키·잘못된 타입이 있거나 같은 id를 다시 등록하면 throw한다(개발 모드의 같은 id 재등록만 교체 허용, HMR용).
 
 ## 데이터 모델
 

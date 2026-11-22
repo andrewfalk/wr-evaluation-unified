@@ -17,7 +17,7 @@ Use this document together with:
 
 ## 2. Runtime Contract
 
-Each module is registered through `registerModule()` and may provide:
+Each module is registered through `registerModule()`. The manifest is checked at registration by `validateManifest()` in `src/core/modules/manifest.ts` (Phase 2 C5): a missing required key, an unknown key, a wrong type or a duplicate `id` throws (only development mode allows re-registering the same `id`, for HMR). Register the module by adding `import './<name>';` to `src/modules/index.ts` (that order is the app's module order). A manifest provides:
 
 - `id`
 - `name`
@@ -25,10 +25,10 @@ Each module is registered through `registerModule()` and may provide:
 - `description`
 - `EvaluationComponent`
 - `createModuleData()`
-- `createDiagnosis()` when module-specific diagnosis fields are needed
 - `computeCalc()`
 - `isComplete()`
-- `tabs`
+- `tabs` (required — one evaluation step per tab)
+- optional: `presetConfig`, `batchImportConfig`, `videoMappingConfig`
 
 At runtime, the app stores module payloads under:
 
@@ -257,7 +257,7 @@ The diagnosis list belongs in `shared.diagnoses[]`.
 
 Module-specific diagnosis extensions are allowed, but they should follow one of these patterns:
 
-1. Extend the shared diagnosis object through `createDiagnosis()` when the fields are conceptually part of diagnosis assessment.
+1. Extend the shared diagnosis object (the shared `createDiagnosis()` in `src/core/utils/data.js`) when the fields are conceptually part of diagnosis assessment. Modules no longer declare their own diagnosis factory in the manifest (removed in Phase 2 P2-49 — nothing read it).
 2. Store module-owned derived interpretation separately under `modules.<moduleId>` if it is not truly part of the diagnosis record.
 
 Use the first option for fields like:
@@ -371,14 +371,6 @@ registerModule({
   createModuleData: () => ({
     taskItems: [],
     summaryNotes: ''
-  }),
-  createDiagnosis: () => ({
-    id: crypto.randomUUID(),
-    code: '',
-    name: '',
-    side: '',
-    hipFinding: '',
-    hipSeverity: ''
   }),
   computeCalc: computeHipCalc,
   isComplete: isHipComplete,

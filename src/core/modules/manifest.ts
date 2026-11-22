@@ -22,20 +22,31 @@ export interface ModuleEvaluationProps {
   [prop: string]: unknown;
 }
 
-export const PRESET_FIELD_TYPES = ['number', 'boolean', 'string'] as const;
+export const PRESET_VALUE_FIELD_TYPES = ['number', 'boolean', 'string'] as const;
+export type PresetValueFieldType = (typeof PRESET_VALUE_FIELD_TYPES)[number];
+export const PRESET_FIELD_TYPES = [...PRESET_VALUE_FIELD_TYPES, 'taskList'] as const;
 export type PresetFieldType = (typeof PRESET_FIELD_TYPES)[number];
 
-/** 프리셋 필드 한 개 — 프리셋 저장 창이 라벨·값 줄로 그린다. */
-export interface PresetFieldDef {
+/** 값 필드 한 개 — 프리셋 저장 창이 라벨·값 줄로 그린다. */
+export interface PresetValueFieldDef {
   key: string;
   label: string;
-  type: PresetFieldType;
+  type: PresetValueFieldType;
 }
 
-/** 직업 노출 프리셋 연동(선택). fields가 'tasks'이면 작업 목록형(spine·cervical). */
+/** 작업 목록 필드 — 프리셋 값의 key(예: 'tasks') 배열을 작업 카드로 그린다(spine·cervical, P2-50). */
+export interface PresetTaskListFieldDef {
+  key: string;
+  type: 'taskList';
+  label?: string;
+}
+
+export type PresetFieldDef = PresetValueFieldDef | PresetTaskListFieldDef;
+
+/** 직업 노출 프리셋 연동(선택). 작업 목록형은 fields에 taskList 필드 하나를 둔다. */
 export interface PresetConfig {
   label: string;
-  fields: PresetFieldDef[] | 'tasks';
+  fields: PresetFieldDef[];
   extractFromModule(moduleData: unknown, sharedJobId: string): unknown;
   applyToModule(moduleData: unknown, sharedJobId: string, presetData: unknown): unknown;
 }
@@ -114,9 +125,13 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every(item => typeof item === 'string');
 }
 
+// memo·lazy·forwardRef가 만드는 객체 컴포넌트의 태그. JSX 요소(react.element 등)는 컴포넌트가 아니다.
+const COMPONENT_OBJECT_TAGS: readonly symbol[] = [Symbol.for('react.memo'), Symbol.for('react.lazy'), Symbol.for('react.forward_ref')];
+
 /** React가 그릴 수 있는 컴포넌트(함수·클래스, 또는 memo·lazy·forwardRef가 만든 객체). */
 function isComponent(value: unknown): boolean {
-  return typeof value === 'function' || (isRecord(value) && '$$typeof' in value);
+  if (typeof value === 'function') return true;
+  return isRecord(value) && typeof value.$$typeof === 'symbol' && COMPONENT_OBJECT_TAGS.includes(value.$$typeof);
 }
 
 function unknownKeys(value: Fields, allowed: readonly string[]): string[] {
@@ -131,24 +146,29 @@ function checkPresetConfig(config: unknown, problems: string[]): void {
   for (const key of unknownKeys(config, PRESET_CONFIG_KEYS)) problems.push(`presetConfig에 모르는 키 '${key}'`);
   if (!isNonEmptyString(config.label)) problems.push('presetConfig.label은 빈 문자열이 아닌 문자열이어야 합니다');
   const { fields } = config;
-  if (fields !== 'tasks') {
-    if (!Array.isArray(fields)) {
-      problems.push("presetConfig.fields는 배열이거나 'tasks'여야 합니다");
-    } else {
-      fields.forEach((field: unknown, index) => {
-        const where = `presetConfig.fields[${index}]`;
-        if (!isRecord(field)) {
-          problems.push(`${where}는 객체여야 합니다`);
-          return;
-        }
-        for (const key of unknownKeys(field, PRESET_FIELD_KEYS)) problems.push(`${where}에 모르는 키 '${key}'`);
-        if (!isNonEmptyString(field.key)) problems.push(`${where}.key는 빈 문자열이 아닌 문자열이어야 합니다`);
-        if (!isNonEmptyString(field.label)) problems.push(`${where}.label은 빈 문자열이 아닌 문자열이어야 합니다`);
-        if (!(PRESET_FIELD_TYPES as readonly unknown[]).includes(field.type)) {
-          problems.push(`${where}.type은 ${PRESET_FIELD_TYPES.join('·')} 중 하나여야 합니다`);
-        }
-      });
-    }
+  if (!Array.isArray(fields)) {
+    problems.push('presetConfig.fields는 배열이어야 합니다');
+  } else {
+    let taskLists = 0;
+    fields.forEach((field: unknown, index) => {
+      const where = `presetConfig.fields[${index}]`;
+      if (!isRecord(field)) {
+        problems.push(`${where}는 객체여야 합니다`);
+        return;
+      }
+      for (const key of unknownKeys(field, PRESET_FIELD_KEYS)) problems.push(`${where}에 모르는 키 '${key}'`);
+      if (!isNonEmptyString(field.key)) problems.push(`${where}.key는 빈 문자열이 아닌 문자열이어야 합니다`);
+      if (!(PRESET_FIELD_TYPES as readonly unknown[]).includes(field.type)) {
+        problems.push(`${where}.type은 ${PRESET_FIELD_TYPES.join('·')} 중 하나여야 합니다`);
+      }
+      if (field.type === 'taskList') {
+        taskLists += 1;
+        if (field.label !== undefined && typeof field.label !== 'string') problems.push(`${where}.label은 문자열이어야 합니다`);
+      } else if (!isNonEmptyString(field.label)) {
+        problems.push(`${where}.label은 빈 문자열이 아닌 문자열이어야 합니다`);
+      }
+    });
+    if (taskLists > 1) problems.push('presetConfig.fields의 taskList 필드는 하나만 둘 수 있습니다');
   }
   if (typeof config.extractFromModule !== 'function') problems.push('presetConfig.extractFromModule은 함수여야 합니다');
   if (typeof config.applyToModule !== 'function') problems.push('presetConfig.applyToModule은 함수여야 합니다');

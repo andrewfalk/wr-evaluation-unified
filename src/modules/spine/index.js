@@ -32,7 +32,7 @@ registerModule({
   },
   presetConfig: {
     label: '척추 작업목록',
-    fields: 'tasks',
+    fields: [{ key: 'tasks', type: 'taskList' }],
     extractFromModule(moduleData, sharedJobId) {
       let tasks = (moduleData.tasks || []).filter(t => t.sharedJobId === sharedJobId);
       // 연결되지 않은 task만 남아 있는 예전 데이터도 허용한다.

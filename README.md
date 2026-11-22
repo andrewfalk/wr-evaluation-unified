@@ -122,9 +122,9 @@ registerModule({
   createModuleData,       // 초기 데이터 팩토리
   computeCalc,            // 계산/점수 산출 함수
   isComplete,             // 완료 판정 함수
-  tabs: [{ id: 'job', label: '신체부담 평가' }],
+  tabs: [{ id: 'job', label: '신체부담 평가' }],   // 필수
   presetConfig: {         // 프리셋 시스템 연동 (선택)
-    label, fields,
+    label, fields,        // fields: [{ key, label, type }] — 작업 목록형은 [{ key: 'tasks', type: 'taskList' }]
     extractFromModule(moduleData, sharedJobId) { ... },
     applyToModule(moduleData, sharedJobId, presetData) { ... },
   },
@@ -134,7 +134,7 @@ registerModule({
 **새 모듈 추가:**
 1. `src/modules/<name>/` 디렉토리 생성
 2. `index.js`에서 `registerModule()` 호출
-3. `src/App.jsx`에 `import './modules/<name>'` 한 줄 추가
+3. `src/modules/index.ts`에 `import './<name>';` 한 줄 추가(이 순서가 화면 목록·일괄 가져오기 순서) — 등록 때 `src/core/modules/manifest.ts`의 `validateManifest()`가 검사해 필수 키(`tabs` 포함) 누락·모르는 키·같은 id 재등록이면 throw
 4. (선택) `src/core/utils/diagnosisMapping.js`에 ICD 코드 매핑 추가
 
 ### 데이터 모델

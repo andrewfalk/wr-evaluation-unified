@@ -9,10 +9,11 @@ import { StrictMode, useCallback, useState } from 'react';
 import { cleanup, renderHook } from '@testing-library/react';
 import { useEvaluationDateSync } from '../useEvaluationDateSync';
 import { registerModule } from '../../../moduleRegistry';
+import { makeTestManifest } from '../../../../testing/moduleManifest';
 import { clearAllLockTokens, clearLockToken, setLockToken } from '../../../services/lockTokenStore';
 
 const MODULE_ID = 'p239c-eval-date-module';
-registerModule({ id: MODULE_ID, name: 'P2-39c', isComplete: ({ module }) => module?.done === true });
+registerModule(makeTestManifest({ id: MODULE_ID, name: 'P2-39c', isComplete: ({ module }) => module?.done === true }));
 
 const DOCTOR = { mode: 'intranet', apiBaseUrl: 'https://x', accessToken: 'tok', user: { id: 'u1', role: 'doctor', organizationId: 'org1' } };
 const NOW = new Date(2026, 10, 14, 9, 30, 0);

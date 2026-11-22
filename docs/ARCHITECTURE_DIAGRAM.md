@@ -30,7 +30,6 @@ graph TB
         BASIC["BasicInfoForm<br/>(6)"]
         DIAG["DiagnosisForm<br/>(4)"]
         AIPANEL["AIAnalysisPanel<br/>(3)"]
-        MODSELECTOR["ModuleSelector<br/>(3)"]
         SETTINGS["SettingsModal<br/>(4)"]
     end
 
@@ -73,7 +72,6 @@ graph TB
     %% App -> Core
     c127 --> WORKSPACE
     c127 --> PATIENT_SVC
-    c127 --> MODSELECTOR
 
     %% Workspace orchestrates
     WORKSPACE -->|18| STATUS_SVC
@@ -115,7 +113,7 @@ graph TB
     classDef infra fill:#607D8B,stroke:#37474F,color:#fff
 
     class KNEE,SPINE,SHOULDER module
-    class BATCH,FORMAT,BASIC,DIAG,AIPANEL,MODSELECTOR,SETTINGS core
+    class BATCH,FORMAT,BASIC,DIAG,AIPANEL,SETTINGS core
     class STATUS_SVC,WORKSPACE,PATIENT_SVC,REMOTE,ANALYZE svc
     class EXPORT,CALC1,COMPUTE,MIGRATE,STORAGE util
     class MAIN,EMR,API_HANDLER infra

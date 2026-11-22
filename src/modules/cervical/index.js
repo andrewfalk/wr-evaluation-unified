@@ -40,7 +40,7 @@ registerModule({
   },
   presetConfig: {
     label: '경추 작업목록',
-    fields: 'tasks',
+    fields: [{ key: 'tasks', type: 'taskList' }],
     extractFromModule(moduleData, sharedJobId) {
       const tasks = (moduleData.tasks || []).filter(task => task.sharedJobId === sharedJobId);
       if (!tasks.length) return null;
