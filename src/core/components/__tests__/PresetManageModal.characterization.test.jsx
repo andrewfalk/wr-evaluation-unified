@@ -110,6 +110,26 @@ describe('PresetManageModal — 미리보기(특성화)', () => {
     ]);
   });
 
+  it('필드형(knee): 빈 문자열·null·없는 필드는 줄을 그리지 않는다(false·0은 그린다)', () => {
+    const { container } = renderModal({
+      patient: makePatient(['knee'], {
+        knee: { jobExtras: [{ sharedJobId: JOB_ID, weight: '', squatting: null, stairs: false, kneeTwist: 0 }] },
+      }),
+    });
+    expect(readSections(container)).toEqual([
+      {
+        header: '🏃무릎 신체부담',
+        hasPreview: true,
+        source: null,
+        rows: [
+          ['계단오르내리기', 'N'],
+          ['무릎 비틀림', 'N'],
+        ],
+        tasks: [],
+      },
+    ]);
+  });
+
   it('tasks형(spine): 이 직업의 작업만 카드로, 칩은 자세·중량·횟수·시간·보정(0/빈 시간·보정은 생략)', () => {
     const { container } = renderModal({
       patient: makePatient(['spine'], { spine: { tasks: SPINE_TASKS } }),
