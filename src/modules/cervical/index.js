@@ -4,6 +4,7 @@ import { createCervicalModuleData, createCervicalTask, EXPOSURE_TYPE_OPTIONS } f
 import { computeCervicalCalc, isCervicalAssessmentComplete } from './utils/calculations';
 import { ensureModule, parseYesNo, splitList } from '../../core/utils/batchImportHelpers';
 import { taskScopeWriteField, stringCoerce } from '../../core/utils/videoMapping';
+import { cervicalBatchExport } from './batchExport';
 
 const EXPOSURE_TYPE_LOOKUP = EXPOSURE_TYPE_OPTIONS.reduce((acc, option) => {
   acc[option.value] = option.value;
@@ -75,6 +76,7 @@ registerModule({
       };
     },
   },
+  batchExport: cervicalBatchExport,
   batchImportConfig: {
     columns: {
       cervicalTaskName: ['경추_작업명', 'cervical_task_name'],

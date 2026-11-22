@@ -3,6 +3,7 @@ import { WristEvaluation } from './WristEvaluation';
 import { createWristModuleData, createWristJobEvaluation, createWristDiagnosisEntry } from './utils/data';
 import { computeWristCalc, isWristAssessmentComplete } from './utils/calculations';
 import { ensureModule, splitList, parseDate } from '../../core/utils/batchImportHelpers';
+import { wristBatchExport } from './batchExport';
 
 const PRESET_COMMON_FIELDS = [
   'main_task_name', 'direct_anatomic_link',
@@ -82,6 +83,7 @@ registerModule({
       return { ...moduleData, jobEvaluations: jobEvals };
     },
   },
+  batchExport: wristBatchExport,
   batchImportConfig: {
     columns: {
       wristRecentTaskChange: ['손목_시간적선후관계_최근작업변화', 'wrist_recent_task_change'],

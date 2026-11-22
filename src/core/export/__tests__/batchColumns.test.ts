@@ -1,16 +1,13 @@
-// 일괄 내보내기 열 표(P2-54b·55a, Phase 2 C6) — 구간·열 수·order. 값은 G2·G4·P2-54a 골든이 지킨다.
+// 일괄 내보내기 열 표(P2-54b·55a·55b, Phase 2 C6) — 구간·열 수·order. 값은 G2·G4·P2-54a 골든이 지킨다.
 import { describe, expect, it } from 'vitest';
 import { assembleBatchColumnSections, getBatchColumnSections, getBatchHeaders, type BatchColumnSection } from '../batchColumns';
 
 const columns = (count: number) => Array.from({ length: count }, (_, index) => ({ header: `h${index}`, cell: () => '' }));
 
 describe('모듈 미등록', () => {
-  it('core가 들고 있는 구간만(core·cervical·elbow·wrist — P2-55b 전)', () => {
+  it('core 구간(32열)만', () => {
     expect(getBatchColumnSections().map(section => [section.id, section.order, section.columns.length])).toEqual([
       ['core', 0, 32],
-      ['cervical', 30, 9],
-      ['elbow', 40, 31],
-      ['wrist', 50, 31],
     ]);
   });
 });
@@ -40,12 +37,12 @@ describe('assembleBatchColumnSections', () => {
       { id: 'early', order: 5, columns: columns(1) },
     ];
     expect(assembleBatchColumnSections(sections).map(section => section.id))
-      .toEqual(['core', 'early', 'cervical', 'elbow', 'wrist', 'late']);
+      .toEqual(['core', 'early', 'late']);
   });
 
   it('order가 겹치면 throw', () => {
-    expect(() => assembleBatchColumnSections([{ id: 'x', order: 30, columns: columns(1) }]))
-      .toThrow("[batchColumns] 구간 order 30이 'cervical'와 'x'에 겹칩니다");
+    expect(() => assembleBatchColumnSections([{ id: 'x', order: 0, columns: columns(1) }]))
+      .toThrow("[batchColumns] 구간 order 0이 'core'와 'x'에 겹칩니다");
     expect(() => assembleBatchColumnSections([
       { id: 'a', order: 10, columns: columns(1) },
       { id: 'b', order: 10, columns: columns(1) },
@@ -60,7 +57,9 @@ describe('assembleBatchColumnSections', () => {
   });
 
   it('같은 id가 둘이면 throw', () => {
-    expect(() => assembleBatchColumnSections([{ id: 'elbow', order: 45, columns: columns(1) }]))
-      .toThrow("[batchColumns] 구간 'elbow'가 두 번 있습니다");
+    expect(() => assembleBatchColumnSections([
+      { id: 'elbow', order: 40, columns: columns(1) },
+      { id: 'elbow', order: 45, columns: columns(1) },
+    ])).toThrow("[batchColumns] 구간 'elbow'가 두 번 있습니다");
   });
 });
