@@ -1,22 +1,5 @@
 // 무릎 모듈 전용 데이터
 
-export const createKneeDiagnosis = () => ({
-  id: crypto.randomUUID(),
-  code: '',
-  name: '',
-  side: '',
-  klgRight: '',
-  klgLeft: '',
-  confirmedRight: '',
-  confirmedLeft: '',
-  assessmentRight: '',
-  assessmentLeft: '',
-  reasonRight: [],
-  reasonRightOther: '',
-  reasonLeft: [],
-  reasonLeftOther: ''
-});
-
 // 구형식 호환용 (BatchImportModal 마이그레이션 전까지)
 export const createJob = () => ({
   id: crypto.randomUUID(),

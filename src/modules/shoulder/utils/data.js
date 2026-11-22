@@ -1,22 +1,5 @@
 // 어깨 모듈 전용 데이터
 
-export const createShoulderDiagnosis = () => ({
-  id: crypto.randomUUID(),
-  code: '',
-  name: '',
-  side: '',
-  ellmanRight: '',
-  ellmanLeft: '',
-  confirmedRight: '',
-  confirmedLeft: '',
-  assessmentRight: '',
-  assessmentLeft: '',
-  reasonRight: [],
-  reasonRightOther: '',
-  reasonLeft: [],
-  reasonLeftOther: ''
-});
-
 export const createShoulderJobExtras = (sharedJobId = '') => ({
   sharedJobId,
   overheadHours: '',
