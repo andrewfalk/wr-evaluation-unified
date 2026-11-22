@@ -1,12 +1,21 @@
 // @ts-nocheck
-import {
-  createWristDiagnosisEntry,
-  createWristJobEvaluation,
-  createWristModuleData,
-} from '../../modules/wrist/utils/data';
+import { getModule } from '../moduleRegistry';
 import { createPatient } from '../utils/data';
 
+// 손목 데이터 생성 함수는 wrist 매니페스트에서 받는다(Phase 2 P2-53 — core가 모듈 폴더를 직접 import하지 않도록).
+// 모듈이 등록된 뒤에 불려야 한다(앱의 "테스트" 버튼·테스트 파일 모두 6모듈을 등록한 상태).
+function getWristFixtures() {
+  const wrist = getModule('wrist');
+  if (!wrist?.devFixtures) throw new Error('createTestPatients: wrist 모듈이 등록되지 않았습니다');
+  return {
+    createWristModuleData: wrist.createModuleData,
+    createWristJobEvaluation: wrist.devFixtures.createJobEvaluation,
+    createWristDiagnosisEntry: wrist.devFixtures.createDiagnosisEntry,
+  };
+}
+
 export function createTestPatients() {
+  const { createWristModuleData, createWristJobEvaluation, createWristDiagnosisEntry } = getWristFixtures();
   const testPatients = [];
 
   const testData = [

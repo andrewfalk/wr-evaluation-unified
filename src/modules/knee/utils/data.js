@@ -49,10 +49,3 @@ export const AUX_LABELS = {
   kneeContact: '무릎 접촉/충격',
   jumpDown: '뛰어내리기'
 };
-
-// Fallback Presets
-export const FALLBACK_PRESETS = [
-  { id: 1, jobName: "건설 현장 배근공", category: "건설업", weight: 2500, squatting: 180, source: "Fallback" },
-  { id: 2, jobName: "기계 조립원", category: "제조업", weight: 1500, squatting: 120, source: "Fallback" },
-  { id: 3, jobName: "포장작업원", category: "제조업", weight: 300, squatting: 60, source: "Fallback" }
-];

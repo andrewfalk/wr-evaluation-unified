@@ -4,7 +4,7 @@ import { getModule } from '../moduleRegistry';
 import { patientTx } from '../state/patientStore/transitions';
 import { showAlert, showConfirm } from '../utils/platform';
 import { useGuardedDialogs } from '../../app/useWorkspaceLifetime';
-import { FALLBACK_PRESETS } from '../../modules/knee/utils/data';
+import { FALLBACK_PRESETS } from '../presets/fallbackPresets';
 
 // App.jsx가 canEditPatient(담당의/admin) AND 락 보유 여부(다른 사용자가 편집 중이면 false)를
 // 합성해 넘긴다. 프리셋 모달은 StepContent의 read-only 이벤트 차단 바깥에서 열리므로, 담당의
