@@ -2257,29 +2257,6 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
 .ai-result-panel { max-height: 520px; }
 .ai-result-content { max-height: 460px; white-space: pre-wrap; }
 
-/* Module Selector */
-.module-selector { display: flex; flex-direction: column; gap: 16px; }
-.module-selector-header { text-align: center; margin-bottom: 0; }
-.module-selector-hero { padding: 20px 22px; }
-.module-selector-header h2 { font-size: 1.3rem; color: var(--text-primary); margin-bottom: 8px; }
-.module-selector-header p { color: var(--text-muted); }
-.module-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
-.module-card { border-radius: 14px; padding: 24px 20px; text-align: left; cursor: pointer; transition: all 0.2s; display: flex; flex-direction: column; gap: 16px; }
-.module-card:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 10px 24px rgba(59,130,246,0.12); }
-.module-card-icon { font-size: 2.8rem; }
-.module-card-body { display: flex; flex-direction: column; gap: 8px; }
-.module-card h3 { font-size: 1.05rem; color: var(--text-primary); margin: 0; }
-.module-card p { font-size: 0.84rem; color: var(--text-muted); margin: 0; line-height: 1.55; }
-.module-card-cta {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: auto;
-  font-size: 0.76rem;
-  font-weight: 700;
-  color: var(--accent-dark);
-}
-.module-card-cta::after { content: '→'; }
 .module-check-copy { font-size: 0.8rem; color: var(--text-muted); }
 
 /* 태블릿/대형 스마트폰 */
@@ -2407,9 +2384,8 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
   .landing-actions, .intake-header, .sidebar-selection-row { flex-direction: column; align-items: stretch; }
   .landing-action-btn, .sidebar-selection-delete { width: 100%; }
   .landing-title { font-size: 1.15rem; }
-  .module-cards { grid-template-columns: 1fr; }
   .section-header, .section-actions { flex-direction: column; align-items: stretch; }
-  .section-actions .btn, .module-card-cta { width: 100%; justify-content: center; }
+  .section-actions .btn { width: 100%; justify-content: center; }
   .evaluation-section, .task-editor-section { padding: 14px; }
   .task-toolbar, .task-item, .task-item-side, .result-card-top, .result-risk-banner { flex-direction: column; align-items: stretch; }
   .task-item-force { text-align: left; }

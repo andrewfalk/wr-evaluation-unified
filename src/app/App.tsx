@@ -28,13 +28,8 @@ import { WorkspaceProvider } from './providers/WorkspaceContext';
 import { ScreenRouter } from './router/ScreenRouter';
 import { hasIntranetSession } from '../platform/dataMode';
 
-// 모듈 등록 (사이드이펙트 import) — 순서 그대로(옛 App.jsx 62-67줄)
-import '../modules/knee';
-import '../modules/spine';
-import '../modules/cervical';
-import '../modules/shoulder';
-import '../modules/elbow';
-import '../modules/wrist';
+// 모듈 등록 (사이드이펙트 import) — 순서는 src/modules/index.ts(옛 App.jsx 62-67줄 그대로)
+import '../modules';
 
 function App({ settings, handleSaveSettings, switchToLocalMode }: WorkspaceAppProps) {
   // 컨트롤러 1~7 — 옛 App.jsx의 호출 순서 그대로(이 순서를 바꾸면 effect 순서가 바뀐다).

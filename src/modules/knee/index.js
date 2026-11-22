@@ -1,6 +1,6 @@
 import { registerModule } from '../../core/moduleRegistry';
 import { KneeEvaluation } from './KneeEvaluation';
-import { createKneeModuleData, createKneeDiagnosis, createKneeJobExtras } from './utils/data';
+import { createKneeModuleData, createKneeJobExtras } from './utils/data';
 import { computeKneeCalc, isKneeAssessmentComplete } from './utils/calculations';
 import { parseKlg, parseBool, ensureModule } from '../../core/utils/batchImportHelpers';
 import { jobScopeWriteField, stringCoerce } from '../../core/utils/videoMapping';
@@ -12,7 +12,6 @@ registerModule({
   description: '근골격계 질환 업무관련성 평가',
   EvaluationComponent: KneeEvaluation,
   createModuleData: createKneeModuleData,
-  createDiagnosis: createKneeDiagnosis,
   computeCalc: computeKneeCalc,
   isComplete: isKneeAssessmentComplete,
   tabs: [

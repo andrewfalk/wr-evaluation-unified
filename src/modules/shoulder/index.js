@@ -1,6 +1,6 @@
 import { registerModule } from '../../core/moduleRegistry';
 import { ShoulderEvaluation } from './ShoulderEvaluation';
-import { createShoulderModuleData, createShoulderDiagnosis, createShoulderJobExtras } from './utils/data';
+import { createShoulderModuleData, createShoulderJobExtras } from './utils/data';
 import { computeShoulderCalc, isShoulderAssessmentComplete } from './utils/calculations';
 import { ensureModule } from '../../core/utils/batchImportHelpers';
 import { jobScopeWriteField, stringCoerce } from '../../core/utils/videoMapping';
@@ -12,7 +12,6 @@ registerModule({
   description: '어깨 근골격계 질환 업무관련성 평가',
   EvaluationComponent: ShoulderEvaluation,
   createModuleData: createShoulderModuleData,
-  createDiagnosis: createShoulderDiagnosis,
   computeCalc: computeShoulderCalc,
   isComplete: isShoulderAssessmentComplete,
   tabs: [

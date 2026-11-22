@@ -1,29 +1,29 @@
 // Module Registry - 평가 모듈 등록/검색
-const modules = new Map();
+//
+// 옛 경로 shim(REFACTORING_ROADMAP Phase 2 C5, P2-49) — 실제 구현은 ./modules/registry.ts, 매니페스트 모양·검사는
+// ./modules/manifest.ts. 소비처 39곳과 테스트의 vi.mock('…/moduleRegistry') 4곳이 이 경로를 쓰므로 경로는 그대로 두고,
+// 옛 JS 소비처의 타입검사가 지금과 같도록 **느슨한 서명**(any)을 붙여 다시 내보낸다. P2-100에서 없앤다.
+import * as registry from './modules/registry';
+
+/** @param {any} manifest */
+export function registerModule(manifest) {
+  registry.registerModule(manifest);
+}
 
 /**
- * 영상 분석 자동 매핑 설정(선택, §8.10). 미선언 모듈은 자동 입력 대상에서 제외(수기만, 하위호환 §8.15).
- * @typedef {Object} VideoMappingConfig
- * @property {'job'|'task'|'job-diagnosis'} scope - 적용 단위(jobExtras / tasks / 진단별)
- * @property {string[]} featureKeys - 이 모듈이 소비하는 FeatureKey(자동제안 대상; candidate 제외)
- * @property {(featureKey: string, value: any) => any} [coerce] - 모듈 필드 타입으로 변환(String/number)
- * @property {(moduleData: object, ctx: object, featureKey: string, value: any) =>
- *   {moduleData: object, previousValue: any, targetPath: string}} writeField - 원자값 기입(불변)
+ * @param {string} id
+ * @returns {any}
  */
-
-export function registerModule(manifest) {
-  modules.set(manifest.id, manifest);
-}
-
 export function getModule(id) {
-  return modules.get(id);
+  return registry.getModule(id);
 }
 
+/** @returns {any[]} */
 export function getAllModules() {
-  return Array.from(modules.values());
+  return registry.getAllModules();
 }
 
-/** videoMappingConfig를 선언한 모듈만 반환(자동 입력 지원 모듈). */
+/** videoMappingConfig를 선언한 모듈만 반환(자동 입력 지원 모듈). @returns {any[]} */
 export function getModulesWithVideoMapping() {
-  return getAllModules().filter((m) => !!m.videoMappingConfig);
+  return registry.getModulesWithVideoMapping();
 }
