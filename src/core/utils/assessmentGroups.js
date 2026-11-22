@@ -3,8 +3,7 @@
 // 항상 diagnoses 배열로부터 매번 다시 계산한다.
 
 import { resolveDiagnosisModule } from './diagnosisMapping';
-import { getStatusText, getReasonText } from '../../modules/knee/utils/calculations';
-import { LOW_REASON_OPTIONS } from '../../modules/knee/utils/data';
+import { getStatusText, getReasonText, LOW_REASON_OPTIONS } from '../assessment/vocabulary';
 
 function normalizeOtherText(value) {
   return String(value || '').trim().replace(/\r\n/g, '\n');

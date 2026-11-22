@@ -26,23 +26,3 @@ export {
 } from '@wr/analytics-core/modules/wrist/index';
 
 // UI 라벨 매핑 함수 — analytics-core로 이동하지 않음(UI 전용, 계산에 관여 안 함).
-export const getStatusText = (status) =>
-  status === 'confirmed' ? '확인' : status === 'unconfirmed' ? '미확인' : '-';
-
-export const getReasonText = (reasons, other) => {
-  if (typeof reasons === 'string') reasons = reasons ? [reasons] : [];
-  if (!reasons || reasons.length === 0) return '-';
-
-  const reasonMap = {
-    unrelated: '업무 노출과 직접 연결하기 어려운 상병',
-    unconfirmed: '병변 미확인',
-    ageMild: '연령 대비 경미',
-    mild: '병변 정도가 경미하거나 비특이적', // 레거시(구 데이터 표시용)
-    delayed: '업무 중단 후 상당 기간 경과',
-    lowBurden: '누적 노출량이 낮음',
-    belowThreshold: '노출 정도가 최소 문턱값을 넘지 못함',
-    other: `기타 (${other || ''})`,
-  };
-
-  return reasons.map((reason) => reasonMap[reason] || reason).join('\n');
-};

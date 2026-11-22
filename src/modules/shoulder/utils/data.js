@@ -26,13 +26,5 @@ export const ELLMAN_OPTIONS = [
   { value: 'Full', label: 'Full' },
 ];
 
-// 업무관련성 평가 낮음 사유 옵션 (무릎과 동일)
-export const LOW_REASON_OPTIONS = [
-  { value: 'unrelated', label: '신체부담과 관련없는 상병' },
-  { value: 'unconfirmed', label: '상병 미확인' },
-  { value: 'ageMild', label: '연령대비 경미' },
-  { value: 'delayed', label: '업무중단 후 상당기간 경과' },
-  { value: 'lowBurden', label: '누적 신체부담 낮음' },
-  { value: 'belowThreshold', label: '부담 정도가 최소 문턱값을 넘지 못함' },
-  { value: 'other', label: '기타' }
-];
+// 업무관련성 평가 낮음 사유 선택지(무릎과 동일)는 core 평가 어휘로 옮겼다(Phase 2 P2-52) — 옛 import 경로(테스트)를 위해 다시 내보낸다.
+export { LOW_REASON_OPTIONS } from '../../../core/assessment/vocabulary';

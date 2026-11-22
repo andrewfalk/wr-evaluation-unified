@@ -37,26 +37,8 @@ export const createKneeModuleData = () => ({
   returnConsiderations: ''
 });
 
-// KLG 옵션
-export const KLG_OPTIONS = [
-  { value: '', label: '선택' },
-  { value: 'N/A', label: '해당없음' },
-  { value: '1', label: '1등급' },
-  { value: '2', label: '2등급' },
-  { value: '3', label: '3등급' },
-  { value: '4', label: '4등급' }
-];
-
-// 업무관련성 평가 낮음 사유 옵션
-export const LOW_REASON_OPTIONS = [
-  { value: 'unrelated', label: '신체부담과 관련없는 상병' },
-  { value: 'unconfirmed', label: '상병 미확인' },
-  { value: 'ageMild', label: '연령대비 경미' },
-  { value: 'delayed', label: '업무중단 후 상당기간 경과' },
-  { value: 'lowBurden', label: '누적 신체부담 낮음' },
-  { value: 'belowThreshold', label: '부담 정도가 최소 문턱값을 넘지 못함' },
-  { value: 'other', label: '기타' }
-];
+// K-L 등급·낮음 사유 선택지는 core 평가 어휘로 옮겼다(Phase 2 P2-52) — 옛 import 경로(테스트)를 위해 다시 내보낸다.
+export { KLG_OPTIONS, LOW_REASON_OPTIONS } from '../../../core/assessment/vocabulary';
 
 // 보조변수 라벨
 export const AUX_LABELS = {

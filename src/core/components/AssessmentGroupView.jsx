@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { LOW_REASON_OPTIONS } from '../../modules/knee/utils/data';
+import { LOW_REASON_OPTIONS } from '../assessment/vocabulary';
 import {
   assessmentLabel,
   statusText,

@@ -3,7 +3,7 @@
 import { excelSerialToYmd } from './excelDate';
 import { getModule } from '../moduleRegistry';
 import { createDiagnosis, createSharedJob } from './data';
-import { LOW_REASON_OPTIONS } from '../../modules/knee/utils/data';
+import { LOW_REASON_OPTIONS } from '../assessment/vocabulary';
 import { validatePastDate, describeDateRejectReason } from '@wr/contracts/patientDates';
 
 // 구 export 라벨 → 현재 value 별칭. 'mild'(상병 미확인/연령대비 경미)는 7개 분할 후
