@@ -68,10 +68,11 @@ export function runBatchImport({ rows, existingPatients, errorRowIndexes, sessio
     .map(mod => ({ id: mod.id, batchImportConfig: mod.batchImportConfig }))
     .filter(mod => mod.batchImportConfig);
 
+  // buildColMap(JS)은 열 키 → 머리글 위치(없으면 -1)를 돌려준다.
   const colMap = buildColMap(headerRow, [
     BASE_COLUMNS,
     ...moduleConfigs.map(mod => mod.batchImportConfig?.columns || {}),
-  ]);
+  ]) as Record<string, number>;
 
   const resultPatients = clonePatients(existingPatients);
   // (P2-43b) 기존 환자 사본의 원래 모습 — 행이 실제로 바꾼 환자만 넘기려고 비교한다(손대지 않은 환자는 touch되지 않게).
@@ -105,7 +106,8 @@ export function runBatchImport({ rows, existingPatients, errorRowIndexes, sessio
     );
 
     if (!patient) {
-      const suggestedModules: string[] = suggestModules([{ code: diagCode, name: diagName, side }]);
+      const diagnosisHint = { code: diagCode, name: diagName, side };
+      const suggestedModules: string[] = suggestModules([diagnosisHint]);
       const modulesData: Fields = {};
       suggestedModules.forEach(moduleId => {
         const mod = getModule(moduleId) as ModuleManifest | undefined;
