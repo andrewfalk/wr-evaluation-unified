@@ -1,5 +1,6 @@
-// 매니페스트 검사(validateManifest)와 레지스트리(P2-49, Phase 2 C5).
-import { describe, expect, it, vi } from 'vitest';
+// 매니페스트 검사(validateManifest)와 레지스트리(P2-49·P2-50, Phase 2 C5).
+import { createElement } from 'react';
+import { describe, expect, it } from 'vitest';
 import { MANIFEST_KEYS, REQUIRED_MANIFEST_KEYS, validateManifest, type ModuleManifest } from '../manifest';
 import { createModuleRegistry } from '../registry';
 
@@ -66,26 +67,39 @@ describe('validateManifest', () => {
     expect(validateManifest(validManifest({ tabs: [{ id: 'a' }] }))).toEqual(['tabs[0]는 { id, label } 문자열 객체여야 합니다']);
   });
 
-  it('memo·lazy 같은 객체 컴포넌트도 컴포넌트로 본다', () => {
-    expect(validateManifest(validManifest({ EvaluationComponent: { $$typeof: Symbol.for('react.memo') } }))).toEqual([]);
+  it('memo·lazy·forwardRef 객체 컴포넌트는 받고, JSX 요소·가짜 태그는 막는다', () => {
+    for (const tag of ['react.memo', 'react.lazy', 'react.forward_ref']) {
+      expect(validateManifest(validManifest({ EvaluationComponent: { $$typeof: Symbol.for(tag) } })), tag).toEqual([]);
+    }
+    const problem = ['EvaluationComponent는 React 컴포넌트여야 합니다'];
+    expect(validateManifest(validManifest({ EvaluationComponent: createElement('div') }))).toEqual(problem);
+    expect(validateManifest(validManifest({ EvaluationComponent: { $$typeof: null } }))).toEqual(problem);
+    expect(validateManifest(validManifest({ EvaluationComponent: { $$typeof: 'react.memo' } }))).toEqual(problem);
   });
 
   it('presetConfig 하위 모양', () => {
     const ok = { label: 'L', fields: [{ key: 'k', label: 'K', type: 'number' }], extractFromModule: () => null, applyToModule: () => ({}) };
     expect(validateManifest(validManifest({ presetConfig: ok }))).toEqual([]);
-    expect(validateManifest(validManifest({ presetConfig: { ...ok, fields: 'tasks' } }))).toEqual([]);
+    expect(validateManifest(validManifest({ presetConfig: { ...ok, fields: [{ key: 'tasks', type: 'taskList' }] } }))).toEqual([]);
     expect(validateManifest(validManifest({
       presetConfig: { label: '', fields: [{ key: 'k', label: 'K', type: 'date', extra: 1 }], extractFromModule: 1, more: true },
     }))).toEqual([
       "presetConfig에 모르는 키 'more'",
       'presetConfig.label은 빈 문자열이 아닌 문자열이어야 합니다',
       "presetConfig.fields[0]에 모르는 키 'extra'",
-      'presetConfig.fields[0].type은 number·boolean·string 중 하나여야 합니다',
+      'presetConfig.fields[0].type은 number·boolean·string·taskList 중 하나여야 합니다',
       'presetConfig.extractFromModule은 함수여야 합니다',
       'presetConfig.applyToModule은 함수여야 합니다',
     ]);
-    expect(validateManifest(validManifest({ presetConfig: { ...ok, fields: 'items' } })))
-      .toEqual(["presetConfig.fields는 배열이거나 'tasks'여야 합니다"]);
+    // P2-50: 옛 문자열 'tasks'는 더 이상 받지 않는다(taskList 필드로 바꿈).
+    expect(validateManifest(validManifest({ presetConfig: { ...ok, fields: 'tasks' } })))
+      .toEqual(['presetConfig.fields는 배열이어야 합니다']);
+    expect(validateManifest(validManifest({
+      presetConfig: { ...ok, fields: [{ key: 'tasks', type: 'taskList', label: 3 }, { key: 'more', type: 'taskList' }] },
+    }))).toEqual([
+      'presetConfig.fields[0].label은 문자열이어야 합니다',
+      'presetConfig.fields의 taskList 필드는 하나만 둘 수 있습니다',
+    ]);
   });
 
   it('batchImportConfig 하위 모양', () => {
@@ -113,19 +127,28 @@ describe('validateManifest', () => {
   });
 });
 
-describe('createModuleRegistry (P2-49: 경고만)', () => {
-  it('문제가 있어도 등록하고, 경고는 모듈 id와 함께 한 번 낸다', () => {
-    const warn = vi.fn();
-    const registry = createModuleRegistry({ warn });
+describe('createModuleRegistry (P2-50: throw)', () => {
+  it('검사에 걸리면 모듈 id·문제 목록과 함께 throw하고 등록하지 않는다', () => {
+    const registry = createModuleRegistry();
     const manifest = validManifest({ tabs: undefined }) as unknown as ModuleManifest;
-    registry.register(manifest);
-    expect(registry.get('demo')).toBe(manifest);
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn).toHaveBeenCalledWith("[moduleRegistry] 모듈 'demo' 매니페스트 문제 1건: 필수 키 'tabs'가 없습니다");
+    expect(() => registry.register(manifest))
+      .toThrow("[moduleRegistry] 모듈 'demo' 매니페스트 문제 1건: 필수 키 'tabs'가 없습니다");
+    expect(registry.get('demo')).toBeUndefined();
+    expect(() => registry.register(null as unknown as ModuleManifest))
+      .toThrow("[moduleRegistry] 모듈 '(id 없음)' 매니페스트 문제 1건: 매니페스트는 객체여야 합니다");
   });
 
-  it('같은 id를 다시 등록하면 자리는 그대로, 내용만 바뀐다(옛 Map 동작)', () => {
-    const registry = createModuleRegistry({ warn: () => {} });
+  it('같은 id 재등록은 기본으로 throw하고 처음 것을 유지한다', () => {
+    const registry = createModuleRegistry();
+    const a = validManifest({ id: 'a' }) as unknown as ModuleManifest;
+    registry.register(a);
+    expect(() => registry.register(validManifest({ id: 'a', name: '다시' }) as unknown as ModuleManifest))
+      .toThrow("[moduleRegistry] 모듈 id 'a'가 이미 등록돼 있습니다");
+    expect(registry.all()).toEqual([a]);
+  });
+
+  it('allowReplace면 자리는 그대로, 내용만 바뀐다(옛 Map 동작 — 개발 모드 HMR)', () => {
+    const registry = createModuleRegistry({ allowReplace: true });
     const a = validManifest({ id: 'a' }) as unknown as ModuleManifest;
     const b = validManifest({ id: 'b' }) as unknown as ModuleManifest;
     const a2 = validManifest({ id: 'a', name: '다시' }) as unknown as ModuleManifest;
@@ -133,5 +156,16 @@ describe('createModuleRegistry (P2-49: 경고만)', () => {
     registry.register(b);
     registry.register(a2);
     expect(registry.all()).toEqual([a2, b]);
+  });
+
+  it('기본 인스턴스는 import.meta.env.DEV일 때 교체를 허용한다(vitest는 DEV)', async () => {
+    expect(import.meta.env.DEV).toBe(true);
+    const { registerModule, getAllModules, getModule } = await import('../registry');
+    const first = validManifest({ id: 'dev-replace' }) as unknown as ModuleManifest;
+    const second = validManifest({ id: 'dev-replace', name: '교체' }) as unknown as ModuleManifest;
+    registerModule(first);
+    registerModule(second);
+    expect(getModule('dev-replace')).toBe(second);
+    expect(getAllModules().filter(mod => mod.id === 'dev-replace')).toHaveLength(1);
   });
 });

@@ -88,8 +88,10 @@
 src/core/moduleRegistry.js
 ├── registerModule(manifest)   — 모듈 등록
 ├── getModule(id)              — ID로 모듈 조회
-└── getAllModules()             — 전체 모듈 목록
+└── getAllModules()             — 전체 모듈 목록(등록 순서)
 ```
+
+`moduleRegistry.js`는 옛 경로 shim이고 구현은 `src/core/modules/registry.ts`, 매니페스트 타입·검사(`validateManifest`)는 `src/core/modules/manifest.ts`다(Phase 2 C5, P2-49·50).
 
 각 모듈은 `src/modules/<name>/index.js`에서 자기 자신을 등록한다:
 
@@ -101,10 +103,9 @@ registerModule({
   description: '근골격계 질환 업무관련성 평가',
   EvaluationComponent,          // 메인 UI 컴포넌트
   createModuleData,             // 초기 데이터 팩토리
-  createDiagnosis,              // (선택) 모듈별 상병 확장 팩토리
   computeCalc,                  // 계산/점수 산출 함수
   isComplete,                   // 완료 판정 함수
-  tabs: [                       // 위자드 스텝 정의
+  tabs: [                       // 위자드 스텝 정의(필수)
     { id: 'job', label: '신체부담 평가' },
   ]
 });
@@ -113,7 +114,7 @@ registerModule({
 **새 모듈 추가 절차:**
 1. `src/modules/<name>/` 디렉토리 생성
 2. `index.js`에서 `registerModule()` 호출
-3. `src/App.jsx`에 `import './modules/<name>'` 한 줄 추가
+3. `src/modules/index.ts`에 `import './<name>';` 한 줄 추가(이 순서가 화면 목록·일괄 가져오기 순서) — 등록 때 `src/core/modules/manifest.ts`의 `validateManifest()`가 검사해 필수 키(`tabs` 포함) 누락·모르는 키·같은 id 재등록이면 throw
 4. (선택) `src/core/utils/diagnosisMapping.js`에 ICD 코드 매핑 추가
 
 ### 2.2 데이터 모델

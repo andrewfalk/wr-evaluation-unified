@@ -256,67 +256,25 @@ export function PresetManageModal({ jobId, patient, presets, editingPreset = nul
     });
   };
 
-  const renderFieldPreview = (moduleId) => {
-    const mod = getModule(moduleId);
-    const data = getModuleSnapshot(moduleId);
-    if (!mod?.presetConfig || !data) return null;
-
-    if (mod.presetConfig.fields === 'tasks' && data.tasks) {
-      return (
-        <div className="preset-field-preview">
-          {data.tasks.map((task, index) => (
-            <div key={index} className="preset-preview-row">
-              <span className="preset-preview-label">{task.name}</span>
-              <span className="preset-preview-value">
-                {[
-                  task.posture,
-                  `${task.weight}kg`,
-                  `${task.frequency}회`,
-                  task.timeValue ? `${task.timeValue}${task.timeUnit || ''}` : null,
-                  task.correctionFactor ? `보정 ${task.correctionFactor}` : null,
-                ].filter(Boolean).join(' / ')}
-              </span>
-            </div>
-          ))}
-        </div>
-      );
-    }
-
-    if (Array.isArray(mod.presetConfig.fields)) {
-      return (
-        <div className="preset-field-preview">
-          {mod.presetConfig.fields.map(field => {
-            const value = data[field.key];
-            if (value === undefined || value === '' || value === null) return null;
-            const display = formatPresetFieldValue(value, field.type);
-            return (
-              <div key={field.key} className="preset-preview-row">
-                <span className="preset-preview-label">{field.label}</span>
-                <span className="preset-preview-value">{display}</span>
-              </div>
-            );
-          })}
-        </div>
-      );
-    }
-
-    return null;
-  };
-
   const renderReadableFieldPreview = (moduleId, options = {}) => {
     const mod = getModule(moduleId);
     const data = getModuleSnapshot(moduleId);
     if (!mod?.presetConfig || !data) return null;
 
     const { storedOnly = false } = options;
+    const { fields } = mod.presetConfig;
 
-    if (mod.presetConfig.fields === 'tasks' && data.tasks) {
+    // 작업 목록형(taskList 필드 — spine·cervical)을 먼저 본다. 저장된 값에 그 목록이 없으면 아무것도 그리지 않는다.
+    const taskListField = fields.find(field => field.type === 'taskList');
+    if (taskListField) {
+      const tasks = data[taskListField.key];
+      if (!tasks) return null;
       return (
         <div className="preset-field-preview">
           {storedOnly && (
             <div className="preset-preview-source">{"\uAE30\uC874 \uD504\uB9AC\uC14B\uC5D0 \uC800\uC7A5\uB41C \uAC12\uC744 \uADF8\uB300\uB85C \uC720\uC9C0 \uC911\uC785\uB2C8\uB2E4."}</div>
           )}
-          {data.tasks.map((task, index) => (
+          {tasks.map((task, index) => (
             <div key={index} className="preset-task-card">
               <div className="preset-task-title">{task.name}</div>
               <div className="preset-task-meta">
@@ -340,28 +298,24 @@ export function PresetManageModal({ jobId, patient, presets, editingPreset = nul
       );
     }
 
-    if (Array.isArray(mod.presetConfig.fields)) {
-      return (
-        <div className="preset-field-preview">
-          {storedOnly && (
-            <div className="preset-preview-source">{"\uAE30\uC874 \uD504\uB9AC\uC14B\uC5D0 \uC800\uC7A5\uB41C \uAC12\uC744 \uADF8\uB300\uB85C \uC720\uC9C0 \uC911\uC785\uB2C8\uB2E4."}</div>
-          )}
-          {mod.presetConfig.fields.map(field => {
-            const value = data[field.key];
-            if (value === undefined || value === '' || value === null) return null;
-            const display = formatPresetFieldValue(value, field.type);
-            return (
-              <div key={field.key} className="preset-preview-row">
-                <span className="preset-preview-label">{field.label}</span>
-                <span className="preset-preview-value">{display}</span>
-              </div>
-            );
-          })}
-        </div>
-      );
-    }
-
-    return renderFieldPreview(moduleId);
+    return (
+      <div className="preset-field-preview">
+        {storedOnly && (
+          <div className="preset-preview-source">{"\uAE30\uC874 \uD504\uB9AC\uC14B\uC5D0 \uC800\uC7A5\uB41C \uAC12\uC744 \uADF8\uB300\uB85C \uC720\uC9C0 \uC911\uC785\uB2C8\uB2E4."}</div>
+        )}
+        {fields.map(field => {
+          const value = data[field.key];
+          if (value === undefined || value === '' || value === null) return null;
+          const display = formatPresetFieldValue(value, field.type);
+          return (
+            <div key={field.key} className="preset-preview-row">
+              <span className="preset-preview-label">{field.label}</span>
+              <span className="preset-preview-value">{display}</span>
+            </div>
+          );
+        })}
+      </div>
+    );
   };
 
   return (

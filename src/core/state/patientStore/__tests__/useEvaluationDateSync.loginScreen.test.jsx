@@ -8,9 +8,10 @@ import { StrictMode, useCallback, useState } from 'react';
 import { cleanup, renderHook } from '@testing-library/react';
 import { useEvaluationDateSync } from '../useEvaluationDateSync';
 import { registerModule } from '../../../moduleRegistry';
+import { makeTestManifest } from '../../../../testing/moduleManifest';
 
 const MODULE_ID = 'as5-eval-date-module';
-registerModule({ id: MODULE_ID, name: 'AS5', isComplete: ({ module }) => module?.done === true });
+registerModule(makeTestManifest({ id: MODULE_ID, name: 'AS5', isComplete: ({ module }) => module?.done === true }));
 
 const LOCAL = { mode: 'local' };
 

@@ -14,15 +14,16 @@ import { act, cleanup, renderHook } from '@testing-library/react';
 // P2-38: 대상 훅만 환자 상태 컨테이너 모듈의 것으로 바꿨다(옛 src/core/hooks/useEvaluationDateSync.js 삭제) — 단언은 그대로.
 import { useEvaluationDateSync } from '../../state/patientStore/useEvaluationDateSync';
 import { registerModule } from '../../moduleRegistry';
+import { makeTestManifest } from '../../../testing/moduleManifest';
 import { canEditPatient } from '../../utils/patientOwnership';
 import { clearAllLockTokens, setLockToken } from '../../services/lockTokenStore';
 
 const MODULE_ID = 't4-eval-date-module';
-registerModule({
+registerModule(makeTestManifest({
   id: MODULE_ID,
   name: 'T4',
   isComplete: ({ module }) => module?.done === true,
-});
+}));
 
 const INTRANET_DOCTOR = { mode: 'intranet', apiBaseUrl: 'https://x', accessToken: 'tok', user: { id: 'u1', role: 'doctor', organizationId: 'org1' } };
 const NOW = new Date(2026, 10, 14, 9, 30, 0); // 로컬 2026-11-14

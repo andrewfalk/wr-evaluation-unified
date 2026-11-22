@@ -4,16 +4,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { touchPatientRecord } from '../../../services/patientRecords';
 import { getModule, registerModule } from '../../../moduleRegistry';
 import { patientTx } from '../transitions';
+import { makeTestManifest, makeTestPresetConfig } from '../../../../testing/moduleManifest';
 
 const NOW = new Date('2026-11-14T05:06:07.000Z');
 const SESSION = { mode: 'intranet', user: { id: 'u1', organizationId: 'org1' } };
 
-registerModule({
+registerModule(makeTestManifest({
   id: 'p236-a',
   createModuleData: () => ({ base: true }),
-  presetConfig: { applyToModule: (moduleData, jobId, presetData) => ({ ...moduleData, [`job-${jobId}`]: presetData }) },
-});
-registerModule({ id: 'p236-b', createModuleData: () => ({ b: 0 }) }); // 프리셋 미지원
+  presetConfig: makeTestPresetConfig({ applyToModule: (moduleData, jobId, presetData) => ({ ...moduleData, [`job-${jobId}`]: presetData }) }),
+}));
+registerModule(makeTestManifest({ id: 'p236-b', createModuleData: () => ({ b: 0 }) })); // 프리셋 미지원
 
 // --- 옛 구현(main) ---
 const oldPreset = (activeId, canMutateActivePatient, preset, jobId, session) => prev => prev.map(p => {
