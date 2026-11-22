@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { KLG_OPTIONS, LOW_REASON_OPTIONS } from '../../modules/knee/utils/data';
-import { getSideText } from '../../modules/knee/utils/calculations';
+import { getSideText } from '../i18n/sideLabels';
 import { resolveDiagnosisModule, supportsKlGrade, supportsEllmanClass } from '../utils/diagnosisMapping';
 import { normalizeSpineAssessmentFields } from '../utils/spineAssessmentMigration';
 import { buildAssessmentUnits } from '../utils/assessmentGroups';

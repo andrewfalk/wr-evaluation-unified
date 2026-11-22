@@ -10,6 +10,7 @@ import {
   pickRepresentativeEntry,
 } from '../utils/calculations';
 import { DiseaseSpecificFields } from './DiseaseSpecificFields';
+import { getSideText } from '../../../core/i18n/sideLabels';
 
 const DIRECT_LINK_OPTIONS = [
   { value: 'yes', label: '예' },
@@ -78,10 +79,6 @@ function RadioGroup({ label, name, value, options, onChange, groupClassName = ''
       </div>
     </div>
   );
-}
-
-function getSideLabel(side) {
-  return side === 'right' ? '우측' : side === 'left' ? '좌측' : side === 'both' ? '양측' : '-';
 }
 
 const BK_META_FIELDS = new Set(['diagnosisId', 'selectedBkType', 'bkSelectionMode', 'bkAutoSyncedFrom']);
@@ -342,7 +339,7 @@ function EntryCard({ jobId, diagnosis, entry, onChangeEntry, allGroups }) {
       <div className="diagnosis-card-header">
         <div className="card-title-stack">
           <span className="diagnosis-card-title">{diagnosis.code || '-'} {diagnosis.name || '손목 상병'}</span>
-          <span className="diagnosis-card-subtitle">방향: {getSideLabel(diagnosis.side)}</span>
+          <span className="diagnosis-card-subtitle">방향: {getSideText(diagnosis.side)}</span>
         </div>
         <div className="wrist-entry-badges">
           <span className="diagnosis-module-badge">{BK_TYPE_LABELS[entry.selectedBkType] || 'BK 유형 미선택'}</span>

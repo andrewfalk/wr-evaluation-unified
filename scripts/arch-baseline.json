@@ -3,7 +3,7 @@
   "metrics": {
     "windowElectronLines": 0,
     "windowElectronFiles": 0,
-    "coreToModulesImports": 34,
+    "coreToModulesImports": 30,
     "rawFetch": 0,
     "webStorageFiles": 6,
     "cssRawHex": 230,

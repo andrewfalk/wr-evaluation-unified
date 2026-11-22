@@ -3,7 +3,7 @@
 // 위해 가볍게 import할 수 있다.
 
 import { getModule } from '../moduleRegistry';
-import { getSideText } from '../../modules/knee/utils/calculations';
+import { getSideText } from '../i18n/sideLabels';
 import { groupSummariesByBkType as groupElbowSummaries, mergeBkGroupSummaries as mergeElbowGroups } from '../../modules/elbow/utils/calculations';
 import { BK_TYPE_LABELS as ELBOW_BK_LABELS } from '../../modules/elbow/utils/data';
 import { groupSummariesByBkType as groupWristSummaries, mergeBkGroupSummaries as mergeWristGroups } from '../../modules/wrist/utils/calculations';
