@@ -85,6 +85,12 @@ export interface VideoMappingConfig {
   taskFallbackUnlinked?: boolean;
 }
 
+/** 시험 데이터(core/fixtures/createTestPatients.js)가 쓰는 생성 함수(선택, P2-53). */
+export interface ModuleDevFixtures {
+  createJobEvaluation?: (sharedJobId: string) => unknown;
+  createDiagnosisEntry?: (diagnosis: unknown) => unknown;
+}
+
 export interface ModuleManifest {
   id: string;
   name: string;
@@ -98,18 +104,20 @@ export interface ModuleManifest {
   presetConfig?: PresetConfig;
   batchImportConfig?: BatchImportConfig;
   videoMappingConfig?: VideoMappingConfig;
+  devFixtures?: ModuleDevFixtures;
 }
 
 export const REQUIRED_MANIFEST_KEYS = [
   'id', 'name', 'icon', 'description', 'EvaluationComponent', 'createModuleData', 'computeCalc', 'isComplete', 'tabs',
 ] as const;
-export const OPTIONAL_MANIFEST_KEYS = ['presetConfig', 'batchImportConfig', 'videoMappingConfig'] as const;
+export const OPTIONAL_MANIFEST_KEYS = ['presetConfig', 'batchImportConfig', 'videoMappingConfig', 'devFixtures'] as const;
 export const MANIFEST_KEYS: readonly string[] = [...REQUIRED_MANIFEST_KEYS, ...OPTIONAL_MANIFEST_KEYS];
 
 const PRESET_CONFIG_KEYS: readonly string[] = ['label', 'fields', 'extractFromModule', 'applyToModule'];
 const PRESET_FIELD_KEYS: readonly string[] = ['key', 'label', 'type'];
 const BATCH_IMPORT_CONFIG_KEYS: readonly string[] = ['columns', 'applyRow'];
 const VIDEO_MAPPING_CONFIG_KEYS: readonly string[] = ['scope', 'featureKeys', 'coerce', 'writeField', 'taskFallbackUnlinked'];
+const DEV_FIXTURE_KEYS: readonly string[] = ['createJobEvaluation', 'createDiagnosisEntry'];
 
 type Fields = Record<string, unknown>;
 
@@ -211,6 +219,17 @@ function checkVideoMappingConfig(config: unknown, problems: string[]): void {
   }
 }
 
+function checkDevFixtures(fixtures: unknown, problems: string[]): void {
+  if (!isRecord(fixtures)) {
+    problems.push('devFixtures는 객체여야 합니다');
+    return;
+  }
+  for (const key of unknownKeys(fixtures, DEV_FIXTURE_KEYS)) problems.push(`devFixtures에 모르는 키 '${key}'`);
+  for (const key of DEV_FIXTURE_KEYS) {
+    if (fixtures[key] !== undefined && typeof fixtures[key] !== 'function') problems.push(`devFixtures.${key}는 함수여야 합니다`);
+  }
+}
+
 /**
  * 매니페스트의 문제 목록(없으면 빈 배열). 순수 함수 — 등록 여부는 레지스트리(registry.ts)가 정한다.
  * 문장 앞에 모듈 id를 붙이지 않는다(레지스트리가 붙인다).
@@ -248,5 +267,6 @@ export function validateManifest(manifest: unknown): string[] {
   if (manifest.presetConfig !== undefined) checkPresetConfig(manifest.presetConfig, problems);
   if (manifest.batchImportConfig !== undefined) checkBatchImportConfig(manifest.batchImportConfig, problems);
   if (manifest.videoMappingConfig !== undefined) checkVideoMappingConfig(manifest.videoMappingConfig, problems);
+  if (manifest.devFixtures !== undefined) checkDevFixtures(manifest.devFixtures, problems);
   return problems;
 }

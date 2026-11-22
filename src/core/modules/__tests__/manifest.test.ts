@@ -24,11 +24,11 @@ describe('validateManifest', () => {
     expect(validateManifest(validManifest())).toEqual([]);
   });
 
-  it('필수 키는 9개이고 허용 키는 필수 9 + 선택 3이다', () => {
+  it('필수 키는 9개이고 허용 키는 필수 9 + 선택 4이다', () => {
     expect([...REQUIRED_MANIFEST_KEYS]).toEqual([
       'id', 'name', 'icon', 'description', 'EvaluationComponent', 'createModuleData', 'computeCalc', 'isComplete', 'tabs',
     ]);
-    expect([...MANIFEST_KEYS].slice(9)).toEqual(['presetConfig', 'batchImportConfig', 'videoMappingConfig']);
+    expect([...MANIFEST_KEYS].slice(9)).toEqual(['presetConfig', 'batchImportConfig', 'videoMappingConfig', 'devFixtures']);
   });
 
   it.each(REQUIRED_MANIFEST_KEYS)('필수 키 %s가 없으면 문제로 낸다', (key) => {
@@ -124,6 +124,17 @@ describe('validateManifest', () => {
       'videoMappingConfig.writeField는 함수여야 합니다',
       'videoMappingConfig.taskFallbackUnlinked는 불리언이어야 합니다',
     ]);
+  });
+
+  it('devFixtures 하위 모양(P2-53)', () => {
+    expect(validateManifest(validManifest({ devFixtures: { createJobEvaluation: () => ({}), createDiagnosisEntry: () => ({}) } })))
+      .toEqual([]);
+    expect(validateManifest(validManifest({ devFixtures: {} }))).toEqual([]);
+    expect(validateManifest(validManifest({ devFixtures: { createJobEvaluation: 1, other: () => 1 } }))).toEqual([
+      "devFixtures에 모르는 키 'other'",
+      'devFixtures.createJobEvaluation는 함수여야 합니다',
+    ]);
+    expect(validateManifest(validManifest({ devFixtures: [] }))).toEqual(['devFixtures는 객체여야 합니다']);
   });
 });
 

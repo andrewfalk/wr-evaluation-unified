@@ -24,6 +24,11 @@ registerModule({
   tabs: [
     { id: 'burden', label: '신체부담 평가' },
   ],
+  // 시험 데이터(core/fixtures/createTestPatients.js)가 쓰는 생성 함수(P2-53).
+  devFixtures: {
+    createJobEvaluation: createWristJobEvaluation,
+    createDiagnosisEntry: createWristDiagnosisEntry,
+  },
   presetConfig: {
     label: '손목 공통 노출',
     fields: [
