@@ -24,11 +24,11 @@ describe('validateManifest', () => {
     expect(validateManifest(validManifest())).toEqual([]);
   });
 
-  it('필수 키는 9개이고 허용 키는 필수 9 + 선택 4이다', () => {
+  it('필수 키는 9개이고 허용 키는 필수 9 + 선택 5이다', () => {
     expect([...REQUIRED_MANIFEST_KEYS]).toEqual([
       'id', 'name', 'icon', 'description', 'EvaluationComponent', 'createModuleData', 'computeCalc', 'isComplete', 'tabs',
     ]);
-    expect([...MANIFEST_KEYS].slice(9)).toEqual(['presetConfig', 'batchImportConfig', 'videoMappingConfig', 'devFixtures']);
+    expect([...MANIFEST_KEYS].slice(9)).toEqual(['presetConfig', 'batchImportConfig', 'videoMappingConfig', 'devFixtures', 'batchExport']);
   });
 
   it.each(REQUIRED_MANIFEST_KEYS)('필수 키 %s가 없으면 문제로 낸다', (key) => {
@@ -135,6 +135,26 @@ describe('validateManifest', () => {
       'devFixtures.createJobEvaluation는 함수여야 합니다',
     ]);
     expect(validateManifest(validManifest({ devFixtures: [] }))).toEqual(['devFixtures는 객체여야 합니다']);
+  });
+
+  it('batchExport 하위 모양(P2-55a)', () => {
+    const column = { header: '열', cell: () => '' };
+    expect(validateManifest(validManifest({ batchExport: { order: 10, columns: [column] } }))).toEqual([]);
+    expect(validateManifest(validManifest({ batchExport: { order: 10, columns: [column], rowTasks: () => [] } }))).toEqual([]);
+    expect(validateManifest(validManifest({ batchExport: { columns: [] } }))).toEqual([
+      'batchExport.order는 유한한 숫자여야 합니다',
+      'batchExport.columns는 비어 있지 않은 배열이어야 합니다',
+    ]);
+    expect(validateManifest(validManifest({
+      batchExport: { order: Number.POSITIVE_INFINITY, columns: [{ header: '', cell: 'x', width: 1 }], rowTasks: [], extra: 1 },
+    }))).toEqual([
+      "batchExport에 모르는 키 'extra'",
+      'batchExport.order는 유한한 숫자여야 합니다',
+      "batchExport.columns[0]에 모르는 키 'width'",
+      'batchExport.columns[0].header는 빈 문자열이 아닌 문자열이어야 합니다',
+      'batchExport.columns[0].cell은 함수여야 합니다',
+      'batchExport.rowTasks는 함수여야 합니다',
+    ]);
   });
 });
 

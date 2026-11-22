@@ -74,7 +74,7 @@ afterEach(() => {
 describe('G2 — batch sheet', () => {
   it('BATCH_HEADERS and every generateBatchRows row', async () => {
     const rows = exportService.generateBatchRows(loadGoldenPatients());
-    await expect(goldenJson({ headers: exportService.BATCH_HEADERS, rows })).toMatchFileSnapshot('./__goldens__/batch-rows.json');
+    await expect(goldenJson({ headers: exportService.getBatchHeaders(), rows })).toMatchFileSnapshot('./__goldens__/batch-rows.json');
   });
 
   // P2-54a: branches the golden patients do not reach (src/core/fixtures/goldenPatientsBatch.json).

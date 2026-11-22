@@ -1,8 +1,8 @@
 import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
-import { resolveMddmStatus } from '../../modules/spine/utils/calculations';
 import { generateUnifiedEMR, resolveAssessment } from './emrReport';
-import { BATCH_COLUMNS } from '../export/batchColumns';
+import { getBatchColumns, getBatchHeaders } from '../export/batchColumns';
+import { getModule } from '../moduleRegistry';
 
 export { generateEMRFieldData, generateConsultReplyFieldData } from './emrReport';
 
@@ -83,11 +83,14 @@ export async function exportBatch(patients) {
   await exportAsZip(valid, `업무관련성평가_${valid.length}명_${date}.zip`);
 }
 
-// 열 머리글·셀은 열 표(src/core/export/batchColumns.ts, P2-54b)가 정한다 — 구간 order 순.
-export const BATCH_HEADERS = BATCH_COLUMNS.map(column => column.header);
+// 열 머리글·셀은 열 표(src/core/export/batchColumns.ts)가 정한다 — 구간 order 순, 모듈 구간은 등록된 모듈의 매니페스트 batchExport(P2-55a).
+export { getBatchHeaders };
 
 export function generateBatchRows(patientList) {
   const rows = [];
+  const columns = getBatchColumns();
+  // spine 작업 행 고르기는 spine 매니페스트의 선택 함수(MDDM이 평가된 경우만) — spine이 등록되지 않았으면 작업 행 없음.
+  const spineRowTasks = getModule('spine')?.batchExport?.rowTasks;
 
   for (const patient of patientList) {
     const shared = patient.data.shared || {};
@@ -97,9 +100,8 @@ export function generateBatchRows(patientList) {
     const kneeExtras = modules.knee?.jobExtras || [];
     const shoulderExtras = modules.shoulder?.jobExtras || [];
     const cervicalTasks = modules.cervical?.tasks || [];
-    // MDDM이 '평가함'(present)일 때만 작업 행을 만든다. unknown(WBV-only)·none(해당없음)은 빈 배열.
     const spineModule = modules.spine || {};
-    const spineTasks = resolveMddmStatus(spineModule) === 'present' ? (spineModule.tasks || []) : [];
+    const spineTasks = spineRowTasks ? spineRowTasks(spineModule) : [];
     const elbowTemporal = modules.elbow?.temporalSequence || modules.elbow?.temporalRelation || {};
     const elbowJobEvaluations = modules.elbow?.jobEvaluations || [];
     const wristTemporal = modules.wrist?.temporalSequence || modules.wrist?.temporalRelation || {};
@@ -163,7 +165,7 @@ export function generateBatchRows(patientList) {
       const pair = jobTaskPairs[index];
       const diag = elbowPair?.diagnosis || wristPair?.diagnosis || diagnoses[index];
       const job = elbowPair?.job || wristPair?.job || pair?.job;
-      // 한 행의 재료 — 셀 값은 열 표(BATCH_COLUMNS)가 만든다.
+      // 한 행의 재료 — 셀 값은 열 표(getBatchColumns())가 만든다.
       const ctx = {
         shared,
         modules,
@@ -180,7 +182,7 @@ export function generateBatchRows(patientList) {
         elbowTemporal,
         wristTemporal,
       };
-      rows.push(BATCH_COLUMNS.map(column => column.cell(ctx)));
+      rows.push(columns.map(column => column.cell(ctx)));
     }
   }
 
@@ -190,8 +192,9 @@ export function generateBatchRows(patientList) {
 function buildBatchWorkbook(patientList) {
   const dataRows = generateBatchRows(patientList);
   const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.aoa_to_sheet([BATCH_HEADERS, ...dataRows]);
-  ws['!cols'] = BATCH_HEADERS.map(() => ({ wch: 18 }));
+  const headers = getBatchHeaders();
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...dataRows]);
+  ws['!cols'] = headers.map(() => ({ wch: 18 }));
   XLSX.utils.book_append_sheet(wb, ws, '일괄입력');
   return wb;
 }

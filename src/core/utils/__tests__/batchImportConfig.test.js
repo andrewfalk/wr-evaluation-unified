@@ -12,7 +12,7 @@ import {
   ensureDiagnosis, ensureSharedJob, applyReturnConsiderations,
   parseConfirmedStatus, parseAssessmentLevel, parseReasonText, applyDiagnosisAssessment,
 } from '../batchImportHelpers';
-import { BATCH_HEADERS, generateBatchRows } from '../exportService';
+import { getBatchHeaders, generateBatchRows } from '../exportService';
 import { createDiagnosis } from '../data';
 
 const BASE_COLUMNS = {
@@ -253,7 +253,7 @@ describe('generateBatchRows ↔ applyDiagnosisAssessment 라운드트립', () =>
     },
   };
 
-  const headerRow = BATCH_HEADERS.map(normalizeHeader);
+  const headerRow = getBatchHeaders().map(normalizeHeader);
   const colMap = buildColMap(headerRow, [{
     diagConfirmedRight: ['상병상태(우)'],
     diagConfirmedLeft: ['상병상태(좌)'],
@@ -297,7 +297,7 @@ describe('generateBatchRows ↔ applyDiagnosisAssessment 라운드트립', () =>
   });
 
   it('평가 컬럼이 모두 빈값/"-"이면 아무것도 바꾸지 않고 false를 반환한다', () => {
-    const emptyRow = BATCH_HEADERS.map(() => '');
+    const emptyRow = getBatchHeaders().map(() => '');
     const before = createDiagnosis();
     const restored = { ...before };
     expect(applyDiagnosisAssessment(restored, emptyRow, colMap, getCell, 'knee')).toBe(false);

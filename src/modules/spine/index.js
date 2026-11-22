@@ -5,6 +5,7 @@ import { computeSpineCalc, isSpineAssessmentComplete } from './utils/calculation
 import { SPINE_FORMULA_V513 } from './utils/formulaVersion';
 import { ensureModule } from '../../core/utils/batchImportHelpers';
 import { taskScopeWriteField, numberCoerce } from '../../core/utils/videoMapping';
+import { spineBatchExport } from './batchExport';
 
 registerModule({
   id: 'spine',
@@ -57,6 +58,7 @@ registerModule({
       return { ...moduleData, tasks: [...otherTasks, ...newTasks], formulaVersion: SPINE_FORMULA_V513 };
     },
   },
+  batchExport: spineBatchExport,
   batchImportConfig: {
     columns: {
       taskName: ['작업명', 'task'],

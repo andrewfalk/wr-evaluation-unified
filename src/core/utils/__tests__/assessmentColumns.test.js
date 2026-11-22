@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { BATCH_HEADERS, generateBatchRows } from '../exportService';
+import { getBatchHeaders, generateBatchRows } from '../exportService';
 
 function col(name) {
-  const index = BATCH_HEADERS.indexOf(name);
+  const index = getBatchHeaders().indexOf(name);
   expect(index).toBeGreaterThanOrEqual(0);
   return index;
 }

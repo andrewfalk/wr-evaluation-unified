@@ -114,7 +114,7 @@ function importRows(rows) {
 
 describe('G1b — batch import applyRow (all modules)', () => {
   it('rows from generateBatchRows(golden patients) imported through every module applyRow', async () => {
-    const rows = [batch.BATCH_HEADERS, ...batch.generateBatchRows(loadGoldenPatients())];
+    const rows = [batch.getBatchHeaders(), ...batch.generateBatchRows(loadGoldenPatients())];
     const { patients, stats } = importRows(rows);
     await expect(goldenJson({ stats, patients: patients.map((p) => ({ id: p.id, data: p.data })) }))
       .toMatchFileSnapshot('./__goldens__/batch-import-applyRow.json');
@@ -122,7 +122,7 @@ describe('G1b — batch import applyRow (all modules)', () => {
 
   // P2-54a: the extra batch cases (src/core/fixtures/goldenPatientsBatch.json) exported and imported back the same way.
   it('extra cases: rows from generateBatchRows(extra patients) imported through every module applyRow', async () => {
-    const rows = [batch.BATCH_HEADERS, ...batch.generateBatchRows(loadGoldenBatchPatients())];
+    const rows = [batch.getBatchHeaders(), ...batch.generateBatchRows(loadGoldenBatchPatients())];
     const { patients, stats } = importRows(rows);
     await expect(goldenJson({ stats, patients: patients.map((p) => ({ id: p.id, data: p.data })) }))
       .toMatchFileSnapshot('./__goldens__/batch-import-applyRow.extra.json');

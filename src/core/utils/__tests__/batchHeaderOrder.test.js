@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { BATCH_HEADERS, generateBatchRows } from '../exportService';
+import { getBatchHeaders, generateBatchRows } from '../exportService';
 
 describe('BATCH_HEADERS: 첫 7개 열 순서 잠금', () => {
   it('등록번호/이름/성별/생년월일/재해일자/키/체중 순이다', () => {
-    expect(BATCH_HEADERS.slice(0, 7)).toEqual([
+    expect(getBatchHeaders().slice(0, 7)).toEqual([
       '등록번호', '이름', '성별', '생년월일', '재해일자', '키', '체중',
     ]);
   });
