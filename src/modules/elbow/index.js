@@ -3,6 +3,7 @@ import { ElbowEvaluation } from './ElbowEvaluation';
 import { createElbowModuleData, createElbowJobEvaluation, createElbowDiagnosisEntry } from './utils/data';
 import { computeElbowCalc, isElbowAssessmentComplete } from './utils/calculations';
 import { ensureModule, splitList, parseDate } from '../../core/utils/batchImportHelpers';
+import { elbowBatchExport } from './batchExport';
 
 // 프리셋에 저장할 공통 노출 필드 (BK 유형과 무관한 직업 물리부담 정보)
 const PRESET_COMMON_FIELDS = [
@@ -79,6 +80,7 @@ registerModule({
       return { ...moduleData, jobEvaluations: jobEvals };
     },
   },
+  batchExport: elbowBatchExport,
   batchImportConfig: {
     columns: {
       elbowRecentTaskChange: ['팔꿈치_시간적선후관계_최근작업변화', 'elbow_recent_task_change'],
