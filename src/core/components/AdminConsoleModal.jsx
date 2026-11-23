@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { requestJson } from '../services/httpClient';
 import { resolveApiBaseUrl } from '../../platform/dataMode';
+import { deviceActionErrorMessage, devicesPerPc, emrAuditNote } from './adminAuditNotes';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -31,6 +32,20 @@ function RoleBadge({ role }) {
 }
 
 // ── Audit Log Tab ─────────────────────────────────────────────────────────────
+// EMR 기록의 비고: 설치본이 알린 발생 시각과 서버 표시(옛 설치본·행위자 불확실/미검증·몰아서 전송·기관 미확정).
+function EmrAuditNoteCell({ item }) {
+  const note = emrAuditNote(item);
+  if (!note || (!note.occurredAt && note.flags.length === 0)) return '-';
+  return (
+    <>
+      {note.occurredAt && <div className="admin-cell-hint">발생 {fmt(note.occurredAt)}</div>}
+      {note.flags.map(flag => (
+        <span key={flag} className="admin-badge admin-badge--warn">{flag}</span>
+      ))}
+    </>
+  );
+}
+
 function AuditTab({ session }) {
   const [items, setItems]                   = useState([]);
   const [total, setTotal]                   = useState(0);
@@ -91,7 +106,7 @@ function AuditTab({ session }) {
           <thead>
             <tr>
               <th>시각</th><th>사용자 ID</th><th>액션</th><th>결과</th>
-              <th>대상</th><th>IP</th>
+              <th>대상</th><th>비고</th><th>IP</th>
             </tr>
           </thead>
           <tbody>
@@ -106,11 +121,12 @@ function AuditTab({ session }) {
                   </span>
                 </td>
                 <td>{item.targetType ? `${item.targetType}/${item.targetId?.slice(0, 8) ?? ''}` : '-'}</td>
+                <td><EmrAuditNoteCell item={item} /></td>
                 <td className="admin-cell-mono">{item.ip ?? '-'}</td>
               </tr>
             ))}
             {!loading && items.length === 0 && (
-              <tr><td colSpan={6} className="admin-empty">감사 로그가 없습니다.</td></tr>
+              <tr><td colSpan={7} className="admin-empty">감사 로그가 없습니다.</td></tr>
             )}
           </tbody>
         </table>
@@ -157,11 +173,13 @@ function DevicesTab({ session }) {
       await requestJson(`/api/admin/devices/${deviceId}/${path}`, { baseUrl, method: 'POST', session });
       await load();
     } catch (e) {
-      setError(e.message);
+      setError(deviceActionErrorMessage(e));
     } finally {
       setActioning(null);
     }
   };
+
+  const pcRows = devicesPerPc(devices);
 
   return (
     <div className="admin-tab-content">
@@ -175,7 +193,7 @@ function DevicesTab({ session }) {
         <table className="admin-table">
           <thead>
             <tr>
-              <th>상태</th><th>사용자</th><th>빌드</th>
+              <th>상태</th><th>사용자</th><th>PC</th><th>빌드</th>
               <th>등록일</th><th>마지막 접속</th><th>IP</th><th>액션</th>
             </tr>
           </thead>
@@ -187,6 +205,12 @@ function DevicesTab({ session }) {
                   {d.suspicious && <span className="admin-badge admin-badge--warn" title="비정상 UA">⚠</span>}
                   {' '}{d.userName}
                   <div className="admin-cell-hint">{d.userLoginId}</div>
+                </td>
+                <td>
+                  <span className="admin-cell-mono" title="장치 키 지문 앞자리 — 같은 값이면 같은 PC">{d.keyPrefix ?? '-'}</span>
+                  {(pcRows.get(d.keyPrefix) ?? 0) > 1 && (
+                    <div className="admin-cell-hint">같은 PC {pcRows.get(d.keyPrefix)}행</div>
+                  )}
                 </td>
                 <td>{d.buildTarget}</td>
                 <td>{fmt(d.registeredAt)}</td>
@@ -205,7 +229,7 @@ function DevicesTab({ session }) {
               </tr>
             ))}
             {!loading && devices.length === 0 && (
-              <tr><td colSpan={7} className="admin-empty">등록된 디바이스가 없습니다.</td></tr>
+              <tr><td colSpan={8} className="admin-empty">등록된 디바이스가 없습니다.</td></tr>
             )}
           </tbody>
         </table>
