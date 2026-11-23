@@ -96,7 +96,7 @@ node scripts/tier3/emr-audit-smoke.mjs --queue 1200
 시험 관리자 계정은 `pwsh -File scripts/verify-stack.ps1 seed-admin -PackageDir release\wr-evaluation-unified-7.3.2-intranet`으로 직접 만든다(계정 값은 남기지 않는다). 시험 사용자 둘(같은 기관)을 관리자 콘솔에서 만든다.
 
 1. 7.3.2 설치본 설치 → 사용자 1로 로그인 → 관리자 콘솔 "디바이스"에 승인 대기 행이 보이고 승인된다.
-2. 설치본을 다시 실행 → EMR 추출 버튼(이 PC에는 EMR이 없어 실패) → 감사 로그(대상 유형 `emr`)에 실패 기록이 사용자 1·발생 시각과 함께 남는다(비고에 표시 없음).
+2. 설치본을 다시 실행 → EMR 추출 버튼(이 PC에는 EMR이 없어 실패) → 감사 로그(대상 유형 `emr`)에 실패 기록이 사용자 1로 남고, 비고에 **발생 시각("발생 …")이 보이며 "옛 설치본"·"행위자 불확실" 표시는 없다**.
 3. 같은 기관의 사용자 2로 로그인해 같은 확인 — 추가 승인 없이 기록되고 행위자가 사용자 2다. "디바이스"에 새 행이 생기지 않는다.
 4. 관리자 콘솔에서 해지 → 설치본을 다시 실행 → EMR 버튼이 "해지되었습니다"로 잠긴다.
 5. 다른 PC 프로필(또는 장치 키를 새로 만든 프로필 — 아래 F)에서 7.1.4 설치본으로 같은 서버에 접속해 승인·EMR 버튼 → 기록이 "옛 설치본"·"행위자 불확실"로 남는다.
@@ -147,15 +147,13 @@ docker exec wr-prod-backup-1 sh -c 'ls -lt /backups/daily | head -3'
 cd C:\wr\wr-evaluation-unified-7.3.2-intranet
 $envFile = '<운영 .env.production 절대경로>'
 
-# 1. updates/ — 설치본을 포함한 패키지면 서명된 7.3.2 피드가 이미 들어 있으니 그대로 두고, 7.3.1 폴더의
-#    update-policy.json(관리자 스위치)만 있으면 옮긴다. 서버 전용 패키지(updates/ 비어 있음)면 7.3.1 폴더의 것을 통째로 옮긴다.
+# 1. updates/ — 7.3.1 폴더의 파일 가운데 새 패키지의 updates/ 에 없는 것만 옮긴다(덮어쓰지 않는다):
+#    관리자 스위치 update-policy.json, canary 피드(canary.yml·canary.yml.sig와 그 설치본·blockmap), 이전 설치본 파일.
+#    설치본을 포함한 패키지면 서명된 7.3.2 latest 피드는 새 패키지의 것이 그대로 남고, 서버 전용 패키지면 7.3.1의 피드가 옮겨진다.
 $installDir = (docker inspect wr-prod-app-1 --format '{{json .Config.Labels}}' | ConvertFrom-Json).'com.docker.compose.project.working_dir'
-if (Test-Path .\updates\latest.yml) {
-  if (Test-Path "$installDir\updates\update-policy.json") { Copy-Item "$installDir\updates\update-policy.json" .\updates\ -ErrorAction Stop }
-} else {
-  Copy-Item "$installDir\updates\*" ".\updates\" -Recurse -ErrorAction Stop
-}
+Get-ChildItem "$installDir\updates" -File | Where-Object { -not (Test-Path (Join-Path .\updates $_.Name)) } | Copy-Item -Destination .\updates\ -ErrorAction Stop
 Get-ChildItem .\updates
+# canary 채널을 쓰고 있었다면 canary.yml 이 가리키는 설치본·blockmap 이 함께 있는지 확인한다(없으면 canary PC의 업데이트가 실패한다).
 
 # 2. 이미지 로드(wr-app-server / wr-backup-monitor / wr-backup 7.3.2)
 .\scripts\import-images.ps1
