@@ -35,8 +35,11 @@ function interpretRegisterResult(result) {
     if (data?.deviceScope === DEVICE_SCOPE_PC && PC_STATUSES.has(data.status) && validOrgId(data.organizationId)) {
       return { kind: 'pc', orgId: data.organizationId ?? null, status: data.status };
     }
-    if (data?.deviceScope === DEVICE_SCOPE_PC) return { kind: 'failed' }; // 알 수 없는 형식 — 아무것도 바꾸지 않는다
-    return { kind: 'legacy', status: data?.status === 'active' ? 'active' : 'pending' };
+    // deviceScope가 있는데 위 형식이 아니면(값이 다르거나 필드가 틀림) 알 수 없는 응답 — 아무것도 바꾸지 않는다.
+    if (data && typeof data === 'object' && 'deviceScope' in data) return { kind: 'failed' };
+    // 이전 서버의 응답: { deviceId, status, message } — status가 문자열일 때만 받는다.
+    if (!data || typeof data !== 'object' || typeof data.status !== 'string') return { kind: 'failed' };
+    return { kind: 'legacy', status: data.status === 'active' ? 'active' : 'pending' };
   }
   const err = result.err ?? {};
   if (err.status === 409 && err.body?.deviceScope === DEVICE_SCOPE_PC && err.body?.status === 'other_org' && validOrgId(err.body.organizationId)) {
@@ -102,7 +105,8 @@ function sendingAllowed(meta, memoryStatus) {
 
 /**
  * 지금 등록 API를 불러야 하는가. 서버 제한을 넘지 않도록 마지막 호출에서 61초, 최근 1시간 5회를 지킨다.
- * state = { meta, login, startedFresh (이번 실행에서 아직 새 서버 응답 확인 전), deviceProblem (감사 전송이 장치 문제 401),
+ * state = { meta, login, startedFresh (이번 실행에서 아직 서버 응답 확인 전), deviceProblem (감사 전송이 장치 문제 401),
+ *           checkedOrgId (이번 실행에서 마지막으로 응답을 받은 로그인 기관 — 새 서버 응답 전에도 기관 바뀜을 알아본다),
  *           attempts: number[] (이번 실행의 등록 호출 시각) }
  * @returns {{ register: boolean, reason?: string }}
  */
@@ -116,8 +120,8 @@ function shouldRegister(state, nowMs) {
   const pc = meta && validPc(meta.pc) ? meta.pc : null;
   if (state.startedFresh) reason = 'first_token';
   else if (state.deviceProblem) reason = 'device_problem'; // 새 서버 응답을 받기 전(pc 없음)이어도 — 서버가 바뀌었을 수 있다
+  else if ((pc ? pc.orgId : state.checkedOrgId) !== login.orgId && (pc || state.checkedOrgId !== undefined)) reason = 'org_changed';
   else if (!pc) reason = meta?.status === 'active' ? null : 'not_active';
-  else if (pc.orgId !== login.orgId) reason = 'org_changed';
   else if (pc.status === 'pending' && nowMs - last >= PENDING_RECHECK_MS) reason = 'pending_recheck';
   if (!reason) return { register: false };
   // 이전 서버(pc 없음)의 승인 대기는 지금처럼 20분 간격.
