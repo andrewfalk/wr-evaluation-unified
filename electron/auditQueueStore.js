@@ -17,9 +17,12 @@
 // - 대기열을 크기 때문에 버리지 않는다(임계를 넘으면 로그만).
 const path = require('path');
 const nodeFs = require('fs');
+const crypto = require('crypto');
 
 const LOCK_WAIT_MS = 2000;
 const LOCK_STALE_MS = 10_000;
+const RECLAIM_GENERATIONS = 8;
+const RECLAIM_LEFTOVER_MS = 60_000;
 const LARGE_QUEUE_LINES = 5000;
 
 /**
@@ -50,6 +53,14 @@ function createAuditQueueStore(options) {
 
   // 시작할 때 남아 있는 임시 파일은 버린다(원본이 기준).
   try { if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile); } catch { /* 다음 시작 때 다시 */ }
+  // 넘겨받던 도중에 끝난 프로세스가 남긴 넘겨받기 표식도 버린다(충분히 오래된 것만).
+  try {
+    const reclaimBase = `${path.basename(lockFile)}.reclaim-`;
+    for (const name of fs.readdirSync(dir).filter(n => n.startsWith(reclaimBase))) {
+      const full = path.join(dir, name);
+      try { if (now() - fs.statSync(full).mtimeMs > RECLAIM_LEFTOVER_MS) fs.unlinkSync(full); } catch { /* 다음 시작 때 다시 */ }
+    }
+  } catch { /* 폴더를 못 읽으면 다음 시작 때 */ }
 
   // ── 잠금(같은 프로필의 다른 프로세스와 추가·제거를 나눈다) ───────────────────
 
@@ -58,9 +69,11 @@ function createAuditQueueStore(options) {
   }
 
   // 잠금 파일 내용 = "<pid>:<무작위 표식>". 잠금을 잡은 프로세스가 그 표식을 기억해, 풀 때 자기 잠금만 지운다.
-  // 넘겨받기: 잠금을 잡은 프로세스가 더는 없거나(pid 확인) 잠금이 LOCK_STALE_MS보다 오래된 경우에만. 넘겨받을 때는 잠금 파일을
-  // 고유한 이름으로 옮긴 뒤 옮긴 내용이 확인한 내용과 같은지 본다 — 그사이 다른 프로세스가 새 잠금을 만들었으면(내용이 다르면)
-  // 그 잠금을 되돌려 놓는다(지우지 않는다).
+  // 넘겨받기: 잠금을 잡은 프로세스가 더는 없거나(pid 확인) 잠금이 LOCK_STALE_MS보다 오래된 경우에만. 확인한 그 잠금(내용·수정
+  // 시각)마다 넘겨받기 표식 파일을 원자적으로 만들고(이미 있으면 실패), 표식을 만든 프로세스만 잠금이 아직 확인한 그대로인지 다시
+  // 보고 지운다. 잠금 파일을 옮기거나 되돌려 놓지 않으므로, 그사이 다른 프로세스가 만든 새 잠금을 옮기거나 지우는 일이 없다.
+  // 표식은 지운 뒤 없앤다 — 늦게 온 프로세스가 같은 표식을 다시 만들어도 잠금이 이미 바뀌어 있어 아무것도 지우지 않는다.
+  // 표식을 만든 프로세스가 도중에 끝나 표식이 남으면, LOCK_STALE_MS가 지난 뒤 다음 세대 표식으로 넘어간다.
   let lockToken = null;
   let seq = 0;
 
@@ -71,24 +84,38 @@ function createAuditQueueStore(options) {
     try { process.kill(pid, 0); return false; } catch (err) { return err.code === 'ESRCH'; }
   }
 
-  function tryTakeOver(seen) {
-    const grave = `${lockFile}.stale-${process.pid}-${(seq += 1)}`;
-    try { fs.renameSync(lockFile, grave); } catch { return; } // 그사이 풀렸거나 다른 프로세스가 옮겼다
-    let moved = null;
-    try { moved = fs.readFileSync(grave, 'utf-8'); } catch { /* 읽을 수 없으면 아래에서 되돌린다 */ }
-    if (moved !== seen) {
-      try { fs.linkSync(grave, lockFile); } catch { /* 이미 새 잠금이 있다 */ }
-    }
-    try { fs.unlinkSync(grave); } catch { /* 다음에 정리 */ }
+  function reclaimFileName(seen, mtimeMs, gen) {
+    const key = crypto.createHash('sha256').update(`${seen}\n${mtimeMs}`).digest('hex').slice(0, 24);
+    return `${lockFile}.reclaim-${key}-${gen}`;
   }
 
-  // 잠금을 원자적으로 게시한다: 표식을 다 쓴 임시 파일을 잠금 이름에 하드 링크로 건다(이미 있으면 실패) — 잠금 파일은 처음부터
+  function tryTakeOver(seen, mtimeMs) {
+    for (let gen = 0; gen < RECLAIM_GENERATIONS; gen += 1) {
+      const claim = reclaimFileName(seen, mtimeMs, gen);
+      const published = publishFile(claim, `${process.pid}:${now()}`);
+      if (published === 'created') {
+        try {
+          const st = fs.statSync(lockFile);
+          if (st.mtimeMs === mtimeMs && fs.readFileSync(lockFile, 'utf-8') === seen) fs.unlinkSync(lockFile);
+        } catch { /* 그사이 풀렸거나 지울 수 없다 — 아래에서 다시 */ }
+        try { fs.unlinkSync(claim); } catch { /* 시작할 때 정리 */ }
+        return;
+      }
+      if (published !== 'exists') return;
+      // 다른 프로세스가 넘겨받는 중이다. 그 표식이 오래됐을 때만(그 프로세스가 도중에 끝남) 다음 세대로.
+      let claimAge = 0;
+      try { claimAge = now() - fs.statSync(claim).mtimeMs; } catch { return; }
+      if (claimAge <= LOCK_STALE_MS) return;
+    }
+  }
+
+  // 파일을 원자적으로 게시한다: 내용을 다 쓴 임시 파일을 그 이름에 하드 링크로 건다(이미 있으면 실패) — 잠금 파일은 처음부터
   // 표식을 담고 있어 "막 만들어진 빈 잠금"이 없다. 'created' | 'exists' | 'error'.
-  function publishLock(token) {
+  function publishFile(target, content) {
     const tmp = `${lockFile}.${process.pid}-${(seq += 1)}.tmp`;
     try {
-      fs.writeFileSync(tmp, token, 'utf-8');
-      fs.linkSync(tmp, lockFile);
+      fs.writeFileSync(tmp, content, 'utf-8');
+      fs.linkSync(tmp, target);
       return 'created';
     } catch (err) {
       return err.code === 'EEXIST' ? 'exists' : 'error';
@@ -102,21 +129,22 @@ function createAuditQueueStore(options) {
     const deadline = now() + LOCK_WAIT_MS;
     const token = `${process.pid}:${Math.random().toString(36).slice(2)}${now().toString(36)}`;
     for (;;) {
-      const published = publishLock(token);
+      const published = publishFile(lockFile, token);
       if (published === 'created') {
         lockToken = token;
         return true;
       }
       if (published === 'exists') {
         let seen = null;
-        let age = 0;
+        let mtimeMs = 0;
         try {
           seen = fs.readFileSync(lockFile, 'utf-8');
-          age = now() - fs.statSync(lockFile).mtimeMs;
-        } catch { /* 그사이 풀렸다 — 아래에서 다시 */ }
+          mtimeMs = fs.statSync(lockFile).mtimeMs;
+        } catch { seen = null; /* 그사이 풀렸다 — 아래에서 다시 */ }
+        const age = now() - mtimeMs;
         const owner = seen ? seen.split(':')[0] : '';
         // 표식이 없는 잠금(이전 형식 등)은 오래됐을 때만, 표식이 있으면 그 프로세스가 없거나 오래됐을 때 넘겨받는다.
-        if (seen !== null && ((owner && processGone(owner)) || age > LOCK_STALE_MS)) tryTakeOver(seen);
+        if (seen !== null && ((owner && processGone(owner)) || age > LOCK_STALE_MS)) tryTakeOver(seen, mtimeMs);
       }
       if (now() >= deadline) return false;
       sleepSync(10);
@@ -169,7 +197,7 @@ function createAuditQueueStore(options) {
         }
         const content = fs.readFileSync(p, 'utf-8');
         const lines = content.split('\n').filter(l => l.trim() && (!name.endsWith('.tmp') || content.endsWith('\n')));
-        if (lines.length) fs.appendFileSync(file, lines.join('\n') + '\n', 'utf-8');
+        if (lines.length) appendLines(file, lines.join('\n') + '\n');
         fs.unlinkSync(p);
       } catch (err) {
         log.error('[auditQueue] spool merge failed:', err.message);
@@ -178,6 +206,28 @@ function createAuditQueueStore(options) {
   }
 
   // ── 줄 ─────────────────────────────────────────────────────────────────────
+
+  // 파일 끝이 줄바꿈이 아니면(이전 덧붙이기가 도중에 실패해 조각이 남았으면) 줄바꿈부터 쓴다 — 새 줄이 그 조각에 붙어
+  // 함께 읽을 수 없게 되지 않도록(조각은 그 줄만 격리된다).
+  function appendLines(target, text) {
+    let prefix = '';
+    try {
+      const size = fs.statSync(target).size;
+      if (size > 0) {
+        const fd = fs.openSync(target, 'r');
+        try {
+          const last = Buffer.alloc(1);
+          fs.readSync(fd, last, 0, 1, size - 1);
+          if (last[0] !== 0x0a) prefix = '\n';
+        } finally {
+          fs.closeSync(fd);
+        }
+      }
+    } catch (err) {
+      if (err.code !== 'ENOENT') throw err;
+    }
+    fs.appendFileSync(target, prefix + text, 'utf-8');
+  }
 
   // 실패하면 평문으로 쓰지 않고 버린다(fail-closed). Windows(EMR 대상)에서는 항상 쓸 수 있다.
   function encryptLine(plaintext) {
@@ -210,7 +260,7 @@ function createAuditQueueStore(options) {
     }
     const append = (target) => {
       try {
-        fs.appendFileSync(target, line, 'utf-8');
+        appendLines(target, line);
       } catch (err) {
         log.error('[auditQueue] enqueue failed:', err.message);
       }
@@ -267,7 +317,7 @@ function createAuditQueueStore(options) {
 
   function quarantine(line) {
     try {
-      fs.appendFileSync(quarantineFile, line + '\n', 'utf-8');
+      appendLines(quarantineFile, line + '\n');
       return true;
     } catch (err) {
       log.error('[auditQueue] quarantine write failed:', err.message);
