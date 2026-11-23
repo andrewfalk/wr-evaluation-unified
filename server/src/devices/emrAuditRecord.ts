@@ -137,7 +137,10 @@ export function occurredAtFlags(occurredAt: unknown, signedAtMs: number): Record
   if (occurredAt === undefined || occurredAt === null) return { occurred_at_unknown: true };
   if (typeof occurredAt !== 'string' || !ISO_UTC.test(occurredAt)) return { occurred_at_invalid: true };
   const t = Date.parse(occurredAt);
-  if (Number.isNaN(t) || t > signedAtMs) return { occurred_at_invalid: true };
+  // Date.parse rolls impossible dates over (02-30 → 03-02): the parsed time must read back as the same date and time.
+  if (Number.isNaN(t) || new Date(t).toISOString().slice(0, 19) !== occurredAt.slice(0, 19) || t > signedAtMs) {
+    return { occurred_at_invalid: true };
+  }
   return { occurred_at: new Date(t).toISOString() };
 }
 

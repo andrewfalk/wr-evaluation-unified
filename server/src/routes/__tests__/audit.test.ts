@@ -727,6 +727,8 @@ describe('POST /api/audit/emr', () => {
       ['malformed', () => '2026-11-23 10:00'],
       ['not a string', () => 1700000000000],
       ['an impossible date', () => '2026-13-45T00:00:00.000Z'],
+      ['a day that does not exist in its month (Feb 30)', () => '2026-02-30T00:00:00.000Z'],
+      ['a day that does not exist in its month (Apr 31)', () => '2026-04-31T12:00:00Z'],
     ])('an event time %s is flagged invalid and the event is still recorded', async (_name, value) => {
       const { entry } = await record({ actorUserId: SESSION_USER, occurredAt: value() });
       expect(entry.extra).toMatchObject({ occurred_at_invalid: true, actor_source: 'session' });
