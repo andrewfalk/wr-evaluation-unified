@@ -7,6 +7,8 @@ const crypto = require('crypto');
 // 토큰 자체가 문제인 401(만료·폐기). 감사 경로가 장치 문제로 돌려주는 401(UNAUTHORIZED)은 여기에 넣지 않는다 —
 // 토큰 없이 다시 보내는 것은 토큰 문제일 때만이다.
 const TOKEN_EXPIRY_CODES = new Set(['TOKEN_INVALID', 'SESSION_REVOKED']);
+// 서버 요청 하나의 시간 제한 — 넘기면 요청을 끊고 네트워크 오류처럼 실패한다.
+const REQUEST_TIMEOUT_MS = 30 * 1000;
 
 /** 서버로 보내는 본문: action·outcome, 있을 때만 targetId·extra. */
 function buildAuditBody(entry) {
@@ -129,6 +131,7 @@ module.exports = {
   isStampedEntry,
   forQueuedSend,
   TOKEN_EXPIRY_CODES,
+  REQUEST_TIMEOUT_MS,
   buildAuditBody,
   canonicalMessage,
   buildSignedAuditRequest,
