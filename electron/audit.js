@@ -14,7 +14,9 @@ const {
   buildSignedAuditRequest,
   interpretHttpResponse,
   isTokenExpiryError,
-  withSessionMissing,
+  createAuditContext,
+  stampEntry,
+  forQueuedSend,
 } = require('./auditLogic');
 const {
   REGISTER_MIN_SPACING_MS,
@@ -283,37 +285,47 @@ function canSend() {
   return sendingAllowed(_meta, _state.status);
 }
 
-// Send with automatic session-missing fallback: if the call fails because the token itself is bad
-// (expired / revoked), strips the Authorization header and retries once. Any other 401 (device
-// problems) propagates to the caller for enqueue.
+// Send with a tokenless retry: if the call fails because the token itself is bad (expired / revoked), the
+// Authorization header is dropped and the same entry is sent once more (the server records who sent it from
+// the PC and the entry's own actor). Any other 401 (device problems) propagates to the caller for enqueue.
 async function doSendWithSessionFallback(entry, accessToken) {
   if (!accessToken) {
-    await doSend(withSessionMissing(entry), null);
+    await doSend(entry, null);
     return;
   }
   try {
     await doSend(entry, accessToken);
   } catch (err) {
     if (isTokenExpiryError(err)) {
-      console.warn('[audit] HTTP 401 token expiry/revocation, retrying as session_missing');
-      await doSend(withSessionMissing(entry), null);
+      console.warn('[audit] HTTP 401 token expiry/revocation, retrying without the token');
+      await doSend(entry, null);
     } else {
       throw err;
     }
   }
 }
 
-// Send an audit entry immediately if device is active; enqueue otherwise.
-async function recordAudit(entry) {
+/**
+ * Record-time information for an EMR action — call it when the action starts (before the helper runs) and pass
+ * it to recordAudit when the action ends: who was logged in then, when, and a random event id.
+ */
+function captureAuditContext() {
+  return createAuditContext(_getAccessToken(), { identity: readTokenIdentity });
+}
+
+// Send an audit entry immediately if device is active; enqueue otherwise. `context` = captureAuditContext() taken
+// when the EMR action started (taken now when absent). The stamped entry is what is sent, queued and resent.
+async function recordAudit(entry, context) {
   if (!_state.deviceId || !_state.privateKey) return;
-  if (!canSend()) { enqueue(entry); return; }
+  const stamped = stampEntry(entry, context ?? captureAuditContext());
+  if (!canSend()) { enqueue(stamped); return; }
 
   const token = _getAccessToken();
   try {
-    await doSendWithSessionFallback(entry, token);
+    await doSendWithSessionFallback(stamped, token);
   } catch (err) {
     console.error('[audit] send failed, enqueuing:', err.message);
-    enqueue(entry);
+    enqueue(stamped);
     noteSendError(err);
   }
 }
@@ -340,7 +352,7 @@ async function flushQueue() {
   let refused = null;
   await flush(async entry => {
     try {
-      await doSendWithSessionFallback(entry, token);
+      await doSendWithSessionFallback(forQueuedSend(entry), token);
     } catch (err) {
       if (!refused && err?.status === 401 && !isTokenExpiryError(err)) refused = err;
       throw err;
@@ -364,4 +376,4 @@ async function initAudit({ getAccessToken, apiBaseUrl }) {
   await flushQueue(); // asks for the device state first (tryRegister)
 }
 
-module.exports = { initAudit, getDeviceStatus, getEmrGate, tryRegister, recordAudit, flushQueue };
+module.exports = { initAudit, getDeviceStatus, getEmrGate, tryRegister, captureAuditContext, recordAudit, flushQueue };

@@ -6,7 +6,6 @@ import {
   buildSignedAuditRequest,
   interpretHttpResponse,
   isTokenExpiryError,
-  withSessionMissing,
 } from '../auditLogic.js';
 
 // 서버(server/src/routes/audit.ts)가 서명을 확인하는 방식 그대로.
@@ -95,9 +94,4 @@ describe('auditLogic — 응답 해석', () => {
     expect(isTokenExpiryError(new Error('network'))).toBe(false);
   });
 
-  it('토큰 없이 다시 보낼 때 extra에 세션 없음 표시를 더한다(기존 extra 보존)', () => {
-    expect(withSessionMissing({ action: 'a', outcome: 'success', extra: { source: 'auto' } }))
-      .toEqual({ action: 'a', outcome: 'success', extra: { source: 'auto', session_missing: true, actor_from_queue: true } });
-    expect(withSessionMissing({ action: 'a', outcome: 'success' }).extra).toEqual({ session_missing: true, actor_from_queue: true });
-  });
 });

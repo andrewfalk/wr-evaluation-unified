@@ -1356,6 +1356,8 @@ ipc.handle('emr-inject', async (event, fieldData) => {
     return { success: false, message: 'EMR direct input is Windows-only.' };
   }
 
+  // 행위자·시각은 동작을 시작할 때 잡는다(끝난 뒤의 기록·대기열·재전송까지 이 값).
+  const auditContext = IS_INTRANET_BUILD ? audit.captureAuditContext() : null;
   const { emrFields, source } = splitInjectPayload(fieldData);
   const result   = await execEmrInject(emrFields);
   const targetId = emrFields?.patientNo
@@ -1366,7 +1368,7 @@ ipc.handle('emr-inject', async (event, fieldData) => {
       action: 'emr_inject', outcome: result?.success ? 'success' : 'failure',
       ...(targetId ? { targetId } : {}),
       ...(source ? { extra: { source } } : {}),
-    }).catch(() => {});
+    }, auditContext).catch(() => {});
   }
   return result;
 });
@@ -1379,6 +1381,7 @@ ipc.handle('emr-extract-record', async (event, patientNo, injuryDate) => {
   if (process.platform !== 'win32') {
     return { success: false, error: 'EMR extraction is Windows-only.' };
   }
+  const auditContext = IS_INTRANET_BUILD ? audit.captureAuditContext() : null;
   // 재해일자 매칭으로 입력내역 행을 순회할 수 있어 타임아웃을 120초로 둠
   // (조회 witness 폴링 8s + 그리드 준비 6s + 행 스캔 최악 ~86s 여유).
   const result   = await runHelper(['--extract-record', String(patientNo), '--injury-date', String(injuryDate || '')], 120000);
@@ -1389,7 +1392,7 @@ ipc.handle('emr-extract-record', async (event, patientNo, injuryDate) => {
     audit.recordAudit({
       action: 'emr_extract_record', outcome: result?.success ? 'success' : 'failure',
       ...(targetId ? { targetId } : {}),
-    }).catch(() => {});
+    }, auditContext).catch(() => {});
   }
   return result;
 });
@@ -1402,9 +1405,10 @@ ipc.handle('emr-extract-consultation', async (event) => {
   if (process.platform !== 'win32') {
     return { success: false, error: 'EMR extraction is Windows-only.' };
   }
+  const auditContext = IS_INTRANET_BUILD ? audit.captureAuditContext() : null;
   const result = await runHelper(['--extract-consultation'], 15000);
   if (IS_INTRANET_BUILD) {
-    audit.recordAudit({ action: 'emr_extract_consultation', outcome: result?.success ? 'success' : 'failure' }).catch(() => {});
+    audit.recordAudit({ action: 'emr_extract_consultation', outcome: result?.success ? 'success' : 'failure' }, auditContext).catch(() => {});
   }
   return result;
 });
