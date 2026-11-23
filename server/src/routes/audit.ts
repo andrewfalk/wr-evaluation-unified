@@ -149,8 +149,13 @@ async function handleEmrAudit(pool: Pool, deps: AuditDeps, req: Request, res: Re
   if (pc.status !== 'active') {
     const record = deps.denied.take(pc.anchorId);
     if (record) {
+      // The session's user is named only when that session belongs to the PC's organisation (the row is the PC's
+      // organisation's); a session of another organisation is not recorded here.
+      const sessionUserOfPcOrg = req.sessionInfo && pc.orgResolved
+        && sessionMatchesPc({ userId: req.sessionInfo.userId, organizationId: req.sessionInfo.organizationId ?? null }, pc)
+        ? req.sessionInfo.userId : null;
       writeAuditLog(pool, {
-        actorUserId: req.sessionInfo?.userId ?? null,
+        actorUserId: sessionUserOfPcOrg,
         actorOrgId:  pc.orgResolved ? pc.orgId : null,
         action:      'emr_audit_denied',
         targetType:  'device',

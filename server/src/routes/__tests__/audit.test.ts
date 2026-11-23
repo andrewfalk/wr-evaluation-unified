@@ -337,6 +337,16 @@ describe('POST /api/audit/emr', () => {
     });
   });
 
+  it('the denial summary names the session user only when the session belongs to the PC\'s organisation', async () => {
+    const pc = makePc();
+    const first = row(pc, { status: 'pending', organization_id: 'org-1' });
+    const fake = makeFake([first]);
+    const res = await send(auditApp(fake), pc, { token: userToken('user-9', 'org-9') });
+    expect(res.status).toBe(401);
+    expect(vi.mocked(writeAuditLog).mock.calls[0][1]).toMatchObject({ actorUserId: null, actorOrgId: 'org-1', action: 'emr_audit_denied' });
+    expect(JSON.stringify(vi.mocked(writeAuditLog).mock.calls[0][1])).not.toContain('user-9');
+  });
+
   it('an approved PC is found even when more unapproved keys exist than the scan tries', async () => {
     const approved = makePc();
     const rows = [row(approved, { registered_at: '2020-01-01T00:00:00.000Z' })];
