@@ -38,6 +38,9 @@ const FAILURES = [
   ['429', () => ({ status: 429, body: { code: 'RATE_LIMITED', error: 'x' } })],
   ['파싱 오류', () => ({ status: 200, body: '<html>' })],
   ['알 수 없는 새 서버 응답', () => ({ status: 200, body: { deviceScope: 'pc', status: 'weird', organizationId: ORG_A } })],
+  ['기관 값이 잘못된 새 서버 응답(숫자)', () => ({ status: 200, body: { deviceScope: 'pc', status: 'revoked', organizationId: 123 } })],
+  ['기관 값이 빠진 새 서버 응답', () => ({ status: 200, body: { deviceScope: 'pc', status: 'revoked' } })],
+  ['기관 값이 잘못된 다른 기관 거부', () => ({ status: 409, body: { deviceScope: 'pc', status: 'other_org', organizationId: { id: 1 } } })],
 ];
 
 describe('deviceState — 순수 함수', () => {
@@ -109,6 +112,7 @@ describe('deviceState — 순수 함수', () => {
     expect(shouldRegister({ ...base, startedFresh: true }, later)).toEqual({ register: true, reason: 'first_token' });
     expect(shouldRegister({ ...base, login: { userId: 'b', orgId: ORG_B } }, later)).toEqual({ register: true, reason: 'org_changed' });
     expect(shouldRegister({ ...base, deviceProblem: true }, later)).toEqual({ register: true, reason: 'device_problem' });
+    expect(shouldRegister({ ...base, meta: { status: 'active' }, deviceProblem: true }, later)).toEqual({ register: true, reason: 'device_problem' });
     const pending = { ...base, meta: { status: 'pending', pc: { orgId: ORG_A, status: 'pending' } } };
     expect(shouldRegister(pending, later).register).toBe(false);
     expect(shouldRegister(pending, 21 * 60 * 1000)).toEqual({ register: true, reason: 'pending_recheck' });
@@ -247,6 +251,26 @@ describe('audit.js — 상태 갱신과 기관에 묶인 게이트', () => {
     await s.audit.tryRegister();
     expect(s.registers()).toHaveLength(1);
     expect(s.audit.getEmrGate().allowed).toBe(true);
+  });
+
+  it('이전 서버의 active만 받은 장치도 감사 전송이 장치 문제 401을 받으면 다시 묻는다(서버가 새 버전으로 바뀐 경우의 해지 반영)', async () => {
+    const tokenRef = { current: tokenA };
+    const pc = newPc();
+    const replies = [oldServerAnswer('active'), pcAnswer('revoked')];
+    const requests = [];
+    const send = async (req) => {
+      const p = new URL(req.url).pathname;
+      requests.push(p);
+      if (p === '/api/audit/emr') return { status: 401, body: '{"code":"UNAUTHORIZED","error":"Device not recognized"}' };
+      const r = replies.shift();
+      return { status: r.status, body: JSON.stringify(r.body) };
+    };
+    const audit = loadShellModule(ELECTRON_DIR, 'audit.js', createFakeElectron({ userDataDir: pc, send }));
+    await audit.initAudit({ getAccessToken: () => tokenRef.current, apiBaseUrl: 'https://server.test' });
+    expect(audit.getEmrGate().allowed).toBe(true);
+    advance(REGISTER_MIN_SPACING_MS);
+    await audit.recordAudit({ action: 'emr_inject', outcome: 'success' });
+    await vi.waitFor(() => expect(audit.getEmrGate()).toEqual({ allowed: false, reason: 'revoked' }));
   });
 
   it('감사 전송이 장치 문제 401을 받으면 상태를 다시 묻는다(해지 반영)', async () => {

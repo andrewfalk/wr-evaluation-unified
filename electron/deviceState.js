@@ -18,6 +18,11 @@ const REGISTER_MAX_PER_HOUR = 5;
 // 승인 대기 중인 PC의 재확인 간격(지금과 같다).
 const PENDING_RECHECK_MS = 20 * 60 * 1000;
 
+// 기관 값은 문자열(UUID) 또는 null(기관 없는 계정). 그 밖의 값(빠짐·숫자 등)은 알 수 없는 응답으로 본다.
+function validOrgId(value) {
+  return value === null || (typeof value === 'string' && value.length > 0);
+}
+
 /**
  * 등록 요청의 결과를 해석한다. result = { ok: true, status, data } 또는 { ok: false, err }(err.status·err.code·err.body).
  * @returns {{ kind: 'pc', orgId: string | null, status: string }
@@ -27,14 +32,14 @@ const PENDING_RECHECK_MS = 20 * 60 * 1000;
 function interpretRegisterResult(result) {
   if (result.ok) {
     const data = result.data;
-    if (data?.deviceScope === DEVICE_SCOPE_PC && PC_STATUSES.has(data.status) && 'organizationId' in data) {
+    if (data?.deviceScope === DEVICE_SCOPE_PC && PC_STATUSES.has(data.status) && validOrgId(data.organizationId)) {
       return { kind: 'pc', orgId: data.organizationId ?? null, status: data.status };
     }
     if (data?.deviceScope === DEVICE_SCOPE_PC) return { kind: 'failed' }; // 알 수 없는 형식 — 아무것도 바꾸지 않는다
     return { kind: 'legacy', status: data?.status === 'active' ? 'active' : 'pending' };
   }
   const err = result.err ?? {};
-  if (err.status === 409 && err.body?.deviceScope === DEVICE_SCOPE_PC && err.body?.status === 'other_org' && 'organizationId' in err.body) {
+  if (err.status === 409 && err.body?.deviceScope === DEVICE_SCOPE_PC && err.body?.status === 'other_org' && validOrgId(err.body.organizationId)) {
     return { kind: 'pc', orgId: err.body.organizationId ?? null, status: 'other_org' };
   }
   if (err.status === 429) return { kind: 'retry_later' };
@@ -110,9 +115,9 @@ function shouldRegister(state, nowMs) {
   let reason = null;
   const pc = meta && validPc(meta.pc) ? meta.pc : null;
   if (state.startedFresh) reason = 'first_token';
+  else if (state.deviceProblem) reason = 'device_problem'; // 새 서버 응답을 받기 전(pc 없음)이어도 — 서버가 바뀌었을 수 있다
   else if (!pc) reason = meta?.status === 'active' ? null : 'not_active';
   else if (pc.orgId !== login.orgId) reason = 'org_changed';
-  else if (state.deviceProblem) reason = 'device_problem';
   else if (pc.status === 'pending' && nowMs - last >= PENDING_RECHECK_MS) reason = 'pending_recheck';
   if (!reason) return { register: false };
   // 이전 서버(pc 없음)의 승인 대기는 지금처럼 20분 간격.
