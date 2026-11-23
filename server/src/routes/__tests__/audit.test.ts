@@ -14,7 +14,10 @@ vi.mock('../../middleware/audit', () => ({
   writeAuditLogStrict: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { createAuditRouter } from '../audit';
+import { createAuditRouter, type AuditRouterOptions } from '../audit';
+import { writeAuditLog, writeAuditLogStrict } from '../../middleware/audit';
+import { keyFingerprint } from '../../devices/pcIdentity';
+import { SERVER_RESERVED_EXTRA_KEYS } from '../../devices/emrAuditRecord';
 import { createFakePool, authSessionHandler, type FakePool, type QueryHandler } from '../../testing/fakePool';
 import { makeRouterApp } from '../../testing/app';
 import { makeAccessToken } from '../../testing/tokens';
@@ -23,54 +26,66 @@ import { makeAccessToken } from '../../testing/tokens';
 // Helpers
 // ---------------------------------------------------------------------------
 
-// Generate a real Ed25519 key pair for signature tests
-function makeKeyPair() {
-  return crypto.generateKeyPairSync('ed25519');
+// A "PC" = one signing key. Registration rows: one per user who registered that key.
+interface Pc {
+  privateKey: crypto.KeyObject;
+  publicKey: string; // raw 32-byte Ed25519 key, base64 (devices.public_key)
+  fingerprint: string;
 }
 
-// Export public key as raw 32-byte base64 (the format stored in devices.public_key)
-function exportPublicKey(pubKey: crypto.KeyObject): string {
-  // DER SPKI for Ed25519 = 12 bytes header + 32 bytes raw key
-  const der = pubKey.export({ format: 'der', type: 'spki' }) as Buffer;
-  return der.subarray(12).toString('base64');
+function makePc(): Pc {
+  const { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519');
+  const raw = (publicKey.export({ format: 'der', type: 'spki' }) as Buffer).subarray(12).toString('base64');
+  return { privateKey, publicKey: raw, fingerprint: keyFingerprint(raw) };
 }
 
-// Build a valid Ed25519 signature over the canonical message.
-// Format: "<deviceId>.<deviceTs>.<deviceNonce>.<JSON-sorted-body>"
-function signPayload(
-  privKey:   crypto.KeyObject,
-  deviceId:  string,
-  deviceTs:  string,
-  deviceNonce: string,
-  body:      object
-): string {
-  const sorted = Object.fromEntries(
-    Object.entries(body).sort(([a], [b]) => a.localeCompare(b))
-  );
-  const message = `${deviceId}.${deviceTs}.${deviceNonce}.${JSON.stringify(sorted)}`;
-  return crypto.sign(null, Buffer.from(message), privKey).toString('base64');
+interface DeviceRow {
+  id: string;
+  user_id: string;
+  organization_id: string | null;
+  status: 'pending' | 'active' | 'revoked';
+  registered_at: string;
+  public_key: string;
+  public_key_fingerprint: string;
 }
 
-// Each test must use a unique nonce (replay guard rejects duplicates within TTL)
+let rowSeq = 0;
+function row(pc: Pc, overrides: Partial<DeviceRow> = {}): DeviceRow {
+  rowSeq += 1;
+  return {
+    id: crypto.randomUUID(),
+    user_id: 'user-1',
+    organization_id: 'org-1',
+    status: 'active',
+    registered_at: new Date(Date.UTC(2026, 0, 1, 0, 0, rowSeq)).toISOString(),
+    public_key: pc.publicKey,
+    public_key_fingerprint: pc.fingerprint,
+    ...overrides,
+  };
+}
+
+// Canonical message: "<header id>.<ts>.<nonce>.<JSON-sorted-body>"
+function signPayload(privKey: crypto.KeyObject, headerId: string, ts: string, devNonce: string, body: object): string {
+  const sorted = Object.fromEntries(Object.entries(body).sort(([a], [b]) => a.localeCompare(b)));
+  return crypto.sign(null, Buffer.from(`${headerId}.${ts}.${devNonce}.${JSON.stringify(sorted)}`), privKey).toString('base64');
+}
+
 function nonce(): string { return crypto.randomBytes(16).toString('hex'); }
 
-// CSRF 해시는 testing/tokens 기본값(sha256('ok')) — 기존 로컬 도우미와 같은 클레임.
-function userToken(userId = 'user-1'): string {
-  return makeAccessToken({ userId, sessionId: 'sess-1', orgId: 'org-1', role: 'doctor', name: 'Dr. Kim' });
+function userToken(userId = 'user-1', orgId: string | null = 'org-1'): string {
+  return makeAccessToken({ userId, sessionId: 'sess-1', orgId, role: 'doctor', name: 'Dr. Kim' });
 }
 
-// 세션 확인 쿼리(인증 미들웨어)에만 답하는 fake — 장치 SELECT까지 가지 않는 요청용.
-// revoked면 세션 없음(빈 결과).
-function makeSessionOnlyFake(options: { revoked?: boolean } = {}): FakePool {
-  return createFakePool({ handlers: [authSessionHandler({ revoked: options.revoked })] });
-}
-
-// emr_audit_nonces as the handler uses it (SEC-A L11): a claimed nonce is kept on COMMIT and dropped
-// on ROLLBACK, and a kept one answers the next claim with 0 rows. One store per fake (per test).
+// emr_audit_nonces as the handler uses it (SEC-A L11): a claimed nonce is kept on COMMIT and dropped on
+// ROLLBACK; the pre-check and the next claim see only kept ones. One store per fake (per test).
 function nonceHandlers(): QueryHandler[] {
   const committed = new Set<string>();
   let pending: string | null = null;
   return [
+    {
+      name: 'nonce.seen', via: 'pool', match: /SELECT 1 FROM emr_audit_nonces/,
+      reply: (_sql, params) => (committed.has(`${String(params[0])}:${String(params[1])}`) ? { rows: [{ '?column?': 1 }] } : { rows: [] }),
+    },
     {
       name: 'nonce.claim', via: 'client', match: /INSERT INTO emr_audit_nonces/,
       reply: (_sql, params) => {
@@ -85,26 +100,38 @@ function nonceHandlers(): QueryHandler[] {
   ];
 }
 
-function deviceHandlers(deviceRow: object | null): QueryHandler[] {
+// The devices table: the key scan (GROUP BY fingerprint), one key's rows, last_seen_at.
+function deviceHandlers(rows: DeviceRow[]): QueryHandler[] {
   return [
-    { name: 'devices.select', match: /FROM devices WHERE id = \$1/, reply: { rows: deviceRow ? [deviceRow] : [] } },
+    {
+      name: 'devices.scan', match: /GROUP BY public_key_fingerprint/,
+      reply: () => {
+        const byFp = new Map<string, DeviceRow[]>();
+        for (const r of rows) byFp.set(r.public_key_fingerprint, [...(byFp.get(r.public_key_fingerprint) ?? []), r]);
+        return {
+          rows: [...byFp.entries()].map(([fp, rs]) => ({
+            fp,
+            public_key: rs[0].public_key,
+            has_active: rs.some((r) => r.status === 'active'),
+            last_registered: rs.map((r) => r.registered_at).sort().at(-1),
+          })),
+        };
+      },
+    },
+    {
+      name: 'devices.byFingerprint', match: /FROM devices WHERE public_key_fingerprint = \$1/,
+      reply: (_sql, params) => ({ rows: rows.filter((r) => r.public_key_fingerprint === params[0]) }),
+    },
     { name: 'devices.touch', match: /UPDATE devices SET last_seen_at = now\(\)/, reply: { rows: [] } },
     ...nonceHandlers(),
   ];
 }
 
-// auth session check, then device SELECT result, then last_seen_at UPDATE
-function makeDeviceFake(deviceRow: object | null): FakePool {
-  return createFakePool({ handlers: [authSessionHandler(), ...deviceHandlers(deviceRow)] });
+function makeFake(rows: DeviceRow[], options: { session?: boolean } = {}): FakePool {
+  return createFakePool({ handlers: [...(options.session === false ? [] : [authSessionHandler()]), ...deviceHandlers(rows)] });
 }
 
-// For queue-replay requests that have no Authorization header.
-// makeOptionalAuth skips the session check, so no auth query fires (no session handler → it would be unmatched).
-function makeDeviceNoSessionFake(deviceRow: object | null): FakePool {
-  return createFakePool({ handlers: deviceHandlers(deviceRow) });
-}
-
-function auditApp(fake: FakePool, options: Parameters<typeof createAuditRouter>[1] = {}) {
+function auditApp(fake: FakePool, options: AuditRouterOptions = {}) {
   return makeRouterApp(a => a.use('/api/audit', createAuditRouter(fake.pool, options)));
 }
 
@@ -113,23 +140,58 @@ const VALID_BODY = {
   outcome: 'success' as const,
 };
 
+interface SendOptions {
+  headerId?: string;
+  token?: string | null;
+  body?: object;
+  devNonce?: string;
+  ts?: string;
+  signWith?: crypto.KeyObject;
+  sig?: string;
+}
+
+// A signed request. `token: null` → no Authorization (a queue replay after the session ended).
+function send(app: ReturnType<typeof auditApp>, pc: Pc, options: SendOptions = {}) {
+  const headerId = options.headerId ?? SHELL_ID;
+  const body = options.body ?? VALID_BODY;
+  const ts = options.ts ?? new Date().toISOString();
+  const devNonce = options.devNonce ?? nonce();
+  const sig = options.sig ?? signPayload(options.signWith ?? pc.privateKey, headerId, ts, devNonce, body);
+  let req = request(app)
+    .post('/api/audit/emr')
+    .set('x-wr-source', 'electron-main')
+    .set('x-wr-device-id', headerId)
+    .set('x-wr-device-sig', sig)
+    .set('x-wr-device-ts', ts)
+    .set('x-wr-device-nonce', devNonce);
+  const token = options.token === undefined ? userToken() : options.token;
+  if (token) req = req.set('Authorization', `Bearer ${token}`);
+  return req.send(body);
+}
+
+// The shell's own device id — never the id of a registration row.
+const SHELL_ID = '6f1c1d3e-8f7a-4c55-9b1e-2a3b4c5d6e7f';
+
+function lastAuditEntry(): { actorUserId: string | null; actorOrgId: string | null; extra: Record<string, unknown> } {
+  return vi.mocked(writeAuditLogStrict).mock.calls.at(-1)![1] as never;
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 describe('POST /api/audit/emr', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
-  it('returns 401 when not authenticated', async () => {
-    const fake = makeSessionOnlyFake({ revoked: true });
-    const res = await request(auditApp(fake))
-      .post('/api/audit/emr')
-      .set('x-wr-source', 'electron-main')
-      .send(VALID_BODY);
+  // ── Request shape ─────────────────────────────────────────────────────────
+
+  it('returns 401 when device headers are missing (no token either)', async () => {
+    const fake = makeFake([]);
+    const res = await request(auditApp(fake)).post('/api/audit/emr').set('x-wr-source', 'electron-main').send(VALID_BODY);
     expect(res.status).toBe(401);
   });
 
   it('returns 401 when X-WR-Source is missing or wrong', async () => {
-    const fake = makeSessionOnlyFake();
+    const fake = makeFake([]);
     const res = await request(auditApp(fake))
       .post('/api/audit/emr')
       .set('Authorization', `Bearer ${userToken()}`)
@@ -139,7 +201,7 @@ describe('POST /api/audit/emr', () => {
   });
 
   it('returns 401 when device headers are missing', async () => {
-    const fake = makeSessionOnlyFake();
+    const fake = makeFake([]);
     const res = await request(auditApp(fake))
       .post('/api/audit/emr')
       .set('Authorization', `Bearer ${userToken()}`)
@@ -150,617 +212,378 @@ describe('POST /api/audit/emr', () => {
   });
 
   it('returns 401 when timestamp is out of range', async () => {
-    const { privateKey, publicKey } = makeKeyPair();
-    const fake    = makeSessionOnlyFake();
-    const devNonce = nonce();
-    const staleTs  = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-    const sig      = signPayload(privateKey, 'dev-1', staleTs, devNonce, VALID_BODY);
-
-    const res = await request(auditApp(fake))
-      .post('/api/audit/emr')
-      .set('Authorization', `Bearer ${userToken()}`)
-      .set('x-wr-source',     'electron-main')
-      .set('x-wr-device-id',  'dev-1')
-      .set('x-wr-device-sig', sig)
-      .set('x-wr-device-ts',    staleTs)
-      .set('x-wr-device-nonce', devNonce)
-      .send(VALID_BODY);
-
+    const pc = makePc();
+    const fake = makeFake([row(pc)]);
+    const res = await send(auditApp(fake), pc, { ts: new Date(Date.now() - 10 * 60 * 1000).toISOString() });
     expect(res.status).toBe(401);
     expect(res.body.error).toMatch(/timestamp/i);
-    void exportPublicKey(publicKey);
   });
 
   it('returns 400 on invalid body (unknown action)', async () => {
-    const { privateKey } = makeKeyPair();
-    const fake     = makeSessionOnlyFake();
-    const ts       = new Date().toISOString();
-    const devNonce = nonce();
-    const body     = { action: 'unknown_action', outcome: 'success' };
-    const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, body);
-
-    const res = await request(auditApp(fake))
-      .post('/api/audit/emr')
-      .set('Authorization', `Bearer ${userToken()}`)
-      .set('x-wr-source',     'electron-main')
-      .set('x-wr-device-id',  'dev-1')
-      .set('x-wr-device-sig', sig)
-      .set('x-wr-device-ts',    ts)
-      .set('x-wr-device-nonce', devNonce)
-      .send(body);
-
+    const pc = makePc();
+    const fake = makeFake([row(pc)]);
+    const res = await send(auditApp(fake), pc, { body: { action: 'unknown_action', outcome: 'success' } });
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('INVALID_BODY');
   });
 
-  it('returns 401 when device does not exist', async () => {
-    const { privateKey } = makeKeyPair();
-    const fake     = makeDeviceFake(null);
-    const ts       = new Date().toISOString();
-    const devNonce = nonce();
-    const sig      = signPayload(privateKey, 'dev-missing', ts, devNonce, VALID_BODY);
-
-    const res = await request(auditApp(fake))
-      .post('/api/audit/emr')
-      .set('Authorization', `Bearer ${userToken()}`)
-      .set('x-wr-source',     'electron-main')
-      .set('x-wr-device-id',  'dev-missing')
-      .set('x-wr-device-sig', sig)
-      .set('x-wr-device-ts',    ts)
-      .set('x-wr-device-nonce', devNonce)
-      .send(VALID_BODY);
-
+  it('a device id header that is not a UUID → 401 without a database lookup', async () => {
+    const pc = makePc();
+    const fake = makeFake([row(pc)]);
+    const res = await send(auditApp(fake), pc, { headerId: 'dev-1' });
     expect(res.status).toBe(401);
-    expect(res.body.error).toMatch(/device not found/i);
+    expect(res.body).toEqual({ code: 'UNAUTHORIZED', error: 'Device not recognized' });
+    expect(fake.callsTo('devices.scan')).toHaveLength(0);
+    expect(fake.callsTo('devices.byFingerprint')).toHaveLength(0);
   });
 
-  it('returns 401 when device is pending', async () => {
-    const { privateKey, publicKey } = makeKeyPair();
-    const fake     = makeDeviceFake({
-      user_id:         'user-1',
-      organization_id: 'org-1',
-      public_key:      exportPublicKey(publicKey),
-      status:          'pending',
-    });
-    const ts       = new Date().toISOString();
-    const devNonce = nonce();
-    const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
+  // ── Finding the PC by signature ───────────────────────────────────────────
 
-    const res = await request(auditApp(fake))
-      .post('/api/audit/emr')
-      .set('Authorization', `Bearer ${userToken()}`)
-      .set('x-wr-source',     'electron-main')
-      .set('x-wr-device-id',  'dev-1')
-      .set('x-wr-device-sig', sig)
-      .set('x-wr-device-ts',    ts)
-      .set('x-wr-device-nonce', devNonce)
-      .send(VALID_BODY);
-
-    expect(res.status).toBe(401);
-    expect(res.body.error).toMatch(/not active/i);
-  });
-
-  it('returns 401 when device is revoked', async () => {
-    const { privateKey, publicKey } = makeKeyPair();
-    const fake     = makeDeviceFake({
-      user_id:         'user-1',
-      organization_id: 'org-1',
-      public_key:      exportPublicKey(publicKey),
-      status:          'revoked',
-    });
-    const ts       = new Date().toISOString();
-    const devNonce = nonce();
-    const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
-
-    const res = await request(auditApp(fake))
-      .post('/api/audit/emr')
-      .set('Authorization', `Bearer ${userToken()}`)
-      .set('x-wr-source',     'electron-main')
-      .set('x-wr-device-id',  'dev-1')
-      .set('x-wr-device-sig', sig)
-      .set('x-wr-device-ts',    ts)
-      .set('x-wr-device-nonce', devNonce)
-      .send(VALID_BODY);
-
-    expect(res.status).toBe(401);
-    expect(res.body.error).toMatch(/not active/i);
-  });
-
-  it('returns 401 when session.user !== device.user', async () => {
-    const { privateKey, publicKey } = makeKeyPair();
-    const fake     = makeDeviceFake({
-      user_id:         'other-user-99',
-      organization_id: 'org-1',
-      public_key:      exportPublicKey(publicKey),
-      status:          'active',
-    });
-    const ts       = new Date().toISOString();
-    const devNonce = nonce();
-    const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
-
-    const res = await request(auditApp(fake))
-      .post('/api/audit/emr')
-      .set('Authorization', `Bearer ${userToken('user-1')}`)
-      .set('x-wr-source',     'electron-main')
-      .set('x-wr-device-id',  'dev-1')
-      .set('x-wr-device-sig', sig)
-      .set('x-wr-device-ts',    ts)
-      .set('x-wr-device-nonce', devNonce)
-      .send(VALID_BODY);
-
-    expect(res.status).toBe(401);
-    expect(res.body.error).toMatch(/mismatch/i);
-  });
-
-  it('returns 401 when Ed25519 signature is invalid', async () => {
-    const { publicKey }             = makeKeyPair();
-    const { privateKey: wrongPriv } = makeKeyPair();
-    const fake     = makeDeviceFake({
-      user_id:         'user-1',
-      organization_id: 'org-1',
-      public_key:      exportPublicKey(publicKey),
-      status:          'active',
-    });
-    const ts       = new Date().toISOString();
-    const devNonce = nonce();
-    const sig      = signPayload(wrongPriv, 'dev-1', ts, devNonce, VALID_BODY);
-
-    const res = await request(auditApp(fake))
-      .post('/api/audit/emr')
-      .set('Authorization', `Bearer ${userToken()}`)
-      .set('x-wr-source',     'electron-main')
-      .set('x-wr-device-id',  'dev-1')
-      .set('x-wr-device-sig', sig)
-      .set('x-wr-device-ts',    ts)
-      .set('x-wr-device-nonce', devNonce)
-      .send(VALID_BODY);
-
-    expect(res.status).toBe(401);
-    expect(res.body.error).toMatch(/signature/i);
-  });
-
-  it('returns 200 when approved device with valid signature', async () => {
-    const { privateKey, publicKey } = makeKeyPair();
-    const fake     = makeDeviceFake({
-      user_id:         'user-1',
-      organization_id: 'org-1',
-      public_key:      exportPublicKey(publicKey),
-      status:          'active',
-    });
-    const ts       = new Date().toISOString();
-    const devNonce = nonce();
-    const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
-
-    const res = await request(auditApp(fake))
-      .post('/api/audit/emr')
-      .set('Authorization', `Bearer ${userToken()}`)
-      .set('x-wr-source',     'electron-main')
-      .set('x-wr-device-id',  'dev-1')
-      .set('x-wr-device-sig', sig)
-      .set('x-wr-device-ts',    ts)
-      .set('x-wr-device-nonce', devNonce)
-      .send(VALID_BODY);
-
+  it('accepts a request signed with the shell\'s own id; the row is keyed by the PC\'s first registration', async () => {
+    const pc = makePc();
+    const first = row(pc);
+    const fake = makeFake([first]);
+    const res = await send(auditApp(fake), pc);
     expect(res.status).toBe(200);
-    expect(res.body.ok).toBe(true);
-  });
-
-  // SEC-A L3 — per verified device, after the signature check.
-  it('429 RATE_LIMITED once a verified device exceeds its per-minute limit; nothing is written for it', async () => {
-    const { writeAuditLogStrict } = await import('../../middleware/audit.js');
-    const { privateKey, publicKey } = makeKeyPair();
-    const fake = makeDeviceFake({ user_id: 'user-1', organization_id: 'org-1', public_key: exportPublicKey(publicKey), status: 'active' });
-    const app = auditApp(fake, { emrEventsPerDevicePerMinute: 1 });
-    const send = () => {
-      const ts = new Date().toISOString();
-      const devNonce = nonce();
-      return request(app)
-        .post('/api/audit/emr')
-        .set('Authorization', `Bearer ${userToken()}`)
-        .set('x-wr-source', 'electron-main')
-        .set('x-wr-device-id', 'dev-1')
-        .set('x-wr-device-sig', signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY))
-        .set('x-wr-device-ts', ts)
-        .set('x-wr-device-nonce', devNonce)
-        .send(VALID_BODY);
-    };
-    vi.mocked(writeAuditLogStrict).mockClear();
-    expect((await send()).status).toBe(200);
-    const limited = await send();
-    expect(limited.status).toBe(429);
-    expect(limited.body).toEqual({ code: 'RATE_LIMITED', error: 'Too many audit events from this device, please retry later' });
-    expect(Number(limited.headers['retry-after'])).toBeGreaterThanOrEqual(1);
-    expect(writeAuditLogStrict).toHaveBeenCalledTimes(1); // only the first request was recorded
-  });
-
-  it('a replayed (already recorded) nonce does not use up the device budget', async () => {
-    const { privateKey, publicKey } = makeKeyPair();
-    const fake = makeDeviceFake({ user_id: 'user-1', organization_id: 'org-1', public_key: exportPublicKey(publicKey), status: 'active' });
-    const app = auditApp(fake, { emrEventsPerDevicePerMinute: 2 });
-    const ts = new Date().toISOString();
-    const sendWith = (devNonce: string) => request(app)
-      .post('/api/audit/emr')
-      .set('Authorization', `Bearer ${userToken()}`)
-      .set('x-wr-source', 'electron-main').set('x-wr-device-id', 'dev-1')
-      .set('x-wr-device-sig', signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY)).set('x-wr-device-ts', ts).set('x-wr-device-nonce', devNonce)
-      .send(VALID_BODY);
-    const a = nonce();
-    expect((await sendWith(a)).status).toBe(200);
-    for (let i = 0; i < 3; i += 1) expect((await sendWith(a)).status).toBe(401); // replays
-    expect((await sendWith(nonce())).status).toBe(200); // the second real event still fits the budget of 2
-  });
-
-  it('a session-authenticated request cannot record itself as a queue replay (session flags are server-set)', async () => {
-    const { writeAuditLogStrict } = await import('../../middleware/audit.js');
-    const { privateKey, publicKey } = makeKeyPair();
-    const fake = makeDeviceFake({ user_id: 'user-1', organization_id: 'org-1', public_key: exportPublicKey(publicKey), status: 'active' });
-    const spoofed = { ...VALID_BODY, extra: { session_missing: true, actor_from_queue: true, kept: 'yes' } };
-    const ts = new Date().toISOString();
-    const devNonce = nonce();
-    const res = await request(auditApp(fake))
-      .post('/api/audit/emr')
-      .set('Authorization', `Bearer ${userToken()}`)
-      .set('x-wr-source', 'electron-main').set('x-wr-device-id', 'dev-1')
-      .set('x-wr-device-sig', signPayload(privateKey, 'dev-1', ts, devNonce, spoofed)).set('x-wr-device-ts', ts).set('x-wr-device-nonce', devNonce)
-      .send(spoofed);
-    expect(res.status).toBe(200);
-    const entry = vi.mocked(writeAuditLogStrict).mock.calls.at(-1)![1] as { extra: Record<string, unknown> };
-    expect(entry.extra).toMatchObject({ kept: 'yes', deviceId: 'dev-1', source: 'electron-main' });
-    expect(entry.extra).not.toHaveProperty('session_missing');
-    expect(entry.extra).not.toHaveProperty('actor_from_queue');
-  });
-
-  it('an unverified (bad signature) request does not use up the device bucket', async () => {
-    const { privateKey, publicKey } = makeKeyPair();
-    const fake = makeDeviceFake({ user_id: 'user-1', organization_id: 'org-1', public_key: exportPublicKey(publicKey), status: 'active' });
-    const app = auditApp(fake, { emrEventsPerDevicePerMinute: 1 });
-    const ts = new Date().toISOString();
-    const bad = await request(app)
-      .post('/api/audit/emr')
-      .set('Authorization', `Bearer ${userToken()}`)
-      .set('x-wr-source', 'electron-main').set('x-wr-device-id', 'dev-1')
-      .set('x-wr-device-sig', Buffer.alloc(64).toString('base64')).set('x-wr-device-ts', ts).set('x-wr-device-nonce', nonce())
-      .send(VALID_BODY);
-    expect(bad.status).toBe(401);
-    const devNonce = nonce();
-    const ok = await request(app)
-      .post('/api/audit/emr')
-      .set('Authorization', `Bearer ${userToken()}`)
-      .set('x-wr-source', 'electron-main').set('x-wr-device-id', 'dev-1')
-      .set('x-wr-device-sig', signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY)).set('x-wr-device-ts', ts).set('x-wr-device-nonce', devNonce)
-      .send(VALID_BODY);
-    expect(ok.status).toBe(200);
-  });
-
-  it('writes audit log on successful request', async () => {
-    const { writeAuditLogStrict } = await import('../../middleware/audit.js');
-    const { privateKey, publicKey } = makeKeyPair();
-    const fake     = makeDeviceFake({
-      user_id:         'user-1',
-      organization_id: 'org-1',
-      public_key:      exportPublicKey(publicKey),
-      status:          'active',
-    });
-    const ts       = new Date().toISOString();
-    const devNonce = nonce();
-    const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
-
-    await request(auditApp(fake))
-      .post('/api/audit/emr')
-      .set('Authorization', `Bearer ${userToken()}`)
-      .set('x-wr-source',     'electron-main')
-      .set('x-wr-device-id',  'dev-1')
-      .set('x-wr-device-sig', sig)
-      .set('x-wr-device-ts',    ts)
-      .set('x-wr-device-nonce', devNonce)
-      .send(VALID_BODY);
-
-    // Written with the transaction's client, inside the same transaction that claimed the nonce (SEC-A L11).
+    expect(res.body).toEqual({ ok: true });
     expect(writeAuditLogStrict).toHaveBeenCalledWith(
       expect.objectContaining({ query: expect.any(Function), release: expect.any(Function) }),
-      expect.objectContaining({
-        actorUserId: 'user-1',
-        action:      'emr_inject',
-        outcome:     'success',
-      })
+      expect.objectContaining({ actorUserId: 'user-1', actorOrgId: 'org-1', action: 'emr_inject', outcome: 'success', targetType: 'emr' }),
     );
+    expect(lastAuditEntry().extra).toMatchObject({ deviceId: first.id, header_device_id: SHELL_ID, source: 'electron-main' });
+    expect(fake.callsTo('nonce.claim')[0].params).toEqual([first.id, expect.any(String)]);
+    expect(fake.callsTo('devices.touch')[0].params).toEqual([pc.fingerprint]);
     expect(fake.transactions).toEqual([{ clientId: 1, statements: ['BEGIN', 'COMMIT'], outcome: 'commit' }]);
-    expect(fake.callsTo('nonce.claim')).toHaveLength(1);
     fake.assertAllReleased();
   });
 
-  it('returns 401 when device.organization_id !== session.organizationId', async () => {
-    const { privateKey, publicKey } = makeKeyPair();
-    const fake     = makeDeviceFake({
-      user_id:         'user-1',
-      organization_id: 'different-org-99',
-      public_key:      exportPublicKey(publicKey),
-      status:          'active',
+  it('an unregistered key → 401 "Device not recognized"', async () => {
+    const registered = makePc();
+    const stranger = makePc();
+    const fake = makeFake([row(registered)]);
+    const res = await send(auditApp(fake), stranger);
+    expect(res.status).toBe(401);
+    expect(res.body).toEqual({ code: 'UNAUTHORIZED', error: 'Device not recognized' });
+    expect(writeAuditLogStrict).not.toHaveBeenCalled();
+  });
+
+  it('a wrong signature → 401 with the same answer, with or without a session', async () => {
+    const pc = makePc();
+    const fake = makeFake([row(pc)]);
+    const app = auditApp(fake);
+    const wrong = makePc().privateKey;
+    for (const token of [userToken(), null]) {
+      const res = await send(app, pc, { signWith: wrong, token });
+      expect(res.status).toBe(401);
+      expect(res.body).toEqual({ code: 'UNAUTHORIZED', error: 'Device not recognized' });
+    }
+    expect(writeAuditLogStrict).not.toHaveBeenCalled();
+  });
+
+  it('a known header id is checked against its key only; a wrong signature with it is refused without a full scan', async () => {
+    const pc = makePc();
+    const fake = makeFake([row(pc)]);
+    const app = auditApp(fake);
+    expect((await send(app, pc)).status).toBe(200);
+    expect(fake.callsTo('devices.scan')).toHaveLength(1);
+    expect((await send(app, pc)).status).toBe(200);
+    const forged = await send(app, pc, { signWith: makePc().privateKey });
+    expect(forged.status).toBe(401);
+    expect(fake.callsTo('devices.scan')).toHaveLength(1); // still the first scan only
+  });
+
+  it('a pending PC → 401; a PC with any revoked row → 401 even when another row is active', async () => {
+    const pending = makePc();
+    const revoked = makePc();
+    const fake = makeFake([
+      row(pending, { status: 'pending' }),
+      row(revoked, { status: 'active', user_id: 'user-1' }),
+      row(revoked, { status: 'revoked', user_id: 'user-2' }),
+    ]);
+    const app = auditApp(fake);
+    for (const pc of [pending, revoked]) {
+      const res = await send(app, pc, { headerId: crypto.randomUUID() });
+      expect(res.status).toBe(401);
+      expect(res.body).toEqual({ code: 'UNAUTHORIZED', error: 'Device not recognized' });
+    }
+    expect(writeAuditLogStrict).not.toHaveBeenCalled();
+  });
+
+  it('an approved PC is found even when more unapproved keys exist than the scan tries', async () => {
+    const approved = makePc();
+    const rows = [row(approved, { registered_at: '2020-01-01T00:00:00.000Z' })];
+    for (let i = 0; i < 6; i += 1) {
+      const other = makePc();
+      rows.push(row(other, { status: i % 2 ? 'pending' : 'revoked', registered_at: `2026-02-0${i + 1}T00:00:00.000Z` }));
+    }
+    const fake = makeFake(rows);
+    const res = await send(auditApp(fake, { resolver: { inactiveKeyCap: 2 } }), approved);
+    expect(res.status).toBe(200);
+  });
+
+  it('forged requests with unknown header ids cannot exceed the full-scan limit; a known PC still gets through', async () => {
+    const pc = makePc();
+    const fake = makeFake([row(pc)]);
+    const app = auditApp(fake, { resolver: { scansPerMinute: 3 } });
+    expect((await send(app, pc)).status).toBe(200); // scan 1 — the PC's header id is now known
+    const results: number[] = [];
+    for (let i = 0; i < 6; i += 1) {
+      const forgedPc = makePc();
+      results.push((await send(app, forgedPc, { headerId: crypto.randomUUID(), token: null })).status);
+    }
+    expect(results.filter((s) => s === 401)).toHaveLength(2); // scans 2 and 3
+    expect(results.filter((s) => s === 429)).toHaveLength(4); // nothing scanned
+    expect(fake.callsTo('devices.scan')).toHaveLength(3);
+    expect((await send(app, pc)).status).toBe(200); // known PC: no scan needed
+    expect(fake.callsTo('devices.scan')).toHaveLength(3);
+  });
+
+  // ── One PC, several users, organisations ──────────────────────────────────
+
+  it('one PC registered by two users: either user of the organisation is recorded as the actor (no user match required)', async () => {
+    const pc = makePc();
+    const first = row(pc, { user_id: 'user-1' });
+    const fake = makeFake([first, row(pc, { user_id: 'user-2' })]);
+    const app = auditApp(fake);
+    expect((await send(app, pc, { token: userToken('user-2') })).status).toBe(200);
+    expect(lastAuditEntry()).toMatchObject({ actorUserId: 'user-2', actorOrgId: 'org-1' });
+    expect(lastAuditEntry().extra).toMatchObject({ deviceId: first.id });
+    // A user of the same organisation who never registered this PC.
+    expect((await send(app, pc, { token: userToken('user-3') })).status).toBe(200);
+    expect(lastAuditEntry()).toMatchObject({ actorUserId: 'user-3', actorOrgId: 'org-1' });
+  });
+
+  it('a session of another organisation → 401 mismatch and one denial row per PC per window', async () => {
+    const pc = makePc();
+    const first = row(pc, { organization_id: 'org-1' });
+    const fake = makeFake([first]);
+    const app = auditApp(fake);
+    for (let i = 0; i < 3; i += 1) {
+      const res = await send(app, pc, { token: userToken('user-9', 'org-9') });
+      expect(res.status).toBe(401);
+      expect(res.body).toEqual({ code: 'UNAUTHORIZED', error: 'Device / session identity mismatch' });
+    }
+    expect(writeAuditLogStrict).not.toHaveBeenCalled();
+    expect(writeAuditLog).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(writeAuditLog).mock.calls[0][1]).toMatchObject({
+      actorUserId: 'user-9', actorOrgId: 'org-9', action: 'device_org_mismatch', targetType: 'device', targetId: first.id, outcome: 'denied',
+      extra: { deviceOrgId: 'org-1', header_device_id: SHELL_ID },
     });
-    const ts       = new Date().toISOString();
-    const devNonce = nonce();
-    const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
+  });
 
-    const res = await request(auditApp(fake))
-      .post('/api/audit/emr')
-      .set('Authorization', `Bearer ${userToken()}`)
-      .set('x-wr-source',     'electron-main')
-      .set('x-wr-device-id',  'dev-1')
-      .set('x-wr-device-sig', sig)
-      .set('x-wr-device-ts',    ts)
-      .set('x-wr-device-nonce', devNonce)
-      .send(VALID_BODY);
-
+  it('a PC without an organisation and a session with one → 401 mismatch', async () => {
+    const pc = makePc();
+    const fake = makeFake([row(pc, { organization_id: null })]);
+    const res = await send(auditApp(fake), pc);
     expect(res.status).toBe(401);
     expect(res.body.error).toMatch(/mismatch/i);
   });
 
-  it('returns 401 when device.organization_id is null but session has an org', async () => {
-    const { privateKey, publicKey } = makeKeyPair();
-    const fake     = makeDeviceFake({
-      user_id:         'user-1',
-      organization_id: null,   // null org — rejected when session has org-1
-      public_key:      exportPublicKey(publicKey),
-      status:          'active',
-    });
-    const ts       = new Date().toISOString();
-    const devNonce = nonce();
-    const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
-
-    const res = await request(auditApp(fake))
-      .post('/api/audit/emr')
-      .set('Authorization', `Bearer ${userToken()}`)
-      .set('x-wr-source',     'electron-main')
-      .set('x-wr-device-id',  'dev-1')
-      .set('x-wr-device-sig', sig)
-      .set('x-wr-device-ts',    ts)
-      .set('x-wr-device-nonce', devNonce)
-      .send(VALID_BODY);
-
-    expect(res.status).toBe(401);
-    expect(res.body.error).toMatch(/mismatch/i);
-  });
-
-  it('returns 401 when same nonce is reused (replay attack)', async () => {
-    const { privateKey, publicKey } = makeKeyPair();
-    const fake1      = makeDeviceFake({
-      user_id:         'user-1',
-      organization_id: 'org-1',
-      public_key:      exportPublicKey(publicKey),
-      status:          'active',
-    });
-    const app        = auditApp(fake1);
-    const ts         = new Date().toISOString();
-    const replayNonce = nonce();
-    const sig         = signPayload(privateKey, 'dev-1', ts, replayNonce, VALID_BODY);
-
-    const res1 = await request(app)
-      .post('/api/audit/emr')
-      .set('Authorization', `Bearer ${userToken()}`)
-      .set('x-wr-source',     'electron-main')
-      .set('x-wr-device-id',  'dev-1')
-      .set('x-wr-device-sig', sig)
-      .set('x-wr-device-ts',    ts)
-      .set('x-wr-device-nonce', replayNonce)
-      .send(VALID_BODY);
-    expect(res1.status).toBe(200);
-
-    // Replay with same nonce — must be rejected even though signature is valid. A second app instance on
-    // the same database (as after a server restart): the nonce is in the database now, not in memory.
-    const res2 = await request(auditApp(fake1))
-      .post('/api/audit/emr')
-      .set('Authorization', `Bearer ${userToken()}`)
-      .set('x-wr-source',     'electron-main')
-      .set('x-wr-device-id',  'dev-1')
-      .set('x-wr-device-sig', sig)
-      .set('x-wr-device-ts',    ts)
-      .set('x-wr-device-nonce', replayNonce)
-      .send(VALID_BODY);
-
-    expect(res2.status).toBe(401);
-    expect(res2.body.error).toMatch(/nonce/i);
-  });
-
-  // ── Queue-replay paths (no Authorization header) ─────────────────────────
-
-  it('accepts queue replay without Authorization and records session_missing flag', async () => {
-    const { writeAuditLogStrict } = await import('../../middleware/audit.js');
-    const { privateKey, publicKey } = makeKeyPair();
-    const fake     = makeDeviceNoSessionFake({
-      user_id:         'user-1',
-      organization_id: 'org-1',
-      public_key:      exportPublicKey(publicKey),
-      status:          'active',
-    });
-    const ts       = new Date().toISOString();
-    const devNonce = nonce();
-    const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
-
-    const res = await request(auditApp(fake))
-      .post('/api/audit/emr')
-      // No Authorization header — simulates queue replay after session expiry
-      .set('x-wr-source',       'electron-main')
-      .set('x-wr-device-id',    'dev-1')
-      .set('x-wr-device-sig',   sig)
-      .set('x-wr-device-ts',    ts)
-      .set('x-wr-device-nonce', devNonce)
-      .send(VALID_BODY);
-
+  it('an account without an organisation is not checked; the row belongs to the PC\'s organisation', async () => {
+    const pc = makePc();
+    const fake = makeFake([row(pc, { organization_id: 'org-1' })]);
+    const res = await send(auditApp(fake), pc, { token: userToken('admin-1', null) });
     expect(res.status).toBe(200);
-    // Actor falls back to device.user_id / device.organization_id
-    expect(writeAuditLogStrict).toHaveBeenCalledWith(
-      expect.objectContaining({ query: expect.any(Function) }), // the nonce transaction's client
-      expect.objectContaining({
-        actorUserId: 'user-1',
-        actorOrgId:  'org-1',
-        extra:       expect.objectContaining({ session_missing: true, actor_from_queue: true }),
-      })
-    );
+    expect(lastAuditEntry()).toMatchObject({ actorUserId: 'admin-1', actorOrgId: 'org-1' });
   });
 
-  it('accepts audit_queue_corrupt action without Authorization', async () => {
-    const { privateKey, publicKey } = makeKeyPair();
-    const fake      = makeDeviceNoSessionFake({
-      user_id:         'user-1',
-      organization_id: 'org-1',
-      public_key:      exportPublicKey(publicKey),
-      status:          'active',
+  it('a key registered in several organisations: recorded without actor or organisation, flagged org_unresolved', async () => {
+    const pc = makePc();
+    const fake = makeFake([row(pc, { organization_id: 'org-1', user_id: 'user-1' }), row(pc, { organization_id: 'org-2', user_id: 'user-2' })]);
+    const app = auditApp(fake);
+    expect((await send(app, pc, { token: null })).status).toBe(200);
+    expect(lastAuditEntry()).toMatchObject({ actorUserId: null, actorOrgId: null });
+    expect(lastAuditEntry().extra).toMatchObject({ org_unresolved: true, actor_uncertain: true, session_missing: true });
+    expect((await send(app, pc, { token: userToken('user-2', 'org-2') })).status).toBe(200);
+    expect(lastAuditEntry()).toMatchObject({ actorUserId: null, actorOrgId: null });
+    expect(lastAuditEntry().extra).toMatchObject({ org_unresolved: true, sent_by_user_id: 'user-2' });
+    // An organisation that has no row of this key is still refused.
+    expect((await send(app, pc, { token: userToken('user-9', 'org-9') })).status).toBe(401);
+  });
+
+  // ── Actor and flags (older shells) ────────────────────────────────────────
+
+  it('an older shell\'s event with a session: session user, flagged uncertain / older shell / time unknown', async () => {
+    const pc = makePc();
+    const fake = makeFake([row(pc)]);
+    expect((await send(auditApp(fake), pc)).status).toBe(200);
+    expect(lastAuditEntry()).toMatchObject({ actorUserId: 'user-1', actorOrgId: 'org-1' });
+    expect(lastAuditEntry().extra).toMatchObject({
+      actor_uncertain: true, actor_source: 'session_fallback', legacy_shell: true, occurred_at_unknown: true,
     });
-    const ts        = new Date().toISOString();
-    const devNonce  = nonce();
-    const corruptBody = { action: 'audit_queue_corrupt', outcome: 'failure' as const };
-    const sig = signPayload(privateKey, 'dev-1', ts, devNonce, corruptBody);
+    expect(lastAuditEntry().extra).not.toHaveProperty('session_missing');
+  });
 
-    const res = await request(auditApp(fake))
-      .post('/api/audit/emr')
-      .set('x-wr-source',       'electron-main')
-      .set('x-wr-device-id',    'dev-1')
-      .set('x-wr-device-sig',   sig)
-      .set('x-wr-device-ts',    ts)
-      .set('x-wr-device-nonce', devNonce)
-      .send(corruptBody);
+  it('a queue replay without a session: actor = registrant of the PC\'s first active row, flagged', async () => {
+    const pc = makePc();
+    const fake = makeFake([
+      row(pc, { user_id: 'user-0', status: 'pending' }),
+      row(pc, { user_id: 'user-1', status: 'active' }),
+      row(pc, { user_id: 'user-2', status: 'active' }),
+    ], { session: false });
+    const res = await send(auditApp(fake), pc, { token: null });
+    expect(res.status).toBe(200);
+    expect(lastAuditEntry()).toMatchObject({ actorUserId: 'user-1', actorOrgId: 'org-1' });
+    expect(lastAuditEntry().extra).toMatchObject({
+      session_missing: true, actor_from_queue: true, actor_uncertain: true, actor_source: 'device_registrant',
+    });
+  });
 
+  it('accepts audit_queue_corrupt without Authorization', async () => {
+    const pc = makePc();
+    const fake = makeFake([row(pc)], { session: false });
+    const res = await send(auditApp(fake), pc, { token: null, body: { action: 'audit_queue_corrupt', outcome: 'failure' } });
     expect(res.status).toBe(200);
   });
 
-  it('rejects invalid signature even without Authorization header', async () => {
-    const { publicKey }             = makeKeyPair();
-    const { privateKey: wrongPriv } = makeKeyPair();
-    const fake     = makeDeviceNoSessionFake({
-      user_id:         'user-1',
-      organization_id: 'org-1',
-      public_key:      exportPublicKey(publicKey),
-      status:          'active',
-    });
-    const ts       = new Date().toISOString();
-    const devNonce = nonce();
-    const sig      = signPayload(wrongPriv, 'dev-1', ts, devNonce, VALID_BODY);
-
-    const res = await request(auditApp(fake))
-      .post('/api/audit/emr')
-      .set('x-wr-source',       'electron-main')
-      .set('x-wr-device-id',    'dev-1')
-      .set('x-wr-device-sig',   sig)
-      .set('x-wr-device-ts',    ts)
-      .set('x-wr-device-nonce', devNonce)
-      .send(VALID_BODY);
-
-    expect(res.status).toBe(401);
-    expect(res.body.error).toMatch(/signature/i);
+  it('the current shell\'s marker turns off the older-shell flags', async () => {
+    const pc = makePc();
+    const fake = makeFake([row(pc)]);
+    const body = { ...VALID_BODY, extra: { shellAudit: 2 } };
+    expect((await send(auditApp(fake), pc, { body })).status).toBe(200);
+    expect(lastAuditEntry().extra).not.toHaveProperty('legacy_shell');
+    expect(lastAuditEntry().extra).not.toHaveProperty('occurred_at_unknown');
   });
 
-  it('allows nonce reuse after a failed request (pendingNonces released)', async () => {
-    // A request that fails verification (invalid sig) should release the nonce
-    // from pendingNonces so the device can retry with the same nonce.
-    const { privateKey, publicKey }    = makeKeyPair();
-    const { privateKey: wrongPriv }    = makeKeyPair();
-    const fake     = makeDeviceFake({
-      user_id: 'user-1', organization_id: 'org-1',
-      public_key: exportPublicKey(publicKey), status: 'active',
-    });
-    const app      = auditApp(fake);
-    const ts       = new Date().toISOString();
-    const devNonce = nonce();
-
-    // First attempt: wrong key → signature invalid → nonce released
-    const badSig = signPayload(wrongPriv, 'dev-1', ts, devNonce, VALID_BODY);
-    const res1 = await request(app)
-      .post('/api/audit/emr')
-      .set('Authorization', `Bearer ${userToken()}`)
-      .set('x-wr-source', 'electron-main')
-      .set('x-wr-device-id', 'dev-1')
-      .set('x-wr-device-sig', badSig)
-      .set('x-wr-device-ts',    ts)
-      .set('x-wr-device-nonce', devNonce)
-      .send(VALID_BODY);
-    expect(res1.status).toBe(401);
-
-    // Second attempt: correct key, same nonce → must succeed
-    const goodSig = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
-    const res2 = await request(app)
-      .post('/api/audit/emr')
-      .set('Authorization', `Bearer ${userToken()}`)
-      .set('x-wr-source', 'electron-main')
-      .set('x-wr-device-id', 'dev-1')
-      .set('x-wr-device-sig', goodSig)
-      .set('x-wr-device-ts',    ts)
-      .set('x-wr-device-nonce', devNonce)
-      .send(VALID_BODY);
-    expect(res2.status).toBe(200);
+  it('an older shell\'s events sent back to back are flagged as a burst (the first one is not)', async () => {
+    const pc = makePc();
+    const fake = makeFake([row(pc)]);
+    const app = auditApp(fake);
+    expect((await send(app, pc)).status).toBe(200);
+    expect(lastAuditEntry().extra).not.toHaveProperty('burst');
+    expect((await send(app, pc)).status).toBe(200);
+    expect(lastAuditEntry().extra).toMatchObject({ burst: true });
   });
 
-  it('releases nonce when writeAuditLogStrict fails, allowing retry with same nonce', async () => {
-    // If the DB INSERT throws after signature verification, the nonce must NOT be
-    // committed to seenNonces. The device must be able to retry with the same
-    // nonce+signature and succeed on the next attempt.
-    const { writeAuditLogStrict } = await import('../../middleware/audit.js');
-    const { privateKey, publicKey } = makeKeyPair();
-    const fake     = makeDeviceFake({
-      user_id: 'user-1', organization_id: 'org-1',
-      public_key: exportPublicKey(publicKey), status: 'active',
-    });
-    const app      = auditApp(fake);
-    const ts       = new Date().toISOString();
-    const devNonce = nonce();
-    const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
-
-    // First attempt: DB fails after signature verification
-    (writeAuditLogStrict as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
-      new Error('DB connection lost')
-    );
-    const res1 = await request(app)
-      .post('/api/audit/emr')
-      .set('Authorization', `Bearer ${userToken()}`)
-      .set('x-wr-source',     'electron-main')
-      .set('x-wr-device-id',  'dev-1')
-      .set('x-wr-device-sig', sig)
-      .set('x-wr-device-ts',    ts)
-      .set('x-wr-device-nonce', devNonce)
-      .send(VALID_BODY);
-    expect(res1.status).toBe(500);
-    expect(res1.body).toEqual({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
-
-    // Second attempt: same nonce+sig, DB now succeeds → must not get 401
-    const res2 = await request(app)
-      .post('/api/audit/emr')
-      .set('Authorization', `Bearer ${userToken()}`)
-      .set('x-wr-source',     'electron-main')
-      .set('x-wr-device-id',  'dev-1')
-      .set('x-wr-device-sig', sig)
-      .set('x-wr-device-ts',    ts)
-      .set('x-wr-device-nonce', devNonce)
-      .send(VALID_BODY);
-    expect(res2.status).toBe(200);
+  it('events further apart than the burst gap are not flagged', async () => {
+    const pc = makePc();
+    const fake = makeFake([row(pc)]);
+    const app = auditApp(fake, { burstGapMs: 20 });
+    expect((await send(app, pc)).status).toBe(200);
+    await new Promise((r) => setTimeout(r, 40));
+    expect((await send(app, pc)).status).toBe(200);
+    expect(lastAuditEntry().extra).not.toHaveProperty('burst');
   });
 
-  it('returns code UNAUTHORIZED (not TOKEN_INVALID/SESSION_REVOKED) on device/session mismatch', async () => {
-    // The Electron client retries without auth ONLY for TOKEN_INVALID / SESSION_REVOKED.
-    // Mismatch must return UNAUTHORIZED so doSendWithSessionFallback() does NOT retry,
-    // preserving the device.user_id ≡ session.user_id identity enforcement.
-    const { privateKey, publicKey } = makeKeyPair();
-    const fake     = makeDeviceFake({
-      user_id:         'other-user-99', // device owned by a different user
-      organization_id: 'org-1',
-      public_key:      exportPublicKey(publicKey),
-      status:          'active',
+  it('server-reserved keys sent by the client are removed; the client\'s source is kept as client_source', async () => {
+    const pc = makePc();
+    const first = row(pc);
+    const fake = makeFake([first]);
+    const forged: Record<string, unknown> = Object.fromEntries(SERVER_RESERVED_EXTRA_KEYS.map((k) => [k, 'forged']));
+    forged.source = 'edited';
+    forged.kept = 'yes';
+    const body = { ...VALID_BODY, extra: forged };
+    expect((await send(auditApp(fake), pc, { body })).status).toBe(200);
+    const extra = lastAuditEntry().extra;
+    expect(extra).toMatchObject({
+      kept: 'yes', client_source: 'edited', deviceId: first.id, header_device_id: SHELL_ID, source: 'electron-main',
+      actor_source: 'session_fallback', actor_uncertain: true, legacy_shell: true,
     });
-    const ts       = new Date().toISOString();
+    for (const key of SERVER_RESERVED_EXTRA_KEYS) expect(extra[key]).not.toBe('forged');
+    // A session-authenticated request cannot record itself as a queue replay.
+    expect(extra).not.toHaveProperty('session_missing');
+    expect(extra).not.toHaveProperty('actor_from_queue');
+  });
+
+  // ── Nonces ────────────────────────────────────────────────────────────────
+
+  it('a reused nonce → 401, also on another app instance and when resent without the token', async () => {
+    const pc = makePc();
+    const fake = makeFake([row(pc)]);
+    const ts = new Date().toISOString();
     const devNonce = nonce();
-    const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
+    expect((await send(auditApp(fake), pc, { ts, devNonce })).status).toBe(200);
+    // Same database, new process: the nonce is in the database, not in memory.
+    const again = await send(auditApp(fake), pc, { ts, devNonce });
+    expect(again.status).toBe(401);
+    expect(again.body.error).toMatch(/nonce/i);
+    // The same signed request without the Authorization header (a shell's fallback after a token error).
+    const tokenless = await send(auditApp(fake), pc, { ts, devNonce, token: null });
+    expect(tokenless.status).toBe(401);
+    expect(tokenless.body.error).toMatch(/nonce/i);
+    expect(writeAuditLogStrict).toHaveBeenCalledTimes(1);
+  });
 
-    const res = await request(auditApp(fake))
-      .post('/api/audit/emr')
-      .set('Authorization', `Bearer ${userToken('user-1')}`)
-      .set('x-wr-source',     'electron-main')
-      .set('x-wr-device-id',  'dev-1')
-      .set('x-wr-device-sig', sig)
-      .set('x-wr-device-ts',    ts)
-      .set('x-wr-device-nonce', devNonce)
-      .send(VALID_BODY);
+  it('allows the nonce after a failed request (bad signature first)', async () => {
+    const pc = makePc();
+    const fake = makeFake([row(pc)]);
+    const app = auditApp(fake);
+    const ts = new Date().toISOString();
+    const devNonce = nonce();
+    expect((await send(app, pc, { ts, devNonce, signWith: makePc().privateKey })).status).toBe(401);
+    expect((await send(app, pc, { ts, devNonce })).status).toBe(200);
+  });
 
+  it('releases the nonce when writing the audit row fails, so the same signed request can be resent', async () => {
+    const pc = makePc();
+    const fake = makeFake([row(pc)]);
+    const app = auditApp(fake);
+    const ts = new Date().toISOString();
+    const devNonce = nonce();
+    vi.mocked(writeAuditLogStrict).mockRejectedValueOnce(new Error('DB connection lost'));
+    const first = await send(app, pc, { ts, devNonce });
+    expect(first.status).toBe(500);
+    expect(first.body).toEqual({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
+    expect((await send(app, pc, { ts, devNonce })).status).toBe(200);
+    fake.assertAllReleased();
+  });
+
+  it('device problems answer UNAUTHORIZED (not a token code), so a shell does not retry them without its token', async () => {
+    const pc = makePc();
+    const fake = makeFake([row(pc, { organization_id: 'org-1' })]);
+    const res = await send(auditApp(fake), pc, { token: userToken('user-9', 'org-9') });
     expect(res.status).toBe(401);
     expect(res.body.code).toBe('UNAUTHORIZED');
-    expect(res.body.code).not.toBe('TOKEN_INVALID');
-    expect(res.body.code).not.toBe('SESSION_REVOKED');
   });
+
+  // ── Limits ────────────────────────────────────────────────────────────────
+
+  it('requests sent one by one are never refused by the PC limit, only slowed down', async () => {
+    const pc = makePc();
+    const fake = makeFake([row(pc)]);
+    const app = auditApp(fake, { pcBurst: 2, pcRatePerSec: 50, pcMaxWaiting: 1 });
+    const started = Date.now();
+    for (let i = 0; i < 8; i += 1) expect((await send(app, pc)).status).toBe(200);
+    // 2 at once, then 6 at 50/s ≈ 120 ms of waiting.
+    expect(Date.now() - started).toBeGreaterThanOrEqual(100);
+    expect(writeAuditLogStrict).toHaveBeenCalledTimes(8);
+  });
+
+  it('requests sent all at once (with or without the shell marker) cannot exceed the PC\'s allowance', async () => {
+    const pc = makePc();
+    const fake = makeFake([row(pc)]);
+    const app = auditApp(fake, { pcBurst: 3, pcRatePerSec: 20, pcMaxWaiting: 1 });
+    expect((await send(app, pc)).status).toBe(200); // the PC is known now (no key scan per request below)
+    const bodies = Array.from({ length: 6 }, (_, i) => (i % 2 ? { ...VALID_BODY, extra: { shellAudit: 2 } } : VALID_BODY));
+    const results = await Promise.all(bodies.map((body) => send(app, pc, { body })));
+    const statuses = results.map((r) => r.status).sort();
+    expect(statuses).toEqual([200, 200, 200, 429, 429, 429]); // the 2 left of the burst + 1 waiting
+    const limited = results.find((r) => r.status === 429)!;
+    expect(limited.body).toEqual({ code: 'RATE_LIMITED', error: 'Too many audit events from this device, please retry later' });
+    expect(Number(limited.headers['retry-after'])).toBeGreaterThanOrEqual(1);
+    expect(writeAuditLogStrict).toHaveBeenCalledTimes(4);
+  });
+
+  it('a replayed (already recorded) nonce or a bad signature does not use up the PC\'s allowance', async () => {
+    const pc = makePc();
+    const fake = makeFake([row(pc)]);
+    const app = auditApp(fake, { pcBurst: 2, pcRatePerSec: 0.001, pcMaxWaiting: 0 });
+    const ts = new Date().toISOString();
+    const devNonce = nonce();
+    expect((await send(app, pc, { ts, devNonce })).status).toBe(200);
+    for (let i = 0; i < 3; i += 1) expect((await send(app, pc, { ts, devNonce })).status).toBe(401);
+    expect((await send(app, pc, { signWith: makePc().privateKey })).status).toBe(401);
+    expect((await send(app, pc)).status).toBe(200); // the second real event still fits the burst of 2
+    expect((await send(app, pc)).status).toBe(429);
+  });
+
+  it('accepted requests do not use up the address limit (120 failed requests per minute)', async () => {
+    const pc = makePc();
+    const fake = makeFake([row(pc)]);
+    const app = auditApp(fake);
+    for (let i = 0; i < 125; i += 1) {
+      const res = await send(app, pc);
+      expect(res.status).toBe(200);
+    }
+  }, 30_000);
 });

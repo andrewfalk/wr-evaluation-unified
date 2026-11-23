@@ -1,15 +1,26 @@
-import crypto from 'crypto';
 import { Router, type Request, type Response, type NextFunction, type RequestHandler } from 'express';
 import type { Pool } from 'pg';
 import { z } from 'zod';
 import { createAuthMiddleware } from '../middleware/auth';
 import { writeAuditLog, writeAuditLogStrict } from '../middleware/audit';
 import { asyncHandler } from '../http/asyncHandler';
-import { createKeyedLimiter, emrAuditIpRateLimit, type KeyedLimiter } from '../middleware/rateLimit';
+import { createPacedLimiter, emrAuditIpRateLimit, type PacedLimiter } from '../middleware/rateLimit';
+import { createPcResolver, type PcResolver, type PcResolverOptions } from '../devices/pcIdentity';
+import {
+  clientExtraWithoutReserved, createBurstTracker, createEventThrottle, fallbackActor, isCurrentShellEvent,
+  legacyShellFlags, sessionMatchesPc,
+} from '../devices/emrAuditRecord';
 
-// SEC-A L3 — signed EMR audit events accepted per device per minute (a normal device sends a few per
-// EMR action; a queue flush after a long offline period is spread over several minutes).
-export const EMR_AUDIT_EVENTS_PER_DEVICE_PER_MINUTE = 120;
+// Per-PC pacing of signed EMR audit events (after signature verification). A PC may send EMR_AUDIT_PC_BURST
+// events at once, then EMR_AUDIT_PC_RATE_PER_SEC per second; a request over the rate waits for its slot
+// instead of being refused (a shell sending its stored events one by one slows down but does not fail), and
+// at most EMR_AUDIT_PC_MAX_WAITING requests of one PC wait at a time (beyond that: 429).
+export const EMR_AUDIT_PC_BURST = 300;
+export const EMR_AUDIT_PC_RATE_PER_SEC = 5;
+export const EMR_AUDIT_PC_MAX_WAITING = 8;
+
+// One device/session organisation mismatch row per PC per window (the rest are counted in the next row).
+const ORG_MISMATCH_RECORD_WINDOW_MS = 10 * 60 * 1000;
 
 // ---------------------------------------------------------------------------
 // POST /api/audit/emr
@@ -20,10 +31,11 @@ export const EMR_AUDIT_EVENTS_PER_DEVICE_PER_MINUTE = 120;
 // session (a compromised renderer cannot fabricate EMR audit entries).
 //
 // Required headers:
-//   X-WR-Device-Id:  UUID of the registered device
-//   X-WR-Device-Sig: base64-encoded Ed25519 signature over the canonical body
-//   X-WR-Device-Ts:  ISO-8601 timestamp — must be within ±5 minutes
-//   X-WR-Source:     must equal 'electron-main'
+//   X-WR-Device-Id:    UUID chosen by the shell — part of the signed message; the PC is found by the signature
+//   X-WR-Device-Sig:   base64-encoded Ed25519 signature over the canonical body
+//   X-WR-Device-Ts:    ISO-8601 timestamp — must be within ±5 minutes
+//   X-WR-Device-Nonce: unique per request
+//   X-WR-Source:       must equal 'electron-main'
 // ---------------------------------------------------------------------------
 
 const DEVICE_HEADER_ID    = 'x-wr-device-id';
@@ -36,7 +48,7 @@ const SOURCE_HEADER       = 'x-wr-source';
 const TIMESTAMP_TOLERANCE_MS = 5 * 60 * 1000;
 
 // Nonces are recorded in emr_audit_nonces (migration 0038) in the same transaction as the audit row
-// — see step 8 (SEC-A L11). jobs/emrAuditNonces.ts removes old rows.
+// — see step 11 (SEC-A L11). jobs/emrAuditNonces.ts removes old rows.
 
 const EMR_AUDIT_ACTIONS = new Set([
   'emr_inject',
@@ -54,14 +66,21 @@ const EmrAuditBody = z.object({
   extra:       z.record(z.unknown()).optional().nullable(),
 });
 
-interface DeviceRow {
-  user_id:         string;
-  organization_id: string | null;
-  public_key:      string;
-  status:          string;
+// One answer for every "this device cannot send" reason (unknown key, bad signature, not approved, malformed id).
+const DEVICE_NOT_RECOGNIZED = { code: 'UNAUTHORIZED', error: 'Device not recognized' } as const;
+
+interface AuditDeps {
+  resolver: PcResolver;
+  pcLimiter: PacedLimiter;
+  burst: ReturnType<typeof createBurstTracker>;
+  orgMismatch: ReturnType<typeof createEventThrottle>;
 }
 
-async function handleEmrAudit(pool: Pool, deviceLimiter: KeyedLimiter, req: Request, res: Response): Promise<void> {
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function handleEmrAudit(pool: Pool, deps: AuditDeps, req: Request, res: Response): Promise<void> {
   // --- 1. Source guard ---
   if (req.headers[SOURCE_HEADER] !== 'electron-main') {
     res.status(401).json({ code: 'UNAUTHORIZED', error: 'Invalid source' });
@@ -69,12 +88,12 @@ async function handleEmrAudit(pool: Pool, deviceLimiter: KeyedLimiter, req: Requ
   }
 
   // --- 2. Device headers ---
-  const deviceId    = req.headers[DEVICE_HEADER_ID]    as string | undefined;
+  const headerId    = req.headers[DEVICE_HEADER_ID]    as string | undefined;
   const deviceSig   = req.headers[DEVICE_HEADER_SIG]   as string | undefined;
   const deviceTs    = req.headers[DEVICE_HEADER_TS]    as string | undefined;
   const deviceNonce = req.headers[DEVICE_HEADER_NONCE] as string | undefined;
 
-  if (!deviceId || !deviceSig || !deviceTs || !deviceNonce) {
+  if (!headerId || !deviceSig || !deviceTs || !deviceNonce) {
     res.status(401).json({ code: 'UNAUTHORIZED', error: 'Missing device headers' });
     return;
   }
@@ -94,141 +113,114 @@ async function handleEmrAudit(pool: Pool, deviceLimiter: KeyedLimiter, req: Requ
   }
   const body = parse.data;
 
-  // --- 5. Load device + verify status ---
-  const deviceRes = await pool.query<DeviceRow>(
-    `SELECT user_id, organization_id, public_key, status
-     FROM devices WHERE id = $1`,
-    [deviceId]
-  );
-  if (deviceRes.rows.length === 0) {
-    res.status(401).json({ code: 'UNAUTHORIZED', error: 'Device not found' });
-    return;
-  }
-  const device = deviceRes.rows[0];
-
-  if (device.status !== 'active') {
-    res.status(401).json({ code: 'UNAUTHORIZED', error: 'Device not active' });
-    return;
-  }
-
-  // --- 6. Optional session check + actor resolution ---
-  // When replaying from the encrypted local queue (session expired), no Bearer
-  // token is sent. In that case we skip the user/org mismatch check and use
-  // the device's own user_id / organization_id as the audit actor, marked with
-  // session_missing=true in the extra field.
-  const session = req.sessionInfo ?? null;
-  const sessionMissing = session === null;
-
-  if (!sessionMissing) {
-    const userMismatch = session.userId !== device.user_id;
-    // If the session belongs to an org, the device must belong to the same org.
-    // A null device.organization_id is not tolerated for org-scoped sessions:
-    // legitimate devices are always registered with an org in production.
-    // Superadmin (session.organizationId === null) bypasses the org check.
-    const orgMismatch =
-      session.organizationId !== null &&
-      session.organizationId !== device.organization_id;
-
-    if (userMismatch || orgMismatch) {
-      const action = userMismatch ? 'device_user_mismatch' : 'device_org_mismatch';
-      writeAuditLog(pool, {
-        actorUserId: session.userId,
-        actorOrgId:  session.organizationId ?? null,
-        action,
-        targetType:  'device',
-        targetId:    deviceId,
-        outcome:     'denied',
-        ip:          req.ip ?? null,
-        userAgent:   req.headers['user-agent'] ?? null,
-        extra: userMismatch
-          ? { deviceUserId: device.user_id }
-          : { deviceOrgId: device.organization_id },
-      });
-      res.status(401).json({ code: 'UNAUTHORIZED', error: 'Device / session identity mismatch' });
-      return;
-    }
-  }
-
-  // Actor identity: from live session when present, from device registration otherwise.
-  const actorUserId = session?.userId ?? device.user_id;
-  const actorOrgId  = session?.organizationId ?? device.organization_id ?? null;
-
-  // --- 7. Ed25519 signature verification ---
-  // Canonical message = "<deviceId>.<deviceTs>.<deviceNonce>.<JSON-sorted-body>"
-  // Including deviceId and deviceNonce binds the signature to this specific
-  // device+request so an attacker cannot reuse a valid signature by substituting
-  // a fresh nonce (which would otherwise bypass the nonce replay guard).
+  // --- 5. Find the PC by signature ---
+  // Canonical message = "<header id>.<deviceTs>.<deviceNonce>.<JSON-sorted-body>". The header id is used as
+  // sent, only as part of the signed message; the PC is the registered key that verifies the signature.
+  // Including the id and nonce binds the signature to this request, so a captured signature cannot be
+  // reused with a fresh nonce.
   const canonicalBody = JSON.stringify(
     Object.fromEntries(
       Object.entries(body).sort(([a], [b]) => a.localeCompare(b))
     )
   );
-  const message = `${deviceId}.${deviceTs}.${deviceNonce}.${canonicalBody}`;
+  const message = `${headerId}.${deviceTs}.${deviceNonce}.${canonicalBody}`;
 
-  let sigValid = false;
-  try {
-    const rawKeyBytes = Buffer.from(device.public_key, 'base64');
-    // Ed25519 SPKI DER header (12 bytes): prepend to raw 32-byte key
-    const spkiHeader = Buffer.from('302a300506032b6570032100', 'hex');
-    const spkiDer    = Buffer.concat([spkiHeader, rawKeyBytes]);
-    const pubKey     = crypto.createPublicKey({ key: spkiDer, format: 'der', type: 'spki' });
-    sigValid = crypto.verify(
-      null,
-      Buffer.from(message),
-      pubKey,
-      Buffer.from(deviceSig, 'base64')
-    );
-  } catch {
-    sigValid = false;
+  const lookup = await deps.resolver.resolve(headerId, message, deviceSig);
+  if (lookup.kind === 'scan_limited') {
+    res.setHeader('Retry-After', String(lookup.retryAfterSec));
+    res.status(429).json({ code: 'RATE_LIMITED', error: 'Too many audit requests, please try again later' });
+    return;
   }
+  if (lookup.kind === 'not_found') {
+    res.status(401).json(DEVICE_NOT_RECOGNIZED);
+    return;
+  }
+  const pc = lookup.pc;
 
-  if (!sigValid) {
-    res.status(401).json({ code: 'UNAUTHORIZED', error: 'Invalid device signature' });
+  // --- 6. PC status: every row of the key counts (one revoked row revokes the PC) ---
+  if (pc.status !== 'active') {
+    res.status(401).json(DEVICE_NOT_RECOGNIZED);
     return;
   }
 
-  // --- 8. Nonce + audit row, in one transaction (SEC-A L11) ---
-  // The nonce is claimed only now — after the signature proved the request — and in the same
-  // transaction as the audit row:
-  //  - a nonce already recorded (replay, or a duplicate in flight that committed first) → 0 rows →
-  //    401 as before; concurrent duplicates are serialised by the primary-key row lock.
-  //  - if the audit INSERT fails, ROLLBACK removes the nonce row too, so the device's queue can resend
-  //    the same signed request (this endpoint exists to record the audit row; never 200 without it).
-  // Server-set fields come after the client's `extra`, so a client cannot overwrite them; the device
-  // rate limit is counted inside, after the claim.
-  // session_missing / actor_from_queue say how the server authenticated this request — only the
-  // server sets them (a session-authenticated request must not be recorded as a queue replay).
-  const { session_missing: _clientSessionMissing, actor_from_queue: _clientFromQueue, ...clientExtra } = body.extra ?? {};
+  // --- 7. Optional session: its organisation must be the PC's ---
+  // Queue replays may come without a token (expired session). Any user of the PC's organisation may send events
+  // from an approved PC; the PC's organisation decides the row's organisation either way.
+  const session = req.sessionInfo
+    ? { userId: req.sessionInfo.userId, organizationId: req.sessionInfo.organizationId ?? null }
+    : null;
+  if (session && !sessionMatchesPc(session, pc)) {
+    const record = deps.orgMismatch.take(pc.anchorId);
+    if (record) {
+      writeAuditLog(pool, {
+        actorUserId: session.userId,
+        actorOrgId:  session.organizationId,
+        action:      'device_org_mismatch',
+        targetType:  'device',
+        targetId:    pc.anchorId,
+        outcome:     'denied',
+        ip:          req.ip ?? null,
+        userAgent:   req.headers['user-agent'] ?? null,
+        extra:       {
+          deviceOrgId: pc.orgId,
+          header_device_id: headerId,
+          ...(record.suppressed > 0 ? { suppressed: record.suppressed } : {}),
+        },
+      });
+    }
+    res.status(401).json({ code: 'UNAUTHORIZED', error: 'Device / session identity mismatch' });
+    return;
+  }
 
+  // --- 8. Replay check before pacing, so a replay of a recorded request does not use up the PC's pace ---
+  const seen = await pool.query(
+    `SELECT 1 FROM emr_audit_nonces WHERE device_id = $1 AND nonce = $2`,
+    [pc.anchorId, deviceNonce],
+  );
+  if ((seen.rowCount ?? 0) > 0) {
+    res.status(401).json({ code: 'UNAUTHORIZED', error: 'Duplicate request (nonce reuse)' });
+    return;
+  }
+
+  // --- 9. Per-PC pacing: over the rate the request waits for its slot (keyed by the PC's fixed row) ---
+  const slot = deps.pcLimiter.acquire(pc.anchorId);
+  if (!slot.allowed) {
+    res.setHeader('Retry-After', String(slot.retryAfterSec));
+    res.status(429).json({ code: 'RATE_LIMITED', error: 'Too many audit events from this device, please retry later' });
+    return;
+  }
+  if (slot.delayMs > 0) await sleep(slot.delayMs);
+
+  // --- 10. Actor and flags ---
+  const legacy = !isCurrentShellEvent(body.extra);
+  const actor = fallbackActor(pc, session, {
+    ...(legacy ? legacyShellFlags() : {}),
+    ...(legacy && deps.burst.isBurst(pc.anchorId) ? { burst: true } : {}),
+  });
+
+  // --- 11. Nonce + audit row, in one transaction (SEC-A L11) ---
+  // A nonce already recorded (a duplicate in flight that committed first) → 0 rows → 401; concurrent
+  // duplicates are serialised by the primary-key row lock. If the audit INSERT fails, ROLLBACK removes the
+  // nonce row too, so the PC can resend the same signed request (never 200 without the audit row).
+  // Server-set fields come after the client's `extra` (from which every server-reserved key was removed).
   const client = await pool.connect();
+  let recorded = false;
   try {
     await client.query('BEGIN');
     const claimed = await client.query(
       `INSERT INTO emr_audit_nonces (device_id, nonce) VALUES ($1, $2)
        ON CONFLICT (device_id, nonce) DO NOTHING
        RETURNING 1`,
-      [deviceId, deviceNonce],
+      [pc.anchorId, deviceNonce],
     );
     if ((claimed.rowCount ?? 0) === 0) {
       await client.query('ROLLBACK');
       res.status(401).json({ code: 'UNAUTHORIZED', error: 'Duplicate request (nonce reuse)' });
       return;
     }
-    // Per-device rate limit (SEC-A L3) — keyed by the device id only now that the signature proved
-    // the sender holds that device's key (keying on the unverified header would let anyone create
-    // unlimited buckets), and counted only for a nonce claimed just now: replays of an already
-    // recorded request (401 above) do not use up the device's budget. Over the limit → ROLLBACK
-    // releases the nonce, so the device's queue can resend the same signed entry later.
-    const limit = deviceLimiter.hit(deviceId);
-    if (!limit.allowed) {
-      await client.query('ROLLBACK');
-      res.setHeader('Retry-After', String(limit.retryAfterSec));
-      res.status(429).json({ code: 'RATE_LIMITED', error: 'Too many audit events from this device, please retry later' });
-      return;
-    }
     await writeAuditLogStrict(client, {
-      actorUserId,
-      actorOrgId,
+      actorUserId: actor.actorUserId,
+      actorOrgId:  actor.actorOrgId,
       action:    body.action,
       targetType: 'emr',
       targetId:   body.targetId ?? null,
@@ -236,24 +228,28 @@ async function handleEmrAudit(pool: Pool, deviceLimiter: KeyedLimiter, req: Requ
       ip:         req.ip ?? null,
       userAgent:  req.headers['user-agent'] ?? null,
       extra:      {
-        ...clientExtra,
-        deviceId,
+        ...clientExtraWithoutReserved(body.extra),
+        deviceId: pc.anchorId,
+        header_device_id: headerId,
         source:   'electron-main',
-        ...(sessionMissing ? { session_missing: true, actor_from_queue: true } : {}),
+        ...actor.flags,
       },
     });
     await client.query('COMMIT');
+    recorded = true;
   } catch (err) {
     await client.query('ROLLBACK').catch(() => undefined);
     throw err;
   } finally {
     client.release();
+    if (!recorded) slot.refund();
   }
+  deps.burst.accepted(pc.anchorId);
 
-  // Update device last_seen_at
+  // Last seen on every row of the PC.
   pool.query(
-    `UPDATE devices SET last_seen_at = now() WHERE id = $1`,
-    [deviceId]
+    `UPDATE devices SET last_seen_at = now() WHERE public_key_fingerprint = $1`,
+    [pc.fingerprint]
   ).catch(() => undefined);
 
   res.status(200).json({ ok: true });
@@ -277,24 +273,36 @@ function makeOptionalAuth(pool: Pool): RequestHandler {
 }
 
 export interface AuditRouterOptions {
-  /** Per-device limit after signature verification (tests lower it). Default EMR_AUDIT_EVENTS_PER_DEVICE_PER_MINUTE. */
-  emrEventsPerDevicePerMinute?: number;
+  /** Per-PC pacing (tests lower it). Defaults EMR_AUDIT_PC_BURST / EMR_AUDIT_PC_RATE_PER_SEC / EMR_AUDIT_PC_MAX_WAITING. */
+  pcBurst?: number;
+  pcRatePerSec?: number;
+  pcMaxWaiting?: number;
+  /** PC lookup limits (tests lower them). */
+  resolver?: PcResolverOptions;
+  /** Gap under which an older shell's event is flagged as part of a burst. */
+  burstGapMs?: number;
 }
 
 export function createAuditRouter(pool: Pool, options: AuditRouterOptions = {}): Router {
   const router = Router();
 
-  // SEC-A L3: per-device events per minute after signature verification (one bucket per router).
-  const deviceLimiter = createKeyedLimiter({
-    windowMs: 60 * 1000,
-    max: options.emrEventsPerDevicePerMinute ?? EMR_AUDIT_EVENTS_PER_DEVICE_PER_MINUTE,
-  });
+  // One set per router (per process in production).
+  const deps: AuditDeps = {
+    resolver: createPcResolver(pool, options.resolver),
+    pcLimiter: createPacedLimiter({
+      burst: options.pcBurst ?? EMR_AUDIT_PC_BURST,
+      ratePerSec: options.pcRatePerSec ?? EMR_AUDIT_PC_RATE_PER_SEC,
+      maxWaiting: options.pcMaxWaiting ?? EMR_AUDIT_PC_MAX_WAITING,
+    }),
+    burst: createBurstTracker({ gapMs: options.burstGapMs }),
+    orgMismatch: createEventThrottle({ windowMs: ORG_MISMATCH_RECORD_WINDOW_MS }),
+  };
 
   router.post(
     '/emr',
-    emrAuditIpRateLimit(), // before anything that queries the database
+    emrAuditIpRateLimit(), // before anything that queries the database; counts failed requests only
     makeOptionalAuth(pool),
-    asyncHandler((req, res) => handleEmrAudit(pool, deviceLimiter, req, res))
+    asyncHandler((req, res) => handleEmrAudit(pool, deps, req, res))
   );
 
   return router;

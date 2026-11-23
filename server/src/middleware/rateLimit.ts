@@ -88,16 +88,18 @@ export function refreshRateLimit(): RequestHandler {
   });
 }
 
-// SEC-A L3 — POST /api/audit/emr, outer guard: 120 per minute per IP. The route accepts requests
-// without a session (queued replays), and the device id is a request header — so before the
+// SEC-A L3 — POST /api/audit/emr, outer guard: 120 failed requests per minute per IP. The route accepts
+// requests without a session (queued replays), and the device id is a request header — so before the
 // signature is verified the only safe key is the address. This bounds the device lookups an
-// unverified sender can cause. The per-device limit runs after verification (createKeyedLimiter).
+// unverified sender can cause. Accepted requests (signature verified, event recorded) are given back,
+// so a PC sending its stored events is paced by the per-PC limit only (createPacedLimiter).
 export function emrAuditIpRateLimit(): RequestHandler {
   return rateLimit({
     windowMs:        60 * 1000,
     limit:           120,
     standardHeaders: 'draft-7',
     legacyHeaders:   false,
+    skipSuccessfulRequests: true,
     message:         { code: 'RATE_LIMITED', error: 'Too many audit requests, please try again later' },
   });
 }
@@ -130,6 +132,67 @@ export function createKeyedLimiter(options: { windowMs: number; max: number; max
       }
       w.count += 1;
       return { allowed: w.count <= max, retryAfterSec: Math.max(1, Math.ceil((w.resetAt - t) / 1000)) };
+    },
+  };
+}
+
+export type PacedAcquire =
+  /** Go ahead after `delayMs`. `refund()` gives the slot back (the event was not recorded after all). */
+  | { allowed: true; delayMs: number; refund: () => void }
+  /** Too many requests of this key are already waiting. */
+  | { allowed: false; retryAfterSec: number };
+
+export interface PacedLimiter {
+  acquire(key: string): PacedAcquire;
+}
+
+/**
+ * Token bucket that delays instead of refusing: each key may take `burst` events at once, then `ratePerSec`
+ * events per second. A request over the rate is told how long to wait for its slot; at most `maxWaiting`
+ * requests of one key may be waiting at a time, beyond that the request is refused. Throughput per key is
+ * therefore bounded by burst + rate × time whether requests arrive one by one or all at once. In memory, per
+ * process. Keys whose bucket is full again are dropped when the map grows past `maxKeys`.
+ */
+export function createPacedLimiter(options: {
+  burst: number; ratePerSec: number; maxWaiting: number; maxKeys?: number; now?: () => number;
+}): PacedLimiter {
+  const { burst, ratePerSec, maxWaiting, maxKeys = 10_000, now = Date.now } = options;
+  // tokens may go below 0: -n means n slots are promised to waiting requests.
+  const buckets = new Map<string, { tokens: number; at: number }>();
+  const refill = (b: { tokens: number; at: number }, t: number) => {
+    b.tokens = Math.min(burst, b.tokens + ((t - b.at) / 1000) * ratePerSec);
+    b.at = t;
+  };
+  return {
+    acquire(key) {
+      const t = now();
+      let b = buckets.get(key);
+      if (!b) {
+        if (buckets.size >= maxKeys) {
+          for (const [k, v] of buckets) { refill(v, t); if (v.tokens >= burst) buckets.delete(k); }
+          if (buckets.size >= maxKeys) buckets.delete(buckets.keys().next().value as string);
+        }
+        b = { tokens: burst, at: t };
+        buckets.set(key, b);
+      }
+      refill(b, t);
+      if (b.tokens < 1 - maxWaiting) {
+        return { allowed: false, retryAfterSec: Math.max(1, Math.ceil((1 - b.tokens) / ratePerSec)) };
+      }
+      b.tokens -= 1;
+      const delayMs = b.tokens >= 0 ? 0 : Math.ceil((-b.tokens / ratePerSec) * 1000);
+      const bucket = b;
+      let refunded = false;
+      return {
+        allowed: true,
+        delayMs,
+        refund: () => {
+          if (refunded) return;
+          refunded = true;
+          refill(bucket, now());
+          bucket.tokens = Math.min(burst, bucket.tokens + 1);
+        },
+      };
     },
   };
 }
