@@ -41,6 +41,8 @@ const FAILURES = [
   ['기관 값이 잘못된 새 서버 응답(숫자)', () => ({ status: 200, body: { deviceScope: 'pc', status: 'revoked', organizationId: 123 } })],
   ['기관 값이 빠진 새 서버 응답', () => ({ status: 200, body: { deviceScope: 'pc', status: 'revoked' } })],
   ['기관 값이 잘못된 다른 기관 거부', () => ({ status: 409, body: { deviceScope: 'pc', status: 'other_org', organizationId: { id: 1 } } })],
+  ['모르는 deviceScope', () => ({ status: 200, body: { deviceScope: 'unknown', status: 'active', organizationId: ORG_B } })],
+  ['status가 없는 응답', () => ({ status: 200, body: { ok: true } })],
 ];
 
 describe('deviceState — 순수 함수', () => {
@@ -239,6 +241,54 @@ describe('audit.js — 상태 갱신과 기관에 묶인 게이트', () => {
     await s.audit.tryRegister(); // 원래 기관 → active
     expect(s.audit.getEmrGate()).toEqual({ allowed: true, reason: 'ok' });
     expect(s.registers()).toHaveLength(4);
+  });
+
+  it('승인 전 프로필이 모르는 deviceScope·status 없는 응답을 받아도 열리지 않는다', async () => {
+    for (const body of [{ deviceScope: 'unknown', status: 'active', organizationId: ORG_B }, { deviceId: 'x' }]) {
+      const tokenRef = { current: tokenA };
+      const pc = newPc();
+      const s = shell(pc, [{ status: 200, body }], tokenRef);
+      await s.init();
+      expect(meta(pc).status).toBe('unregistered');
+      expect(s.audit.getEmrGate()).toEqual({ allowed: false, reason: 'unregistered' });
+      advance(REGISTER_MIN_SPACING_MS);
+    }
+  });
+
+  it('이전 서버의 응답만 받은 실행에서도 로그인 기관이 바뀌면 다시 묻는다(그사이 서버가 새 버전이 된 경우)', async () => {
+    const tokenRef = { current: tokenA };
+    const pc = newPc();
+    const s = shell(pc, [oldServerAnswer('active'), otherOrgAnswer(ORG_B)], tokenRef);
+    await s.init();
+    expect(s.audit.getEmrGate().allowed).toBe(true);
+    tokenRef.current = tokenB;
+    advance(REGISTER_MIN_SPACING_MS);
+    await s.audit.tryRegister();
+    expect(s.registers()).toHaveLength(2);
+    expect(s.audit.getEmrGate()).toEqual({ allowed: false, reason: 'other_org' });
+  });
+
+  it('등록 응답을 기다리는 동안 들어온 장치 문제 401은 그 응답으로 지워지지 않고 다시 묻는다', async () => {
+    const tokenRef = { current: tokenA };
+    const pc = await approvedPc(tokenRef);
+    let release;
+    const replies = [() => new Promise((r) => { release = () => r(pcAnswer('active')); }), () => pcAnswer('revoked')];
+    const send = async (req) => {
+      const p = new URL(req.url).pathname;
+      if (p === '/api/audit/emr') return { status: 401, body: '{"code":"UNAUTHORIZED","error":"Device not recognized"}' };
+      const r = await replies.shift()();
+      return { status: r.status, body: JSON.stringify(r.body) };
+    };
+    const audit = loadShellModule(ELECTRON_DIR, 'audit.js', createFakeElectron({ userDataDir: pc, send }));
+    const initing = audit.initAudit({ getAccessToken: () => tokenRef.current, apiBaseUrl: 'https://server.test' });
+    await vi.waitFor(() => expect(release).toBeTypeOf('function')); // 첫 토큰 확인이 진행 중
+    await audit.recordAudit({ action: 'emr_inject', outcome: 'success' }); // 장치 문제 401
+    release(); // 늦게 온 active 응답
+    await initing;
+    expect(audit.getEmrGate().allowed).toBe(true);
+    advance(REGISTER_MIN_SPACING_MS + 1000);
+    await vi.advanceTimersByTimeAsync(REGISTER_MIN_SPACING_MS + 1000);
+    await vi.waitFor(() => expect(audit.getEmrGate()).toEqual({ allowed: false, reason: 'revoked' }));
   });
 
   it('같은 기관의 다른 사용자로 바뀌어도 호출하지 않고 열려 있다', async () => {

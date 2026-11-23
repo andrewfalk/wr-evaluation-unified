@@ -38,6 +38,8 @@ let _apiBaseUrl = '';
 let _registerAttempts = [];  // registration calls of this process (ms)
 let _freshProcess = true;    // no answer to a registration call yet in this process
 let _deviceProblem = false;  // an audit send was refused for a device problem
+let _deviceProblemSeq = 0;   // counts those refusals, so an answer to a call that started earlier does not clear a newer one
+let _checkedOrgId;           // login organisation of the last answer in this process (undefined until the first)
 
 // ── File helpers ─────────────────────────────────────────────────────────────
 
@@ -173,7 +175,8 @@ async function tryRegister() {
   const now = Date.now();
   _registerAttempts = _registerAttempts.filter(t => now - t < 60 * 60 * 1000);
   const decision = shouldRegister({
-    meta: _meta, login, startedFresh: _freshProcess, deviceProblem: _deviceProblem, attempts: _registerAttempts,
+    meta: _meta, login, startedFresh: _freshProcess, deviceProblem: _deviceProblem, checkedOrgId: _checkedOrgId,
+    attempts: _registerAttempts,
   }, now);
   if (!decision.register) {
     if (decision.reason && QUICK_RETRY_REASONS.has(decision.reason)) scheduleRetry();
@@ -181,6 +184,7 @@ async function tryRegister() {
   }
 
   _registerAttempts.push(now);
+  const problemSeqAtStart = _deviceProblemSeq;
   _registering = true;
   let result;
   try {
@@ -199,7 +203,10 @@ async function tryRegister() {
   const outcome = interpretRegisterResult(result);
   if (outcome.kind === 'pc' || outcome.kind === 'legacy') {
     _freshProcess = false;
-    _deviceProblem = false;
+    _checkedOrgId = login.orgId;
+    // A device refusal that came in while this call was in flight is not answered by it — ask again (within limits).
+    if (_deviceProblemSeq === problemSeqAtStart) _deviceProblem = false;
+    else scheduleRetry();
     const next = applyRegisterOutcome(_meta, outcome, Date.now());
     if (next !== _meta) {
       _meta = next;
@@ -221,6 +228,7 @@ async function tryRegister() {
 function noteSendError(err) {
   if (err?.status === 401 && !isTokenExpiryError(err)) {
     _deviceProblem = true;
+    _deviceProblemSeq += 1;
     tryRegister().catch(e => console.error('[audit] register after device refusal:', e.message));
   }
 }
