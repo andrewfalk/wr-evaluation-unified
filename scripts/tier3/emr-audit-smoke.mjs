@@ -65,7 +65,7 @@ const ELECTRON_UA = 'Mozilla/5.0 (Windows NT 6.1) wr-evaluation-unified-tier3 El
 // ---------------------------------------------------------------------------
 function sql(statement) {
   return execFileSync('docker', ['exec', '-i', PG_CONTAINER, 'psql', '-U', PG_USER, '-d', PG_DB, '-At', '-v', 'ON_ERROR_STOP=1', '-f', '-'], {
-    input: statement, encoding: 'utf8',
+    input: statement, encoding: 'utf8', maxBuffer: 512 * 1024 * 1024, // 대량 대기열(수천 건)의 감사 행 JSON
   }).trim();
 }
 const q = (v) => `'${String(v).replace(/'/g, "''")}'`;
@@ -305,22 +305,29 @@ async function legacyScenario() {
   // 8) 재전송 회차 도중의 새 기록이 제한 때문에 실패하지 않는다(옛 설치본은 실패한 새 기록을 회차 끝의 쓰기로 잃을 수 있다).
   tokens.current = accounts.a.token;
   // 회차가 확실히 진행 중일 때 새 기록을 보내도록 대기열을 최소 20건으로 하고, 응답 5건을 받은 뒤(회차가 끝나지 않았을 때) 보낸다.
-  const overlap = Math.max(20, Math.min(QUEUE_SIZE, 150));
+  // 대량 모드(--queue 300 이상)는 대기열을 --queue만큼 쌓고, 서버가 응답을 늦추기 시작한 뒤(PC별 여유분 소진) 보낸다.
+  const paced = QUEUE_SIZE >= 300;
+  const overlap = paced ? QUEUE_SIZE : Math.max(20, Math.min(QUEUE_SIZE, 150));
   for (let i = 0; i < overlap; i += 1) shell.queue.enqueue(entry(`overlap-q-${i}`));
   requestLog.length = 0;
   let flushSettled = false;
   const flushing = shell.audit.flushQueue().finally(() => { flushSettled = true; });
   flushing.catch(() => {}); // 실패는 아래 await에서 받는다(처리되지 않은 거부 방지)
   const waitUntil = Date.now() + 30_000;
-  while (requestLog.filter((r) => r.path === '/api/audit/emr').length < 5) {
+  const ready = () => (paced
+    ? requestLog.some((r) => r.path === '/api/audit/emr' && r.ms >= 80) // 늦춰진 응답(초당 10건 → 100 ms 간격)
+    : requestLog.filter((r) => r.path === '/api/audit/emr').length >= 5);
+  const waitUntil2 = Date.now() + 120_000;
+  while (!ready()) {
+    if (paced && Date.now() > waitUntil2) throw new Error('서버가 응답을 늦추기 시작하지 않았습니다(2분)');
     if (flushSettled) throw new Error('재전송 회차가 새 기록을 보내기 전에 끝났습니다(전송 실패 또는 대기열 부족)');
-    if (Date.now() > waitUntil) throw new Error('재전송 회차의 응답을 30초 안에 받지 못했습니다');
+    if (!paced && Date.now() > waitUntil) throw new Error('재전송 회차의 응답을 30초 안에 받지 못했습니다');
     await sleep(5);
   }
   const overlapped = !flushSettled;
   await shell.audit.recordAudit(entry('overlap-live'));
   await flushing;
-  record('7.1.4: 새 기록을 재전송 회차 도중에 보냄', overlapped);
+  record(`7.1.4: 새 기록을 재전송 회차 도중에 보냄${paced ? '(서버가 늦추는 중)' : ''}`, overlapped);
   const live = seqRows('overlap-live');
   const overlapRows = rowsWhere(`AND extra->>'seq' LIKE 'overlap-q-%'`);
   record('7.1.4: 재전송 중의 새 기록이 한 건 기록됨', live.length === 1, `${live.length}건`);
