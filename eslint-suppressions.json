@@ -1,9 +1,4 @@
 {
-  "electron/auditQueue.js": {
-    "no-empty": {
-      "count": 3
-    }
-  },
   "electron/main.js": {
     "no-empty": {
       "count": 4
