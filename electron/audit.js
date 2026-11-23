@@ -1,6 +1,7 @@
 'use strict';
 // electron/audit.js
-// Device key management, Ed25519 signing, and EMR audit submission.
+// Device key management, Ed25519 signing, and EMR audit submission — Electron wiring (userData files,
+// safeStorage, net.request). Decisions live in auditLogic.js (no electron dependency, unit-tested).
 // Requires initAudit() to be called from app.whenReady().
 const { app, net, safeStorage } = require('electron');
 const path = require('path');
@@ -8,6 +9,15 @@ const fs = require('fs');
 const crypto = require('crypto');
 const { enqueue, flush, checkCorrupt, handleCorrupt } = require('./auditQueue');
 const { mustChangePassword } = require('./accessTokenClaims');
+const {
+  REGISTER_RETRY_INTERVAL_MS,
+  buildSignedAuditRequest,
+  interpretHttpResponse,
+  isTokenExpiryError,
+  withSessionMissing,
+  registerStatusFromResponse,
+  classifyRegisterError,
+} = require('./auditLogic');
 
 // ── Module state ─────────────────────────────────────────────────────────────
 
@@ -20,12 +30,6 @@ let _state = {
 let _getAccessToken = () => null;
 let _apiBaseUrl = '';
 let _lastRegisterAttempt = 0;
-
-// Server caps device registration at 5/hour per user (see server/src/middleware/rateLimit.ts).
-// The 5-minute flushQueue interval alone would send 12 attempts/hour, blowing through that
-// budget and (before this backoff existed) causing tryRegister to misread 429 as a hard
-// failure. Spacing retries out keeps steady-state polling comfortably under the server limit.
-const REGISTER_RETRY_INTERVAL_MS = 20 * 60 * 1000;
 
 // ── File helpers ─────────────────────────────────────────────────────────────
 
@@ -101,20 +105,9 @@ function httpPost(url, headers, body) {
       let data = '';
       res.on('data', c => { data += c; });
       res.on('end', () => {
-        try {
-          const json = JSON.parse(data);
-          if (res.statusCode >= 400) {
-            const msg = (typeof json?.error === 'string' ? json.error : json?.error?.message) || `HTTP ${res.statusCode}`;
-            const err = new Error(msg);
-            err.status = res.statusCode;
-            err.code   = json?.code ?? null;
-            reject(err);
-          } else {
-            resolve({ status: res.statusCode, data: json });
-          }
-        } catch {
-          reject(new Error(`parse error HTTP ${res.statusCode}`));
-        }
+        const result = interpretHttpResponse(res.statusCode, data);
+        if (result instanceof Error) reject(result);
+        else resolve(result);
       });
     });
     req.on('error', reject);
@@ -145,24 +138,21 @@ async function tryRegister() {
       { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
       JSON.stringify({ publicKey: _state.publicKeyB64, buildTarget: 'intranet' })
     );
-    const newStatus = data?.status === 'active' ? 'active' : 'pending';
+    const newStatus = registerStatusFromResponse(data);
     _state.status = newStatus;
     const meta = loadMeta();
     if (meta) saveMeta({ ...meta, status: newStatus });
     console.log('[audit] device registration status:', newStatus);
     return newStatus === 'active';
   } catch (err) {
-    // 429 means the server is still reachable and the device may already be
-    // pending/approved — treat it as "try again later", not a hard failure.
-    // Demoting to 'error' here previously surfaced a misleading "device
-    // registration required" message even for devices already awaiting
-    // (or holding) admin approval.
-    if (err.status === 429) {
+    // 429: 서버에는 닿았고 장치는 이미 승인 대기·승인 상태일 수 있다 — 'error'로 내리지 않고 나중에 다시 한다.
+    // 비밀번호 변경 필요(사전 검사를 빠져나간 경우): 'error'로 내리지 않는다 — 비밀번호 변경이 끝나면 풀린다.
+    const kind = classifyRegisterError(err);
+    if (kind === 'retry_later') {
       console.warn('[audit] tryRegister rate-limited, will retry in', REGISTER_RETRY_INTERVAL_MS / 60000, 'min:', err.message);
       return false;
     }
-    // 위 사전 검사를 빠져나간 경우(클레임을 못 읽은 토큰 등)에도 장치를 'error'로 내리지 않는다 — 비밀번호 변경이 끝나면 풀린다.
-    if (err.status === 403 && err.code === 'PASSWORD_CHANGE_REQUIRED') {
+    if (kind === 'password_change') {
       console.warn('[audit] tryRegister deferred until the password is changed');
       return false;
     }
@@ -172,43 +162,13 @@ async function tryRegister() {
   }
 }
 
-// ── Ed25519 signing ──────────────────────────────────────────────────────────
-
-// Canonical message matches server audit.ts: "{deviceId}.{ts}.{nonce}.{sortedBodyJson}"
-function signPayload(body, deviceTs, deviceNonce) {
-  const sorted = Object.fromEntries(Object.keys(body).sort().map(k => [k, body[k]]));
-  const canonical = `${_state.deviceId}.${deviceTs}.${deviceNonce}.${JSON.stringify(sorted)}`;
-  return crypto.sign(null, Buffer.from(canonical, 'utf-8'), _state.privateKey).toString('base64');
-}
-
 // ── Send ─────────────────────────────────────────────────────────────────────
 
 async function doSend(entry, accessToken) {
-  const deviceTs    = new Date().toISOString();
-  const deviceNonce = crypto.randomUUID();
-
-  const body = {
-    action:  entry.action,
-    outcome: entry.outcome,
-    ...(entry.targetId ? { targetId: entry.targetId } : {}),
-    ...(entry.extra    ? { extra:    entry.extra    } : {}),
-  };
-
-  const sig = signPayload(body, deviceTs, deviceNonce);
-
-  await httpPost(
-    `${_apiBaseUrl}/api/audit/emr`,
-    {
-      'Content-Type':    'application/json',
-      'X-WR-Device-Id':  _state.deviceId,
-      'X-WR-Device-Sig': sig,
-      'X-WR-Device-Ts':  deviceTs,
-      'X-WR-Device-Nonce': deviceNonce,
-      'X-WR-Source':     'electron-main',
-      ...(accessToken ? { 'Authorization': `Bearer ${accessToken}` } : {}),
-    },
-    JSON.stringify(body)
-  );
+  const { headers, body } = buildSignedAuditRequest({
+    entry, deviceId: _state.deviceId, privateKey: _state.privateKey, accessToken,
+  });
+  await httpPost(`${_apiBaseUrl}/api/audit/emr`, headers, body);
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
@@ -217,30 +177,20 @@ function getDeviceStatus() {
   return { status: _state.status, deviceId: _state.deviceId };
 }
 
-// 401 codes that indicate the token itself is bad (expired / revoked).
-// UNAUTHORIZED is returned by the audit route for device-level failures
-// (mismatch, bad signature, device not active) and must NOT be retried as
-// session_missing — that would allow a mismatched session to bypass the
-// device.user_id ≡ session.user_id identity check.
-const TOKEN_EXPIRY_CODES = new Set(['TOKEN_INVALID', 'SESSION_REVOKED']);
-
-// Send with automatic session-missing fallback.
-// If the call fails with TOKEN_INVALID or SESSION_REVOKED, strips the
-// Authorization header and retries once. Any other 401 (device mismatch,
-// bad signature, device not active) propagates to the caller for enqueue.
+// Send with automatic session-missing fallback: if the call fails because the token itself is bad
+// (expired / revoked), strips the Authorization header and retries once. Any other 401 (device
+// problems) propagates to the caller for enqueue.
 async function doSendWithSessionFallback(entry, accessToken) {
   if (!accessToken) {
-    const e = { ...entry, extra: { ...(entry.extra ?? {}), session_missing: true, actor_from_queue: true } };
-    await doSend(e, null);
+    await doSend(withSessionMissing(entry), null);
     return;
   }
   try {
     await doSend(entry, accessToken);
   } catch (err) {
-    if (err.status === 401 && TOKEN_EXPIRY_CODES.has(err.code)) {
+    if (isTokenExpiryError(err)) {
       console.warn('[audit] HTTP 401 token expiry/revocation, retrying as session_missing');
-      const e = { ...entry, extra: { ...(entry.extra ?? {}), session_missing: true, actor_from_queue: true } };
-      await doSend(e, null);
+      await doSend(withSessionMissing(entry), null);
     } else {
       throw err;
     }
