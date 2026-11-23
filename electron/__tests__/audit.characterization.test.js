@@ -58,6 +58,19 @@ const queueEntries = (pcDir, fake) => (fs.existsSync(queueFile(pcDir))
     .map((l) => JSON.parse(fake.safeStorage.decryptString(Buffer.from(l.slice(4), 'base64'))))
   : []);
 
+// EA-7부터 현재 설치본은 기록마다 시점 정보(occurredAt·eventId·actorUserId·shellAudit, 대기열 전송은 queued)를 extra에 넣고,
+// 토큰 없이 보낼 때 세션 없음 표시를 더 붙이지 않는다(서버가 정한다). 특성화는 그 값을 걷어낸 나머지를 비교한다.
+const STAMP_KEYS = ['occurredAt', 'eventId', 'actorUserId', 'shellAudit', 'queued'];
+function unstamp(body) {
+  if (!body?.extra) return body;
+  const extra = Object.fromEntries(Object.entries(body.extra).filter(([k]) => !STAMP_KEYS.includes(k)));
+  const { extra: _drop, ...rest } = body;
+  return Object.keys(extra).length ? { ...rest, extra } : rest;
+}
+const isLegacy = () => SHELL_DIR === LEGACY_DIR;
+const SESSION_MISSING = () => (isLegacy() ? { session_missing: true, actor_from_queue: true } : {});
+const withExtra = (body, extra) => (Object.keys(extra).length ? { ...body, extra: { ...(body.extra ?? {}), ...extra } } : body);
+
 beforeEach(() => {
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -171,7 +184,8 @@ describe('audit.js 특성화 — 전송과 대기열', () => {
     const [sent] = server.audits();
     const m = meta(pc);
     expect(sent.headers).toMatchObject({ 'X-WR-Device-Id': m.deviceId, 'X-WR-Source': 'electron-main', Authorization: `Bearer ${TOKEN}` });
-    expect(sent.body).toEqual({ action: 'emr_inject', outcome: 'success', targetId: 'tgt', extra: { source: 'auto' } });
+    expect(unstamp(sent.body)).toEqual({ action: 'emr_inject', outcome: 'success', targetId: 'tgt', extra: { source: 'auto' } });
+    if (!isLegacy()) expect(sent.body.extra).toMatchObject({ shellAudit: 2, actorUserId: 'user-1', eventId: expect.any(String), occurredAt: expect.any(String) });
     const pub = crypto.createPublicKey({ key: Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), Buffer.from(m.publicKeyB64, 'base64')]), format: 'der', type: 'spki' });
     const sorted = Object.fromEntries(Object.entries(sent.body).sort(([a], [b]) => a.localeCompare(b)));
     const message = `${m.deviceId}.${sent.headers['X-WR-Device-Ts']}.${sent.headers['X-WR-Device-Nonce']}.${JSON.stringify(sorted)}`;
@@ -186,7 +200,7 @@ describe('audit.js 특성화 — 전송과 대기열', () => {
     const entry = { action: 'emr_extract_record', outcome: 'failure', targetId: 'x' };
     await audit.recordAudit(entry);
     expect(server.audits()).toHaveLength(0);
-    expect(queueEntries(pc, fake)).toEqual([entry]);
+    expect(queueEntries(pc, fake).map(unstamp)).toEqual([entry]);
   });
 
   it('토큰 만료·폐기 401 → 토큰 없이 한 번 더(세션 없음 표시), 장치 문제 401 → 대기열', async () => {
@@ -199,11 +213,11 @@ describe('audit.js 특성화 — 전송과 대기열', () => {
     const [first, retry] = server.audits();
     expect(first.headers.Authorization).toBe(`Bearer ${TOKEN}`);
     expect(retry.headers).not.toHaveProperty('Authorization');
-    expect(retry.body.extra).toEqual({ session_missing: true, actor_from_queue: true });
+    expect(unstamp(retry.body)).toEqual(withExtra({ action: 'emr_inject', outcome: 'success' }, SESSION_MISSING()));
     expect(retry.headers['X-WR-Device-Nonce']).not.toBe(first.headers['X-WR-Device-Nonce']);
     await audit.recordAudit({ action: 'emr_extract_consultation', outcome: 'success' });
     expect(server.audits()).toHaveLength(3); // no tokenless retry for a device problem
-    expect(queueEntries(pc, fake)).toEqual([{ action: 'emr_extract_consultation', outcome: 'success' }]);
+    expect(queueEntries(pc, fake).map(unstamp)).toEqual([{ action: 'emr_extract_consultation', outcome: 'success' }]);
   });
 
   it('토큰이 없으면 처음부터 토큰 없이(세션 없음 표시) 보낸다', async () => {
@@ -213,7 +227,7 @@ describe('audit.js 특성화 — 전송과 대기열', () => {
     await audit.recordAudit({ action: 'emr_inject', outcome: 'success', extra: { source: 'edited' } });
     const [sent] = server.audits();
     expect(sent.headers).not.toHaveProperty('Authorization');
-    expect(sent.body.extra).toEqual({ source: 'edited', session_missing: true, actor_from_queue: true });
+    expect(unstamp(sent.body).extra).toEqual({ source: 'edited', ...SESSION_MISSING() });
   });
 
   it('flushQueue: 대기열 전부를 순서대로 간격 없이 보내고, 실패(이유 무관)는 남기고, 다 보내면 파일을 지운다', async () => {
@@ -239,7 +253,7 @@ describe('audit.js 특성화 — 전송과 대기열', () => {
     const renamed = fs.readdirSync(pc).filter((f) => /^audit-emr-pending-corrupt-\d+\.bin$/.test(f));
     expect(renamed).toHaveLength(1);
     expect(fs.existsSync(queueFile(pc))).toBe(false);
-    expect(server.audits().map((r) => r.body)).toEqual([{ action: 'audit_queue_corrupt', outcome: 'failure', extra: { corruptFile: renamed[0] } }]);
+    expect(server.audits().map((r) => unstamp(r.body))).toEqual([{ action: 'audit_queue_corrupt', outcome: 'failure', extra: { corruptFile: renamed[0] } }]);
   });
 
   it('전송 중에 추가된 항목은 회차 끝의 파일 쓰기에 덮일 수 있다(지금 동작 — EA-8에서 고친다)', async () => {

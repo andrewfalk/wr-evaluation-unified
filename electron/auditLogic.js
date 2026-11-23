@@ -80,17 +80,58 @@ function isTokenExpiryError(err) {
   return err?.status === 401 && TOKEN_EXPIRY_CODES.has(err.code);
 }
 
-/** 토큰 없이 다시 보낼 때의 항목(세션 없음 표시를 extra에 더한다). */
-function withSessionMissing(entry) {
-  return { ...entry, extra: { ...(entry.extra ?? {}), session_missing: true, actor_from_queue: true } };
+// 이 설치본의 기록 표식(서버가 이전 설치본의 기록과 구분한다 — server/src/devices/emrAuditRecord.ts).
+const SHELL_AUDIT_MARKER = 2;
+
+/**
+ * EMR 동작을 시작할 때 잡아 두는 기록 시점 정보: 그때 로그인한 사용자(토큰의 sub — 없으면 비움)·시각·무작위 eventId.
+ * 동작이 끝난 뒤의 기록·대기열·재전송까지 이 값을 쓴다(그사이 계정이 바뀌어도 시작한 사용자로 남는다).
+ * deps: { now(): Date, randomUUID(): string, identity(token) }.
+ */
+function createAuditContext(token, deps = {}) {
+  const now = deps.now ?? (() => new Date());
+  const randomUUID = deps.randomUUID ?? (() => crypto.randomUUID());
+  const identity = deps.identity ? deps.identity(token) : null;
+  return {
+    occurredAt: now().toISOString(),
+    eventId: randomUUID(),
+    ...(identity?.userId ? { actorUserId: identity.userId } : {}),
+  };
+}
+
+/** 기록 시점 정보를 extra에 넣은 항목(기존 extra 값은 그대로 둔다). 항목 형식 {action, outcome, targetId?, extra?}는 그대로. */
+function stampEntry(entry, context) {
+  return {
+    ...entry,
+    extra: {
+      ...(entry.extra ?? {}),
+      occurredAt: context.occurredAt,
+      eventId: context.eventId,
+      ...(context.actorUserId ? { actorUserId: context.actorUserId } : {}),
+      shellAudit: SHELL_AUDIT_MARKER,
+    },
+  };
+}
+
+function isStampedEntry(entry) {
+  return entry?.extra?.shellAudit === SHELL_AUDIT_MARKER;
+}
+
+/** 대기열에서 나가는 항목: 이 설치본이 만든 항목에는 queued: true를 더하고, 이전 형식 항목은 손대지 않는다. */
+function forQueuedSend(entry) {
+  return isStampedEntry(entry) ? { ...entry, extra: { ...entry.extra, queued: true } } : entry;
 }
 
 module.exports = {
+  SHELL_AUDIT_MARKER,
+  createAuditContext,
+  stampEntry,
+  isStampedEntry,
+  forQueuedSend,
   TOKEN_EXPIRY_CODES,
   buildAuditBody,
   canonicalMessage,
   buildSignedAuditRequest,
   interpretHttpResponse,
   isTokenExpiryError,
-  withSessionMissing,
 };
