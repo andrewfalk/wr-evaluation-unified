@@ -203,4 +203,30 @@ describe.skipIf(!TEST_DATABASE_URL)('EMR audit from a device registered through 
     expect(closed.status).toBe(401);
     expect(closed.body).toEqual({ code: 'UNAUTHORIZED', error: 'Device not recognized' });
   });
+  it('current shell: a claim of a disabled account of the organisation is kept (unverified); a claim of another organisation is rejected', async () => {
+    const other = await createIntegrationOrg(pool, 'audit_device_claim');
+    try {
+      const outsider = await other.makeUser('doctor', '다른 기관 의사 2');
+      const keys = crypto.generateKeyPairSync('ed25519');
+      await registerAndApprove(doctor, rawPublicKey(keys.publicKey));
+      const shellId = crypto.randomUUID();
+      const leaver = await org.makeUser('nurse', '퇴사 예정 간호사');
+      await pool.query(`UPDATE users SET disabled_at = now() WHERE id = $1`, [leaver.id]);
+      const occurredAt = new Date(Date.now() - 5 * 60_000).toISOString();
+
+      const p1 = crypto.randomUUID();
+      expect((await sendEvent(keys, shellId, null, { probe: p1, shellAudit: 2, actorUserId: leaver.id, occurredAt, queued: true })).status).toBe(200);
+      const [kept] = await rowsByProbe(p1);
+      expect(kept).toMatchObject({ actor_user_id: leaver.id, actor_org_id: org.orgId });
+      expect(kept.extra).toMatchObject({ actor_source: 'device_claim', actor_unverified: true, occurred_at: occurredAt, session_missing: true });
+
+      const p2 = crypto.randomUUID();
+      expect((await sendEvent(keys, shellId, doctor, { probe: p2, shellAudit: 2, actorUserId: outsider.id, occurredAt })).status).toBe(200);
+      const [rejected] = await rowsByProbe(p2);
+      expect(rejected).toMatchObject({ actor_user_id: doctor.id, actor_org_id: org.orgId });
+      expect(rejected.extra).toMatchObject({ actor_source: 'session_fallback', actor_uncertain: true, actor_claim_rejected: true });
+    } finally {
+      await other.destroy();
+    }
+  });
 });
