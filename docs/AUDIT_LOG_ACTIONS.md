@@ -74,10 +74,12 @@
 ### 디바이스
 | action | 파일:라인 | 비고 |
 |---|---|---|
-| `device_register` | `devices.ts:91` | |
-| `device_register_duplicate` | `devices.ts:91` | |
-| `device_approve` | `admin.ts:126` | |
-| `device_revoke` | `admin.ts:171` | |
+| `device_register` | `routes/devices.ts` | 새 PC(장치 서명 키)의 승인 대기 행 |
+| `device_register_duplicate` | `routes/devices.ts` | 세션 기관에 이미 있는 PC — 새 행 없이 PC의 첫 행 ID·상태를 돌려줌(`extra.pcStatus`) |
+| `device_register_other_org` | `routes/devices.ts` | 다른 기관에 등록된 PC — 거부(409), 행 없음. 상대 기관은 남기지 않고 `extra.fingerprintPrefix`만 |
+| `device_approve` | `routes/admin/devices.ts` | 해지 행이 있는 PC의 승인 대기 행은 승인하지 않는다(409 `DEVICE_PC_REVOKED`) |
+| `device_revoke` | `routes/admin/devices.ts` | 같은 PC(관리자 범위 안)의 모든 행을 해지, `extra.revokedDeviceIds` |
+| `emr_audit_denied` | `routes/audit.ts` | 서명은 맞는데 PC가 해지·승인 대기인 EMR 감사 요청. PC당 10분에 한 건(`extra.pcStatus`·`emrAction`·`suppressed`) |
 | `device_user_mismatch` | (7.3.2부터 기록하지 않음) | 예전 기록만 남아 있다 — 같은 기관 사용자는 승인된 PC에서 EMR 감사 기록을 남길 수 있다 |
 | `device_org_mismatch` | `routes/audit.ts` | EMR 감사 요청의 세션 기관 ≠ PC의 기관. PC당 10분에 한 건, 그사이 건수는 다음 행의 `extra.suppressed` |
 

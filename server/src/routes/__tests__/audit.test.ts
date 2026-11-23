@@ -322,6 +322,31 @@ describe('POST /api/audit/emr', () => {
     expect(writeAuditLogStrict).not.toHaveBeenCalled();
   });
 
+  it('a signed request from a revoked PC leaves one denial summary per PC per window (none for unsigned ones)', async () => {
+    const pc = makePc();
+    const first = row(pc, { status: 'active' });
+    const fake = makeFake([first, row(pc, { status: 'revoked', user_id: 'user-2' })]);
+    const app = auditApp(fake);
+    expect((await send(app, pc, { signWith: makePc().privateKey })).status).toBe(401); // bad signature: nothing
+    expect(writeAuditLog).not.toHaveBeenCalled();
+    for (let i = 0; i < 3; i += 1) expect((await send(app, pc, { token: i === 0 ? undefined : null })).status).toBe(401);
+    expect(writeAuditLog).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(writeAuditLog).mock.calls[0][1]).toMatchObject({
+      actorUserId: 'user-1', actorOrgId: 'org-1', action: 'emr_audit_denied', targetType: 'device', targetId: first.id, outcome: 'denied',
+      extra: { pcStatus: 'revoked', emrAction: 'emr_inject', header_device_id: SHELL_ID },
+    });
+  });
+
+  it('the denial summary names the session user only when the session belongs to the PC\'s organisation', async () => {
+    const pc = makePc();
+    const first = row(pc, { status: 'pending', organization_id: 'org-1' });
+    const fake = makeFake([first]);
+    const res = await send(auditApp(fake), pc, { token: userToken('user-9', 'org-9') });
+    expect(res.status).toBe(401);
+    expect(vi.mocked(writeAuditLog).mock.calls[0][1]).toMatchObject({ actorUserId: null, actorOrgId: 'org-1', action: 'emr_audit_denied' });
+    expect(JSON.stringify(vi.mocked(writeAuditLog).mock.calls[0][1])).not.toContain('user-9');
+  });
+
   it('an approved PC is found even when more unapproved keys exist than the scan tries', async () => {
     const approved = makePc();
     const rows = [row(approved, { registered_at: '2020-01-01T00:00:00.000Z' })];

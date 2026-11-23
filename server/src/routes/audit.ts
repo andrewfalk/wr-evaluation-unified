@@ -22,8 +22,10 @@ export const EMR_AUDIT_PC_BURST = 300;
 export const EMR_AUDIT_PC_RATE_PER_SEC = 10;
 export const EMR_AUDIT_PC_MAX_WAITING = 8;
 
-// One device/session organisation mismatch row per PC per window (the rest are counted in the next row).
+// One device/session organisation mismatch row, and one "PC not approved / revoked" row, per PC per window
+// (the rest are counted in the next row).
 const ORG_MISMATCH_RECORD_WINDOW_MS = 10 * 60 * 1000;
+const DENIED_RECORD_WINDOW_MS = 10 * 60 * 1000;
 
 // ---------------------------------------------------------------------------
 // POST /api/audit/emr
@@ -77,6 +79,7 @@ interface AuditDeps {
   pcLimiter: PacedLimiter;
   burst: ReturnType<typeof createBurstTracker>;
   orgMismatch: ReturnType<typeof createEventThrottle>;
+  denied: ReturnType<typeof createEventThrottle>;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -141,7 +144,34 @@ async function handleEmrAudit(pool: Pool, deps: AuditDeps, req: Request, res: Re
   const pc = lookup.pc;
 
   // --- 6. PC status: every row of the key counts (one revoked row revokes the PC) ---
+  // A signed request from a revoked or not yet approved PC leaves one summary row per PC per window (older
+  // shells keep EMR open after a revocation; this makes that use visible to the PC's organisation admins).
   if (pc.status !== 'active') {
+    const record = deps.denied.take(pc.anchorId);
+    if (record) {
+      // The session's user is named only when that session belongs to the PC's organisation (the row is the PC's
+      // organisation's); a session of another organisation is not recorded here.
+      const sessionUserOfPcOrg = req.sessionInfo && pc.orgResolved
+        && sessionMatchesPc({ userId: req.sessionInfo.userId, organizationId: req.sessionInfo.organizationId ?? null }, pc)
+        ? req.sessionInfo.userId : null;
+      writeAuditLog(pool, {
+        actorUserId: sessionUserOfPcOrg,
+        actorOrgId:  pc.orgResolved ? pc.orgId : null,
+        action:      'emr_audit_denied',
+        targetType:  'device',
+        targetId:    pc.anchorId,
+        outcome:     'denied',
+        ip:          req.ip ?? null,
+        userAgent:   req.headers['user-agent'] ?? null,
+        extra:       {
+          pcStatus: pc.status,
+          emrAction: body.action,
+          header_device_id: headerId,
+          ...(req.sessionInfo ? {} : { session_missing: true }),
+          ...(record.suppressed > 0 ? { suppressed: record.suppressed } : {}),
+        },
+      });
+    }
     res.status(401).json(DEVICE_NOT_RECOGNIZED);
     return;
   }
@@ -307,6 +337,7 @@ export function createAuditRouter(pool: Pool, options: AuditRouterOptions = {}):
     }),
     burst: createBurstTracker({ gapMs: options.burstGapMs }),
     orgMismatch: createEventThrottle({ windowMs: ORG_MISMATCH_RECORD_WINDOW_MS }),
+    denied: createEventThrottle({ windowMs: DENIED_RECORD_WINDOW_MS }),
   };
 
   router.post(
