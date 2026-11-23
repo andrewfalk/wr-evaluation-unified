@@ -15,8 +15,11 @@ import {
 // events at once, then EMR_AUDIT_PC_RATE_PER_SEC per second; a request over the rate waits for its slot
 // instead of being refused (a shell sending its stored events one by one slows down but does not fail), and
 // at most EMR_AUDIT_PC_MAX_WAITING requests of one PC wait at a time (beyond that: 429).
+// Measured (scripts/tier3/emr-audit-smoke.mjs): a shell sends its stored events back to back at about 120 per
+// second. With these values one 5-minute resend round of a PC takes in up to 300 + 10 × 300 = 3,300 events,
+// so the round ends before the next one starts; one PC can write at most 300 + 600 per minute.
 export const EMR_AUDIT_PC_BURST = 300;
-export const EMR_AUDIT_PC_RATE_PER_SEC = 5;
+export const EMR_AUDIT_PC_RATE_PER_SEC = 10;
 export const EMR_AUDIT_PC_MAX_WAITING = 8;
 
 // One device/session organisation mismatch row per PC per window (the rest are counted in the next row).
