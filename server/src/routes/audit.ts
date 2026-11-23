@@ -5,10 +5,10 @@ import { createAuthMiddleware } from '../middleware/auth';
 import { writeAuditLog, writeAuditLogStrict } from '../middleware/audit';
 import { asyncHandler } from '../http/asyncHandler';
 import { createPacedLimiter, emrAuditIpRateLimit, type PacedLimiter } from '../middleware/rateLimit';
-import { createPcResolver, type PcResolver, type PcResolverOptions } from '../devices/pcIdentity';
+import { createPcResolver, isUuid, type PcInfo, type PcResolver, type PcResolverOptions } from '../devices/pcIdentity';
 import {
-  clientExtraWithoutReserved, createBurstTracker, createEventThrottle, fallbackActor, isCurrentShellEvent,
-  legacyShellFlags, sessionMatchesPc,
+  clientExtraWithoutReserved, createBurstTracker, createEventThrottle, currentShellActor, fallbackActor, isCurrentShellEvent,
+  legacyShellFlags, occurredAtFlags, sessionMatchesPc, type ActorClaim, type ActorDecision, type SessionIdentity,
 } from '../devices/emrAuditRecord';
 
 // Per-PC pacing of signed EMR audit events (after signature verification). A PC may send EMR_AUDIT_PC_BURST
@@ -84,6 +84,22 @@ interface AuditDeps {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Checks the current shell's actor claim: the session's own user needs no lookup; otherwise a UUID of an existing
+ * user whose organisation is the PC's (a disabled account still counts — the event may predate the disabling).
+ */
+async function checkActorClaim(pool: Pool, raw: unknown, pc: PcInfo, session: SessionIdentity | null): Promise<ActorClaim> {
+  if (raw === undefined || raw === null) return { present: false, userId: null, valid: false };
+  const userId = typeof raw === 'string' ? raw : null;
+  if (!userId || !isUuid(userId) || !pc.orgResolved) return { present: true, userId, valid: false };
+  if (session && session.userId === userId) return { present: true, userId, valid: true };
+  const { rows } = await pool.query<{ organization_id: string | null }>(
+    `SELECT organization_id FROM users WHERE id = $1`,
+    [userId],
+  );
+  return { present: true, userId, valid: rows.length === 1 && (rows[0].organization_id ?? null) === pc.orgId };
 }
 
 async function handleEmrAudit(pool: Pool, deps: AuditDeps, req: Request, res: Response): Promise<void> {
@@ -233,11 +249,18 @@ async function handleEmrAudit(pool: Pool, deps: AuditDeps, req: Request, res: Re
   }
 
   // --- 10. Actor and flags ---
-  const legacy = !isCurrentShellEvent(body.extra);
-  const actor = fallbackActor(pc, session, {
-    ...(legacy ? legacyShellFlags() : {}),
-    ...(legacy && deps.burst.isBurst(pc.anchorId) ? { burst: true } : {}),
-  });
+  // The current shell (extra.shellAudit: 2) says who started the EMR action and when; older shells say neither.
+  let actor: ActorDecision;
+  if (isCurrentShellEvent(body.extra)) {
+    const claim = await checkActorClaim(pool, body.extra?.actorUserId, pc, session);
+    const decided = currentShellActor(pc, session, claim);
+    actor = { ...decided, flags: { ...decided.flags, ...occurredAtFlags(body.extra?.occurredAt, ts) } };
+  } else {
+    actor = fallbackActor(pc, session, {
+      ...legacyShellFlags(),
+      ...(deps.burst.isBurst(pc.anchorId) ? { burst: true } : {}),
+    });
+  }
 
   // --- 11. Nonce + audit row, in one transaction (SEC-A L11) ---
   // A nonce already recorded (a duplicate in flight that committed first) → 0 rows → 401; concurrent

@@ -92,6 +92,58 @@ export function fallbackActor(pc: PcInfo, session: SessionIdentity | null, extra
   return { actorUserId: pc.registrantUserId, actorOrgId: pc.orgId, flags: { ...flags, actor_source: 'device_registrant' } };
 }
 
+/** What the current shell says about who started the EMR action (`extra.actorUserId`), after the server checked it. */
+export interface ActorClaim {
+  /** The event carried an actorUserId at all. */
+  present: boolean;
+  userId: string | null;
+  /** UUID, the user exists, and the user's organisation is the PC's (a disabled account still counts). */
+  valid: boolean;
+}
+
+/**
+ * Actor of a current-shell event (the table in the plan):
+ *  - claim = session user → the session user (`actor_source: 'session'`, no uncertainty flag);
+ *  - a valid claim otherwise (no session, or a different session user) → the claimed user, flagged
+ *    `actor_unverified` (`actor_source: 'device_claim'`), with `sent_by_user_id` when a session sent it;
+ *  - anything else → fallbackActor (always `actor_uncertain`), plus `actor_claim_rejected` when a claim was sent.
+ */
+export function currentShellActor(pc: PcInfo, session: SessionIdentity | null, claim: ActorClaim): ActorDecision {
+  if (pc.orgResolved && session && claim.present && claim.userId === session.userId) {
+    return { actorUserId: session.userId, actorOrgId: pc.orgId, flags: { actor_source: 'session' } };
+  }
+  if (pc.orgResolved && claim.valid && claim.userId) {
+    return {
+      actorUserId: claim.userId,
+      actorOrgId: pc.orgId,
+      flags: {
+        actor_source: 'device_claim',
+        actor_unverified: true,
+        ...(session ? { sent_by_user_id: session.userId } : { session_missing: true, actor_from_queue: true }),
+      },
+    };
+  }
+  return fallbackActor(pc, session, claim.present ? { actor_claim_rejected: true } : {});
+}
+
+const ISO_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
+
+/**
+ * The current shell's event time (`extra.occurredAt`): an ISO-8601 UTC time not later than the signed request
+ * time → `occurred_at`; present but malformed or later → `occurred_at_invalid` (the row is still recorded);
+ * absent → `occurred_at_unknown`. The row's created_at stays the time the server received it.
+ */
+export function occurredAtFlags(occurredAt: unknown, signedAtMs: number): Record<string, unknown> {
+  if (occurredAt === undefined || occurredAt === null) return { occurred_at_unknown: true };
+  if (typeof occurredAt !== 'string' || !ISO_UTC.test(occurredAt)) return { occurred_at_invalid: true };
+  const t = Date.parse(occurredAt);
+  // Date.parse rolls impossible dates over (02-30 → 03-02): the parsed time must read back as the same date and time.
+  if (Number.isNaN(t) || new Date(t).toISOString().slice(0, 19) !== occurredAt.slice(0, 19) || t > signedAtMs) {
+    return { occurred_at_invalid: true };
+  }
+  return { occurred_at: new Date(t).toISOString() };
+}
+
 /** Events from an older shell carry no event time: the row's time is when the server received it. */
 export function legacyShellFlags(): Record<string, unknown> {
   return { legacy_shell: true, occurred_at_unknown: true };

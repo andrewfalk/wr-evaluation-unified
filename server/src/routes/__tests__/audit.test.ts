@@ -127,8 +127,17 @@ function deviceHandlers(rows: DeviceRow[]): QueryHandler[] {
   ];
 }
 
+// users(id → organization_id) for the current shell's actor claim.
+const USERS: Record<string, string | null> = {};
+function usersHandler(): QueryHandler {
+  return {
+    name: 'users.org', match: /SELECT organization_id FROM users WHERE id = \$1/,
+    reply: (_sql, params) => (String(params[0]) in USERS ? { rows: [{ organization_id: USERS[String(params[0])] }] } : { rows: [] }),
+  };
+}
+
 function makeFake(rows: DeviceRow[], options: { session?: boolean } = {}): FakePool {
-  return createFakePool({ handlers: [...(options.session === false ? [] : [authSessionHandler()]), ...deviceHandlers(rows)] });
+  return createFakePool({ handlers: [...(options.session === false ? [] : [authSessionHandler()]), usersHandler(), ...deviceHandlers(rows)] });
 }
 
 function auditApp(fake: FakePool, options: AuditRouterOptions = {}) {
@@ -474,13 +483,13 @@ describe('POST /api/audit/emr', () => {
     expect(res.status).toBe(200);
   });
 
-  it('the current shell\'s marker turns off the older-shell flags', async () => {
+  it("the current shell's marker turns off the older-shell flags (legacy_shell, burst); without an event time it is unknown", async () => {
     const pc = makePc();
     const fake = makeFake([row(pc)]);
     const body = { ...VALID_BODY, extra: { shellAudit: 2 } };
     expect((await send(auditApp(fake), pc, { body })).status).toBe(200);
     expect(lastAuditEntry().extra).not.toHaveProperty('legacy_shell');
-    expect(lastAuditEntry().extra).not.toHaveProperty('occurred_at_unknown');
+    expect(lastAuditEntry().extra).toMatchObject({ occurred_at_unknown: true });
   });
 
   it('an older shell\'s events sent back to back are flagged as a burst (the first one is not)', async () => {
@@ -641,4 +650,109 @@ describe('POST /api/audit/emr', () => {
     expect(Number(blocked.headers['retry-after'])).toBeGreaterThanOrEqual(1);
     expect(fake.callsTo('devices.scan')).toHaveLength(0);
   }, 30_000);
+  // ── Current shell: actor claim and event time (extra.shellAudit: 2) ──────
+
+  describe('current shell values', () => {
+    const SAME_ORG = '3f0c2b1a-1111-4222-8333-444455556666';
+    const OTHER_ORG = '3f0c2b1a-1111-4222-8333-444455557777';
+    const NO_ORG = '3f0c2b1a-1111-4222-8333-444455558888';
+    const SESSION_USER = '3f0c2b1a-1111-4222-8333-444455559999';
+    beforeEach(() => {
+      USERS[SAME_ORG] = 'org-1';
+      USERS[OTHER_ORG] = 'org-2';
+      USERS[NO_ORG] = null;
+      USERS[SESSION_USER] = 'org-1';
+    });
+    const current = (extra: Record<string, unknown>) => ({ ...VALID_BODY, extra: { shellAudit: 2, eventId: 'e-1', ...extra } });
+    const sessionTok = () => userToken(SESSION_USER);
+
+    async function record(extra: Record<string, unknown>, options: { token?: string | null; ts?: string } = {}) {
+      const pc = makePc();
+      const fake = makeFake([row(pc)]);
+      const res = await send(auditApp(fake), pc, { body: current(extra), token: options.token === undefined ? sessionTok() : options.token, ts: options.ts });
+      expect(res.status).toBe(200); // never refused for these values
+      return { entry: lastAuditEntry(), fake };
+    }
+
+    it('claim = session user → the session user, no uncertainty flag; a valid event time is recorded', async () => {
+      const ts = new Date().toISOString();
+      const occurredAt = new Date(Date.now() - 60_000).toISOString();
+      const { entry, fake } = await record({ actorUserId: SESSION_USER, occurredAt }, { ts });
+      expect(entry).toMatchObject({ actorUserId: SESSION_USER, actorOrgId: 'org-1' });
+      expect(entry.extra).toMatchObject({ actor_source: 'session', occurred_at: occurredAt, eventId: 'e-1', shellAudit: 2 });
+      for (const k of ['actor_uncertain', 'actor_unverified', 'legacy_shell', 'occurred_at_unknown', 'occurred_at_invalid', 'burst']) {
+        expect(entry.extra).not.toHaveProperty(k);
+      }
+      expect(fake.callsTo('users.org')).toHaveLength(0); // no lookup for the session's own user
+    });
+
+    it('a valid claim different from the session → the claimed user, flagged unverified, with the sender', async () => {
+      const { entry } = await record({ actorUserId: SAME_ORG, occurredAt: new Date().toISOString() });
+      expect(entry).toMatchObject({ actorUserId: SAME_ORG, actorOrgId: 'org-1' });
+      expect(entry.extra).toMatchObject({ actor_source: 'device_claim', actor_unverified: true, sent_by_user_id: SESSION_USER });
+    });
+
+    it('a valid claim without a session → the claimed user, flagged unverified and session missing', async () => {
+      const { entry } = await record({ actorUserId: SAME_ORG, occurredAt: new Date().toISOString(), queued: true }, { token: null });
+      expect(entry).toMatchObject({ actorUserId: SAME_ORG, actorOrgId: 'org-1' });
+      expect(entry.extra).toMatchObject({ actor_source: 'device_claim', actor_unverified: true, session_missing: true, queued: true });
+      expect(entry.extra).not.toHaveProperty('sent_by_user_id');
+    });
+
+    it.each([
+      ['an unknown user', 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'],
+      ['a user of another organisation', OTHER_ORG],
+      ['an account without an organisation', NO_ORG],
+      ['a value that is not a UUID', 'user-1'],
+      ['a value that is not a string', 42],
+    ])('a claim of %s is rejected: fallback actor, flagged uncertain and claim rejected', async (_name, claim) => {
+      const withSession = await record({ actorUserId: claim, occurredAt: new Date().toISOString() });
+      expect(withSession.entry).toMatchObject({ actorUserId: SESSION_USER, actorOrgId: 'org-1' });
+      expect(withSession.entry.extra).toMatchObject({ actor_source: 'session_fallback', actor_uncertain: true, actor_claim_rejected: true });
+      const noSession = await record({ actorUserId: claim }, { token: null });
+      expect(noSession.entry).toMatchObject({ actorUserId: 'user-1', actorOrgId: 'org-1' }); // the PC's registrant
+      expect(noSession.entry.extra).toMatchObject({ actor_source: 'device_registrant', actor_uncertain: true, actor_claim_rejected: true, session_missing: true });
+    });
+
+    it('a current-shell event without a claim: fallback actor flagged uncertain (no claim-rejected flag), time unknown', async () => {
+      const { entry } = await record({});
+      expect(entry).toMatchObject({ actorUserId: SESSION_USER });
+      expect(entry.extra).toMatchObject({ actor_source: 'session_fallback', actor_uncertain: true, occurred_at_unknown: true });
+      expect(entry.extra).not.toHaveProperty('actor_claim_rejected');
+      expect(entry.extra).not.toHaveProperty('legacy_shell');
+    });
+
+    it.each([
+      ['later than the signed time', () => new Date(Date.now() + 60_000).toISOString()],
+      ['malformed', () => '2026-11-23 10:00'],
+      ['not a string', () => 1700000000000],
+      ['an impossible date', () => '2026-13-45T00:00:00.000Z'],
+      ['a day that does not exist in its month (Feb 30)', () => '2026-02-30T00:00:00.000Z'],
+      ['a day that does not exist in its month (Apr 31)', () => '2026-04-31T12:00:00Z'],
+    ])('an event time %s is flagged invalid and the event is still recorded', async (_name, value) => {
+      const { entry } = await record({ actorUserId: SESSION_USER, occurredAt: value() });
+      expect(entry.extra).toMatchObject({ occurred_at_invalid: true, actor_source: 'session' });
+      expect(entry.extra).not.toHaveProperty('occurred_at');
+    });
+
+    it('a key in several organisations: no actor, org_unresolved, the claim rejected', async () => {
+      const pc = makePc();
+      const fake = makeFake([row(pc, { organization_id: 'org-1' }), row(pc, { organization_id: 'org-2', user_id: 'user-2' })]);
+      const res = await send(auditApp(fake), pc, { body: current({ actorUserId: SESSION_USER }), token: sessionTok() });
+      expect(res.status).toBe(200);
+      expect(lastAuditEntry()).toMatchObject({ actorUserId: null, actorOrgId: null });
+      expect(lastAuditEntry().extra).toMatchObject({ org_unresolved: true, actor_uncertain: true, actor_claim_rejected: true });
+    });
+
+    it('every case without the session user confirmed carries an uncertainty or unverified flag', async () => {
+      const cases: [Record<string, unknown>, string | null][] = [
+        [{}, null], [{}, sessionTok()], [{ actorUserId: SAME_ORG }, null], [{ actorUserId: SAME_ORG }, sessionTok()],
+        [{ actorUserId: OTHER_ORG }, sessionTok()], [{ actorUserId: 'nope' }, null],
+      ];
+      for (const [extra, tok] of cases) {
+        const { entry } = await record(extra, { token: tok });
+        expect(entry.extra.actor_uncertain === true || entry.extra.actor_unverified === true).toBe(true);
+      }
+    });
+  });
 });
