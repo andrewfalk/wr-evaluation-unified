@@ -191,25 +191,89 @@ describe('대기열 회차(auditQueueStore)', () => {
     expect(fileLines(dir)).toEqual([]);
   });
 
-  it('넘겨받으려던 잠금이 그사이 다른 프로세스의 새 잠금으로 바뀌었으면 지우지 않고 되돌려 놓는다', () => {
+  it('넘겨받으려던 잠금이 그사이 다른 프로세스의 새 잠금으로 바뀌었으면 그 잠금을 옮기거나 지우지 않는다(세 번째 프로세스가 끼어들어도)', () => {
     const dir = tempDir();
     const lock = path.join(dir, 'audit-emr-pending.enc.lock');
-    fs.writeFileSync(lock, '999999999:gone');
+    fs.writeFileSync(lock, '999999999:gone'); // 끝난 프로세스의 잠금
+    const otherOwner = `${process.ppid}:other-owner`;
+    const third = `${process.ppid}:third`;
     let swapped = false;
+    let thirdTried = false;
     const fsProxy = {
       ...fs,
+      // 이 프로세스가 끝난 잠금을 확인한 직후, 다른 프로세스가 그 잠금을 정리하고 새 잠금을 잡는다.
+      readFileSync: (p, ...a) => {
+        const v = fs.readFileSync(p, ...a);
+        if (p === lock && !swapped) { swapped = true; fs.unlinkSync(lock); fs.writeFileSync(lock, otherOwner); }
+        return v;
+      },
+      // 이 프로세스가 잠금 파일을 옮기거나 지워 잠금 이름이 비면, 세 번째 프로세스가 그 틈에 잠금을 잡는다.
       renameSync: (from, to) => {
-        if (from === lock && !swapped) { swapped = true; fs.writeFileSync(lock, `${process.ppid}:new-owner`); } // 확인과 옮기기 사이
-        return fs.renameSync(from, to);
+        const r = fs.renameSync(from, to);
+        if (from === lock && !thirdTried) { thirdTried = true; try { fs.writeFileSync(lock, third, { flag: 'wx' }); } catch { /* 이미 있음 */ } }
+        return r;
+      },
+      unlinkSync: (p) => {
+        const r = fs.unlinkSync(p);
+        if (p === lock && swapped && !thirdTried) { thirdTried = true; try { fs.writeFileSync(lock, third, { flag: 'wx' }); } catch { /* 이미 있음 */ } }
+        return r;
       },
     };
     let t = Date.now();
     const store = makeStore(dir, { fs: fsProxy, now: () => { t += 500; return t; } });
     store.enqueue(e(1));
-    expect(fs.readFileSync(lock, 'utf8')).toBe(`${process.ppid}:new-owner`);
+    expect(fs.readFileSync(lock, 'utf8')).toBe(otherOwner); // 다른 프로세스의 잠금이 그대로다
     expect(fileLines(dir)).toEqual([]); // 잠금이 없으니 대기열 파일은 그대로
     expect(fs.readdirSync(dir).filter((n) => n.startsWith('audit-emr-pending.spool-'))).toHaveLength(1);
-    expect(fs.readdirSync(dir).filter((n) => n.includes('.stale-'))).toEqual([]);
+    expect(fs.readdirSync(dir).filter((n) => n.includes('.reclaim-') || n.includes('.stale-'))).toEqual([]);
+  });
+
+  it('넘겨받기 표식을 남기고 끝난 프로세스가 있어도 오래된 잠금을 넘겨받고, 오래된 표식은 시작할 때 버린다', () => {
+    const dir = tempDir();
+    const lock = path.join(dir, 'audit-emr-pending.enc.lock');
+    fs.writeFileSync(lock, '999999999:gone');
+    const past = new Date(Date.now() - 5 * 60_000);
+    let leftover = null;
+    const fsProxy = {
+      ...fs,
+      linkSync: (from, to) => {
+        if (String(to).includes('.reclaim-') && String(to).endsWith('-0') && !leftover) {
+          leftover = to; // 첫 세대 표식을 만든 프로세스가 도중에 끝났다
+          fs.writeFileSync(to, '999999998:0');
+          fs.utimesSync(to, past, past);
+        }
+        return fs.linkSync(from, to);
+      },
+    };
+    makeStore(dir, { fs: fsProxy }).enqueue(e(1));
+    expect(leftover).not.toBeNull();
+    expect(entries(dir).map((x) => x.targetId)).toEqual(['t1']);
+    expect(fs.existsSync(lock)).toBe(false);
+    expect(fs.existsSync(leftover)).toBe(true); // 남의 표식은 그 자리에서 지우지 않는다
+    const young = `${lock}.reclaim-young-0`;
+    fs.writeFileSync(young, '1:1');
+    makeStore(dir); // 다음 시작
+    expect(fs.existsSync(leftover)).toBe(false);
+    expect(fs.existsSync(young)).toBe(true);
+  });
+
+  it('대기열 끝에 덧붙이기가 도중에 실패해 남은 조각이 있어도, 뒤에 붙는 항목(직접 추가·보조 파일에서 옮김)은 따로 읽힌다', async () => {
+    const dir = tempDir();
+    const queue = path.join(dir, 'audit-emr-pending.enc');
+    const lock = path.join(dir, 'audit-emr-pending.enc.lock');
+    makeStore(dir).enqueue(e(1));
+    fs.appendFileSync(queue, 'enc:QUJD'); // 줄바꿈 없이 끝난 조각(디스크가 가득 차 쓰기가 끊긴 경우)
+    makeStore(dir).enqueue(e(2));
+    fs.appendFileSync(queue, 'enc:REVG');
+    fs.writeFileSync(lock, `${process.ppid}:live`); // 다른 프로세스가 잠금을 쥔 동안의 추가는 보조 파일로
+    let t = Date.now();
+    makeStore(dir, { now: () => { t += 500; return t; } }).enqueue(e(3));
+    fs.unlinkSync(lock);
+    const sent = [];
+    await makeStore(dir).flush(async (entry) => { sent.push(entry.targetId); return 'ok'; });
+    expect(sent).toEqual(['t1', 't2', 't3']);
+    expect(fileLines(dir, 'audit-emr-quarantine.enc')).toEqual(['enc:QUJD', 'enc:REVG']); // 조각은 그 줄만 격리
+    expect(fileLines(dir)).toEqual([]);
   });
 
   it('날짜형 Retry-After는 지금과의 차이로 읽는다', () => {
@@ -248,7 +312,7 @@ describe('대기열 회차(auditQueueStore)', () => {
     fs.writeFileSync(lock, '999999999:gone');
     const fsProxy = {
       ...fs,
-      renameSync: (from, to) => { if (from === lock) throw Object.assign(new Error('EPERM'), { code: 'EPERM' }); return fs.renameSync(from, to); },
+      unlinkSync: (p) => { if (p === lock) throw Object.assign(new Error('EPERM'), { code: 'EPERM' }); return fs.unlinkSync(p); },
     };
     let calls = 0;
     let t = Date.now();
@@ -256,6 +320,7 @@ describe('대기열 회차(auditQueueStore)', () => {
     store.enqueue(e(1));
     expect(calls).toBeLessThan(500);
     expect(fs.readdirSync(dir).filter((n) => n.startsWith('audit-emr-pending.spool-'))).toHaveLength(1);
+    expect(fs.readdirSync(dir).filter((n) => n.includes('.reclaim-'))).toEqual([]);
   });
 
   it('잠금을 풀 때 자기 잠금만 지운다', () => {
