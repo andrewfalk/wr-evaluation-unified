@@ -173,9 +173,11 @@ async function handleEmrAudit(pool: Pool, deps: AuditDeps, req: Request, res: Re
   }
 
   // --- 8. Replay check before pacing, so a replay of a recorded request does not use up the PC's pace ---
+  // New nonces are recorded under the PC's fixed row; nonces recorded under any other row of the PC (by earlier
+  // versions, which keyed them by the header id) still count.
   const seen = await pool.query(
-    `SELECT 1 FROM emr_audit_nonces WHERE device_id = $1 AND nonce = $2`,
-    [pc.anchorId, deviceNonce],
+    `SELECT 1 FROM emr_audit_nonces WHERE device_id = ANY($1::uuid[]) AND nonce = $2 LIMIT 1`,
+    [pc.rows.map((r) => r.id), deviceNonce],
   );
   if ((seen.rowCount ?? 0) > 0) {
     res.status(401).json({ code: 'UNAUTHORIZED', error: 'Duplicate request (nonce reuse)' });

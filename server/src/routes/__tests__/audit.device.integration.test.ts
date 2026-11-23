@@ -185,6 +185,14 @@ describe.skipIf(!TEST_DATABASE_URL)('EMR audit from a device registered through 
     expect(replay.body.error).toMatch(/nonce/i);
     expect(await rowsByProbe(probe)).toHaveLength(1);
 
+    // A nonce recorded under another row of the PC (earlier versions keyed nonces by the header id) is still a replay.
+    const second = await insertRow(keys, (await org.makeUser('doctor', 'EMR 의사 2')).id, org.orgId, 'active');
+    const oldNonce = crypto.randomUUID();
+    await pool.query(`INSERT INTO emr_audit_nonces (device_id, nonce) VALUES ($1, $2)`, [second, oldNonce]);
+    const oldReplay = await sendEvent(keys, second, doctor, { probe: crypto.randomUUID() }, { nonce: oldNonce });
+    expect(oldReplay.status).toBe(401);
+    expect(oldReplay.body.error).toMatch(/nonce/i);
+
     const malformed = await sendEvent(keys, 'not-a-uuid', doctor, { probe: crypto.randomUUID() });
     expect(malformed.status).toBe(401);
     expect(malformed.body).toEqual({ code: 'UNAUTHORIZED', error: 'Device not recognized' });

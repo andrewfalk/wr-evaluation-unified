@@ -84,7 +84,7 @@ function nonceHandlers(): QueryHandler[] {
   return [
     {
       name: 'nonce.seen', via: 'pool', match: /SELECT 1 FROM emr_audit_nonces/,
-      reply: (_sql, params) => (committed.has(`${String(params[0])}:${String(params[1])}`) ? { rows: [{ '?column?': 1 }] } : { rows: [] }),
+      reply: (_sql, params) => ((params[0] as string[]).some((id) => committed.has(`${id}:${String(params[1])}`)) ? { rows: [{ '?column?': 1 }] } : { rows: [] }),
     },
     {
       name: 'nonce.claim', via: 'client', match: /INSERT INTO emr_audit_nonces/,
