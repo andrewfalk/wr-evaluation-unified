@@ -7,10 +7,13 @@ const { app, net, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const { enqueue, flush, checkCorrupt, handleCorrupt } = require('./auditQueue');
+const { enqueue, quarantineEntry, flush, quarantineFileName } = require('./auditQueue');
 const { mustChangePassword, readTokenIdentity } = require('./accessTokenClaims');
 const {
+  RESEND_MAX_PER_ROUND,
+  RESEND_GAP_MS,
   REQUEST_TIMEOUT_MS,
+  classifySendFailure,
   buildSignedAuditRequest,
   interpretHttpResponse,
   isTokenExpiryError,
@@ -113,7 +116,7 @@ function initDevice() {
 // ── HTTP helper ──────────────────────────────────────────────────────────────
 
 // One request, with a time limit (a request that does not finish in REQUEST_TIMEOUT_MS is aborted and fails
-// like a network error) — so a registration call that never answers cannot hold _registering forever.
+// like a network error). Resolves { status, data } for 2xx/3xx JSON, rejects otherwise (interpretHttpResponse).
 function httpPost(url, headers, body) {
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -134,7 +137,7 @@ function httpPost(url, headers, body) {
       res.on('data', c => { data += c; });
       res.on('error', err => finish(reject, err));
       res.on('end', () => {
-        const result = interpretHttpResponse(res.statusCode, data);
+        const result = interpretHttpResponse(res.statusCode, data, res.headers);
         if (result instanceof Error) finish(reject, result);
         else finish(resolve, result);
       });
@@ -324,41 +327,75 @@ async function recordAudit(entry, context) {
   try {
     await doSendWithSessionFallback(stamped, token);
   } catch (err) {
+    if (classifySendFailure(err).kind === 'quarantine') {
+      // The entry itself was refused (the server will never take it as it is): set aside, not resent. If it cannot be
+      // set aside, it goes to the queue (the next round tries again) — never dropped.
+      console.error('[audit] entry refused, set aside:', err.message);
+      if (quarantineEntry(stamped)) {
+        if (entry.action !== 'audit_queue_corrupt') await reportSetAside({ rejectedLines: 1 }).catch(() => {});
+        return;
+      }
+    }
     console.error('[audit] send failed, enqueuing:', err.message);
     enqueue(stamped);
     noteSendError(err);
   }
 }
 
-// Attempt to flush the pending queue. Handles corrupt file gracefully.
-// Asks for the device state first when it is due (approvals of a pending PC and transient failures heal
-// without an app restart — see tryRegister).
-async function flushQueue() {
-  await tryRegister();
-  if (!canSend()) return;
+// Tells the server how many queued entries were set aside (diagnostic — the existing audit_queue_corrupt action).
+async function reportSetAside({ corruptLines = 0, rejectedLines = 0 }) {
+  await recordAudit({
+    action:  'audit_queue_corrupt',
+    outcome: 'failure',
+    extra:   { kind: 'set_aside', corruptLines, rejectedLines, quarantineFile: quarantineFileName() },
+  });
+}
 
-  if (checkCorrupt()) {
-    const name = handleCorrupt();
-    console.error('[audit] corrupt queue file renamed:', name);
-    await recordAudit({
-      action:  'audit_queue_corrupt',
-      outcome: 'failure',
-      extra:   { corruptFile: name },
-    }).catch(() => {});
-    return;
+let _nextRoundAt = 0; // a 429's Retry-After: no resend round before this time
+let _roundRunning = false; // one flushQueue at a time, from the state check to the end of the round
+
+// One resend round of the queue (see auditQueueStore.js): at most RESEND_MAX_PER_ROUND entries, RESEND_GAP_MS
+// apart. The round stops and keeps the rest on 429 (and waits for Retry-After), 5xx, network errors, timeouts,
+// 403 and unknown answers; a device problem 401 also stops it and asks for the device state again; an entry the
+// server refuses as such (400 INVALID_BODY, 413) is set aside and the round goes on. Asks for the device state
+// first when it is due (approvals of a pending PC and transient failures heal without an app restart).
+async function flushQueue() {
+  if (_roundRunning || Date.now() < _nextRoundAt) return;
+  _roundRunning = true;
+  try {
+    await flushQueueRound();
+  } finally {
+    _roundRunning = false;
   }
+}
+
+async function flushQueueRound() {
+  await tryRegister();
+  if (!canSend() || Date.now() < _nextRoundAt) return;
 
   const token = _getAccessToken();
-  let refused = null;
-  await flush(async entry => {
+  let stop = null;
+  const result = await flush(async entry => {
     try {
       await doSendWithSessionFallback(forQueuedSend(entry), token);
+      return 'ok';
     } catch (err) {
-      if (!refused && err?.status === 401 && !isTokenExpiryError(err)) refused = err;
-      throw err;
+      const kind = classifySendFailure(err);
+      if (kind.kind === 'quarantine') return 'quarantine';
+      stop = { err, ...kind };
+      return 'stop';
     }
-  });
-  if (refused) noteSendError(refused);
+  }, { maxPerRound: RESEND_MAX_PER_ROUND, gapMs: RESEND_GAP_MS });
+  if (result.skipped) return;
+
+  if (stop?.retryAfterMs) _nextRoundAt = Date.now() + stop.retryAfterMs;
+  if (stop?.kind === 'device_problem') noteSendError(stop.err);
+  if (stop) console.warn('[audit] resend round stopped:', stop.err?.message ?? stop.kind);
+  const { corrupt, rejected } = result.quarantined;
+  if (corrupt + rejected > 0) {
+    console.error('[audit] queue entries set aside:', corrupt, 'unreadable,', rejected, 'refused');
+    await reportSetAside({ corruptLines: corrupt, rejectedLines: rejected }).catch(() => {});
+  }
 }
 
 // Called once from app.whenReady() after main window is created.

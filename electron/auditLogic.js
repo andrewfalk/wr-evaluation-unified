@@ -6,9 +6,15 @@ const crypto = require('crypto');
 
 // 토큰 자체가 문제인 401(만료·폐기). 감사 경로가 장치 문제로 돌려주는 401(UNAUTHORIZED)은 여기에 넣지 않는다 —
 // 토큰 없이 다시 보내는 것은 토큰 문제일 때만이다.
-const TOKEN_EXPIRY_CODES = new Set(['TOKEN_INVALID', 'SESSION_REVOKED']);
-// 서버 요청 하나의 시간 제한 — 넘기면 요청을 끊고 네트워크 오류처럼 실패한다.
+const TOKEN_EXPIRY_CODES = new Set(['TOKEN_INVALID', 'SESSION_REVOKED', 'SESSION_EXPIRED', 'USER_DISABLED']);
+
+// 재전송 회차: 회차당 보낼 수 있는 항목 수와 요청 사이 간격, 요청 하나의 제한 시간.
+// (서버는 PC마다 한 번에 300건, 그 뒤 초당 10건을 받는다 — 응답을 늦추되 거부하지 않는다.)
+const RESEND_MAX_PER_ROUND = 500;
+const RESEND_GAP_MS = 20;
 const REQUEST_TIMEOUT_MS = 30 * 1000;
+// 429에 Retry-After가 없을 때 다음 회차까지 기다리는 시간.
+const DEFAULT_RETRY_AFTER_MS = 60 * 1000;
 
 /** 서버로 보내는 본문: action·outcome, 있을 때만 targetId·extra. */
 function buildAuditBody(entry) {
@@ -55,12 +61,29 @@ function buildSignedAuditRequest({ entry, deviceId, privateKey, accessToken }, d
  * HTTP 응답 해석: 2xx·3xx JSON → { status, data }, 4xx·5xx JSON → Error(status·code), JSON이 아니면 Error('parse error').
  * 성공이면 객체를 돌려주고 실패면 Error를 돌려준다(던지지 않는다 — 호출부가 reject한다).
  */
-function interpretHttpResponse(statusCode, rawBody) {
+/** Retry-After: 초(정수) 또는 HTTP 날짜. 날짜는 지금과의 차이(지난 날짜면 0). 읽을 수 없으면 NaN. */
+function parseRetryAfterSec(value, nowMs = Date.now()) {
+  if (value === undefined || value === null) return NaN;
+  const text = String(value).trim();
+  if (/^\d+$/.test(text)) return Number(text);
+  const at = Date.parse(text);
+  return Number.isNaN(at) ? NaN : Math.max(0, Math.ceil((at - nowMs) / 1000));
+}
+
+function interpretHttpResponse(statusCode, rawBody, headers) {
+  const retryAfter = parseRetryAfterSec(Array.isArray(headers?.['retry-after']) ? headers['retry-after'][0] : headers?.['retry-after']);
   let json;
   try {
     json = JSON.parse(rawBody);
   } catch {
-    return new Error(`parse error HTTP ${statusCode}`);
+    const err = new Error(`parse error HTTP ${statusCode}`);
+    // 본문이 JSON이 아닌 오류 응답(프록시 등)도 상태와 Retry-After는 남긴다 — 429·413을 그대로 처리할 수 있게.
+    if (statusCode >= 400) {
+      err.status = statusCode;
+      err.code = null;
+      if (Number.isFinite(retryAfter) && retryAfter >= 0) err.retryAfterSec = retryAfter;
+    }
+    return err;
   }
   if (statusCode >= 400) {
     let err;
@@ -73,6 +96,7 @@ function interpretHttpResponse(statusCode, rawBody) {
     err.status = statusCode;
     err.code   = json?.code ?? null;
     err.body   = json;
+    if (Number.isFinite(retryAfter) && retryAfter >= 0) err.retryAfterSec = retryAfter;
     return err;
   }
   return { status: statusCode, data: json };
@@ -101,6 +125,23 @@ function createAuditContext(token, deps = {}) {
   };
 }
 
+/**
+ * 감사 전송 실패의 분류(토큰 없이 한 번 더 보낸 뒤의 실패):
+ *  - 'quarantine': 그 항목만의 문제(400 INVALID_BODY, 413) — 격리하고 다음 항목을 보낸다.
+ *  - 'device_problem': 장치 문제 401 — 회차를 멈추고 장치 상태를 다시 묻는다.
+ *  - 'stop'(기본): 429(retryAfterMs), 5xx, 네트워크 오류·시간 초과, 403, 형식을 알 수 없는 응답 — 회차를 멈추고 항목을 남긴다.
+ */
+function classifySendFailure(err) {
+  const status = err?.status;
+  if (status === 400 && err.code === 'INVALID_BODY') return { kind: 'quarantine' };
+  if (status === 413) return { kind: 'quarantine' };
+  if (status === 401 && !TOKEN_EXPIRY_CODES.has(err.code)) return { kind: 'device_problem' };
+  if (status === 429) {
+    return { kind: 'stop', retryAfterMs: typeof err.retryAfterSec === 'number' ? err.retryAfterSec * 1000 : DEFAULT_RETRY_AFTER_MS };
+  }
+  return { kind: 'stop' };
+}
+
 /** 기록 시점 정보를 extra에 넣은 항목(기존 extra 값은 그대로 둔다). 항목 형식 {action, outcome, targetId?, extra?}는 그대로. */
 function stampEntry(entry, context) {
   return {
@@ -125,13 +166,18 @@ function forQueuedSend(entry) {
 }
 
 module.exports = {
+  parseRetryAfterSec,
+  RESEND_MAX_PER_ROUND,
+  RESEND_GAP_MS,
+  REQUEST_TIMEOUT_MS,
+  DEFAULT_RETRY_AFTER_MS,
+  classifySendFailure,
   SHELL_AUDIT_MARKER,
   createAuditContext,
   stampEntry,
   isStampedEntry,
   forQueuedSend,
   TOKEN_EXPIRY_CODES,
-  REQUEST_TIMEOUT_MS,
   buildAuditBody,
   canonicalMessage,
   buildSignedAuditRequest,

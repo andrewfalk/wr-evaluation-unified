@@ -76,13 +76,13 @@ describe('auditLogic — 응답 해석', () => {
     expect(e).toMatchObject({ message: 'HTTP 500', status: 500 });
   });
 
-  it('JSON이 아니면 상태와 무관하게 parse error(status·code 없음)', () => {
-    for (const status of [200, 502]) {
-      const e = interpretHttpResponse(status, '<html>');
-      expect(e).toBeInstanceOf(Error);
-      expect(e.message).toBe(`parse error HTTP ${status}`);
-      expect(e.status).toBeUndefined();
-    }
+  it('JSON이 아니면 parse error — 2xx는 상태 없음, 오류 상태(4xx·5xx)는 상태와 Retry-After를 남긴다', () => {
+    const ok = interpretHttpResponse(200, '<html>');
+    expect(ok).toBeInstanceOf(Error);
+    expect(ok.message).toBe('parse error HTTP 200');
+    expect(ok.status).toBeUndefined();
+    const bad = interpretHttpResponse(502, '<html>', { 'retry-after': ['15'] });
+    expect(bad).toMatchObject({ message: 'parse error HTTP 502', status: 502, code: null, retryAfterSec: 15 });
   });
 
   it('토큰 만료·폐기 401만 토큰 문제다(장치 문제 401·다른 상태는 아님)', () => {
