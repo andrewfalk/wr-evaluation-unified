@@ -550,7 +550,7 @@ try {
           const { token: _token, csrf: _csrf, ...rest } = a;
           return [k, rest];
         }));
-        fs.rmSync(KEEP_STATE, { force: true });
+        // 이미 있는 파일(이전 실행의 재개 정보일 수 있다)은 덮지 않는다 — 있으면 실패하고 이번 실행의 시험 데이터를 정리한다.
         fs.writeFileSync(KEEP_STATE, JSON.stringify({ run: RUN, orgId, org2Id, accounts: storedAccounts, ...state }, null, 2), { mode: 0o600, flag: 'wx' });
         keep = true;
         console.log(`상태를 ${KEEP_STATE}에 남겼습니다(시험 계정·PC 폴더 유지) — 서버를 다시 올린 뒤 --resume-state로 이어 갑니다.`);
