@@ -39,7 +39,7 @@
 
 ```
 [backup 컨테이너]
-  crond (02:00 daily)
+  crond (02:00 daily, 한국 시간 — TZ=KST-9)
     └─ backup.sh
          ├─ pg_dump (Fc format) → /tmp/wr-backup-YYYYMMDD_HHmmss.dump
          ├─ gpg --encrypt → /backups/daily/wr-backup-YYYYMMDD_HHmmss.dump.gpg
@@ -113,7 +113,7 @@ docker compose exec backup ls /backups/daily/
 
 ### 4-1. 자동 백업 (일반)
 
-`backup` 컨테이너의 crond가 **매일 02:00**에 자동 실행합니다.  
+`backup` 컨테이너의 crond가 **매일 02:00(한국 시간)** 에 자동 실행합니다. 백업 컨테이너만 `TZ=KST-9`로 한국 시간을 쓰므로(7.3.2부터 — 그 전에는 컨테이너 시계가 UTC라 한국 시간 11:00에 돌았다) **백업 파일 이름의 날짜·시각과 월(monthly)·연(yearly) 보존 태그도 한국 시간 기준**입니다. 다른 컨테이너의 시계는 UTC 그대로입니다.  
 `.env`에 `BACKUP_GPG_RECIPIENT`를 설정한 뒤 `--profile backup`으로 활성화합니다.
 
 ```bash

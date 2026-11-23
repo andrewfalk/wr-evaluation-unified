@@ -705,7 +705,7 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml \
 
 출력에 `Status: success`가 표시되면 백업이 정상 동작합니다.
 
-자동 백업은 **매일 새벽 2시** (서버 로컬 시간 기준)에 실행됩니다.
+자동 백업은 **매일 새벽 2시(한국 시간)** 에 실행됩니다 — 백업 컨테이너만 `TZ=KST-9`를 쓴다(7.3.2부터, 그 전에는 컨테이너 시계 UTC 기준이라 한국 시간 11:00). 백업 파일 이름과 월·연 보존 태그도 한국 시간 기준입니다. 호스트에서 백업을 내보내는 예약 작업(`register-backup-export-task.ps1`)은 02:00 뒤로 잡습니다.
 
 ---
 

@@ -1246,6 +1246,14 @@ function runHelper(args, timeoutMs = 15000) {
 
 // ── EMR helpers ───────────────────────────────────────────────────────────────
 
+const EMR_GATE_MESSAGES = {
+  pending:         '이 PC의 EMR 접근이 관리자 승인 대기 중입니다.',
+  revoked:         '이 PC의 EMR 접근이 해지되었습니다. 관리자에게 문의하세요.',
+  other_org:       '이 PC는 다른 기관에 등록되어 있어 EMR 연동을 사용할 수 없습니다.',
+  org_unconfirmed: '이 PC의 EMR 장치 승인을 확인하는 중입니다. 잠시 후 다시 시도하세요.',
+  unregistered:    'EMR 장치 등록이 필요합니다. 관리자에게 문의하세요.',
+};
+
 // Shared origin + device gate for all EMR ipc handlers.
 // Returns a rejection object if access should be denied, null if access is allowed.
 function emrGate(event, action) {
@@ -1255,12 +1263,11 @@ function emrGate(event, action) {
     return { success: false, message: 'EMR access denied: sender origin not allowed.' };
   }
   if (IS_INTRANET_BUILD) {
-    const { status } = audit.getDeviceStatus();
-    if (status !== 'active') {
-      const msg = status === 'pending'
-        ? '이 PC의 EMR 접근이 관리자 승인 대기 중입니다.'
-        : 'EMR 장치 등록이 필요합니다. 관리자에게 문의하세요.';
-      return { success: false, message: msg };
+    // 승인 상태는 PC(장치 키) 단위이고 그 PC가 속한 기관의 로그인에서만 열린다(audit.getEmrGate, deviceState.js).
+    const { allowed, reason } = audit.getEmrGate();
+    if (!allowed) {
+      if (reason === 'org_unconfirmed') audit.tryRegister().catch(() => {});
+      return { success: false, message: EMR_GATE_MESSAGES[reason] ?? EMR_GATE_MESSAGES.unregistered };
     }
   }
   return null; // access allowed
@@ -1349,6 +1356,8 @@ ipc.handle('emr-inject', async (event, fieldData) => {
     return { success: false, message: 'EMR direct input is Windows-only.' };
   }
 
+  // 행위자·시각은 동작을 시작할 때 잡는다(끝난 뒤의 기록·대기열·재전송까지 이 값).
+  const auditContext = IS_INTRANET_BUILD ? audit.captureAuditContext() : null;
   const { emrFields, source } = splitInjectPayload(fieldData);
   const result   = await execEmrInject(emrFields);
   const targetId = emrFields?.patientNo
@@ -1359,7 +1368,7 @@ ipc.handle('emr-inject', async (event, fieldData) => {
       action: 'emr_inject', outcome: result?.success ? 'success' : 'failure',
       ...(targetId ? { targetId } : {}),
       ...(source ? { extra: { source } } : {}),
-    }).catch(() => {});
+    }, auditContext).catch(() => {});
   }
   return result;
 });
@@ -1372,6 +1381,7 @@ ipc.handle('emr-extract-record', async (event, patientNo, injuryDate) => {
   if (process.platform !== 'win32') {
     return { success: false, error: 'EMR extraction is Windows-only.' };
   }
+  const auditContext = IS_INTRANET_BUILD ? audit.captureAuditContext() : null;
   // 재해일자 매칭으로 입력내역 행을 순회할 수 있어 타임아웃을 120초로 둠
   // (조회 witness 폴링 8s + 그리드 준비 6s + 행 스캔 최악 ~86s 여유).
   const result   = await runHelper(['--extract-record', String(patientNo), '--injury-date', String(injuryDate || '')], 120000);
@@ -1382,7 +1392,7 @@ ipc.handle('emr-extract-record', async (event, patientNo, injuryDate) => {
     audit.recordAudit({
       action: 'emr_extract_record', outcome: result?.success ? 'success' : 'failure',
       ...(targetId ? { targetId } : {}),
-    }).catch(() => {});
+    }, auditContext).catch(() => {});
   }
   return result;
 });
@@ -1395,9 +1405,10 @@ ipc.handle('emr-extract-consultation', async (event) => {
   if (process.platform !== 'win32') {
     return { success: false, error: 'EMR extraction is Windows-only.' };
   }
+  const auditContext = IS_INTRANET_BUILD ? audit.captureAuditContext() : null;
   const result = await runHelper(['--extract-consultation'], 15000);
   if (IS_INTRANET_BUILD) {
-    audit.recordAudit({ action: 'emr_extract_consultation', outcome: result?.success ? 'success' : 'failure' }).catch(() => {});
+    audit.recordAudit({ action: 'emr_extract_consultation', outcome: result?.success ? 'success' : 'failure' }, auditContext).catch(() => {});
   }
   return result;
 });

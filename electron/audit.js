@@ -1,13 +1,34 @@
 'use strict';
 // electron/audit.js
-// Device key management, Ed25519 signing, and EMR audit submission.
+// Device key management, Ed25519 signing, and EMR audit submission — Electron wiring (userData files,
+// safeStorage, net.request). Decisions live in auditLogic.js (no electron dependency, unit-tested).
 // Requires initAudit() to be called from app.whenReady().
 const { app, net, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const { enqueue, flush, checkCorrupt, handleCorrupt } = require('./auditQueue');
-const { mustChangePassword } = require('./accessTokenClaims');
+const { enqueue, quarantineEntry, flush, quarantineFileName } = require('./auditQueue');
+const { mustChangePassword, readTokenIdentity } = require('./accessTokenClaims');
+const {
+  RESEND_MAX_PER_ROUND,
+  RESEND_GAP_MS,
+  REQUEST_TIMEOUT_MS,
+  classifySendFailure,
+  buildSignedAuditRequest,
+  interpretHttpResponse,
+  isTokenExpiryError,
+  createAuditContext,
+  stampEntry,
+  forQueuedSend,
+} = require('./auditLogic');
+const {
+  REGISTER_MIN_SPACING_MS,
+  interpretRegisterResult,
+  applyRegisterOutcome,
+  emrGateDecision,
+  sendingAllowed,
+  shouldRegister,
+} = require('./deviceState');
 
 // ── Module state ─────────────────────────────────────────────────────────────
 
@@ -17,15 +38,14 @@ let _state = {
   publicKeyB64: null, // raw 32-byte Ed25519 public key, base64
   status:       'unregistered', // 'unregistered' | 'pending' | 'active' | 'error'
 };
+let _meta = null;          // wr-device.json as last read/written by this process
 let _getAccessToken = () => null;
 let _apiBaseUrl = '';
-let _lastRegisterAttempt = 0;
-
-// Server caps device registration at 5/hour per user (see server/src/middleware/rateLimit.ts).
-// The 5-minute flushQueue interval alone would send 12 attempts/hour, blowing through that
-// budget and (before this backoff existed) causing tryRegister to misread 429 as a hard
-// failure. Spacing retries out keeps steady-state polling comfortably under the server limit.
-const REGISTER_RETRY_INTERVAL_MS = 20 * 60 * 1000;
+let _registerAttempts = [];  // registration calls of this process (ms)
+let _freshProcess = true;    // no answer to a registration call yet in this process
+let _deviceProblem = false;  // an audit send was refused for a device problem
+let _deviceProblemSeq = 0;   // counts those refusals, so an answer to a call that started earlier does not clear a newer one
+let _checkedOrgId;           // login organisation of the last answer in this process (undefined until the first)
 
 // ── File helpers ─────────────────────────────────────────────────────────────
 
@@ -68,6 +88,7 @@ function initDevice() {
   const privateKey = meta ? loadPrivateKey() : null;
 
   if (meta?.deviceId && privateKey) {
+    _meta = meta;
     _state = {
       deviceId:     meta.deviceId,
       privateKey,
@@ -85,7 +106,8 @@ function initDevice() {
   const deviceId     = crypto.randomUUID();
 
   savePrivateKey(pkcs8Der);
-  saveMeta({ deviceId, publicKeyB64, status: 'unregistered' });
+  _meta = { deviceId, publicKeyB64, status: 'unregistered' };
+  saveMeta(_meta);
 
   _state = { deviceId, privateKey: pk, publicKeyB64, status: 'unregistered' };
   return true;
@@ -93,122 +115,162 @@ function initDevice() {
 
 // ── HTTP helper ──────────────────────────────────────────────────────────────
 
+// One request, with a time limit (a request that does not finish in REQUEST_TIMEOUT_MS is aborted and fails
+// like a network error). Resolves { status, data } for 2xx/3xx JSON, rejects otherwise (interpretHttpResponse).
 function httpPost(url, headers, body) {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn(value);
+    };
     const req = net.request({ url, method: 'POST' });
+    const timer = setTimeout(() => {
+      try { req.abort(); } catch { /* 이미 끝남 */ }
+      finish(reject, new Error('request timeout'));
+    }, REQUEST_TIMEOUT_MS);
     for (const [k, v] of Object.entries(headers)) req.setHeader(k, String(v));
     req.on('response', res => {
       let data = '';
       res.on('data', c => { data += c; });
+      res.on('error', err => finish(reject, err));
       res.on('end', () => {
-        try {
-          const json = JSON.parse(data);
-          if (res.statusCode >= 400) {
-            const msg = (typeof json?.error === 'string' ? json.error : json?.error?.message) || `HTTP ${res.statusCode}`;
-            const err = new Error(msg);
-            err.status = res.statusCode;
-            err.code   = json?.code ?? null;
-            reject(err);
-          } else {
-            resolve({ status: res.statusCode, data: json });
-          }
-        } catch {
-          reject(new Error(`parse error HTTP ${res.statusCode}`));
-        }
+        const result = interpretHttpResponse(res.statusCode, data, res.headers);
+        if (result instanceof Error) finish(reject, result);
+        else finish(resolve, result);
       });
     });
-    req.on('error', reject);
+    req.on('error', err => finish(reject, err));
     req.write(body);
     req.end();
   });
 }
 
-// ── Device registration ──────────────────────────────────────────────────────
+// ── Device registration (approval state) ─────────────────────────────────────
+//
+// When to call the registration API and what its answer does: deviceState.js. In short —
+//  - right after the first token of this process, when the login organisation changes, and after an audit send
+//    was refused for a device problem (never more often than the server's registration limits allow);
+//  - an answer from a server that works per PC (deviceScope: 'pc') is stored as is (pc field) and from then on
+//    the EMR gate opens only for that organisation's logins while the PC is active there;
+//  - an older server's answer can raise the profile-wide status to active but never lowers it;
+//  - a failed call changes nothing.
+
+let _registering = false;
+let _askAgain = false; // tryRegister was called while a call was in flight
+let _retryTimer = null;
+const QUICK_RETRY_REASONS = new Set(['first_token', 'org_changed', 'device_problem']);
+
+function currentLogin() {
+  const token = _getAccessToken();
+  return token ? readTokenIdentity(token) : null;
+}
+
+function emrGate() {
+  return emrGateDecision(_meta, currentLogin(), _state.status);
+}
+
+// A short retry while the first answer (or the answer for a new login organisation) is still missing.
+function scheduleRetry() {
+  if (_retryTimer) return;
+  _retryTimer = setTimeout(() => {
+    _retryTimer = null;
+    tryRegister().catch(e => console.error('[audit] register retry:', e.message));
+  }, REGISTER_MIN_SPACING_MS + 1000);
+  if (typeof _retryTimer.unref === 'function') _retryTimer.unref();
+}
 
 async function tryRegister() {
-  if (_state.status === 'active') return true;
   const token = _getAccessToken();
-  if (!token || !_state.publicKeyB64 || !_apiBaseUrl) return false;
+  if (!token || !_state.publicKeyB64 || !_apiBaseUrl) return emrGate().allowed;
 
   // 임시 비밀번호 상태의 토큰은 서버가 /api/devices/register를 403으로 거절한다. 그 요청이 인증 앞단의 IP 제한
-  // (분당 1회)을 소비하면, 비밀번호를 바꾼 직후의 첫 등록이 429를 받아 20분 재시도 대기에 들어가 EMR이 잠긴다.
+  // (분당 1회)을 소비하면, 비밀번호를 바꾼 직후의 첫 등록이 429를 받아 EMR이 잠긴다.
   // 그래서 요청 자체를 보내지 않는다 — 비밀번호 변경 후 새 토큰으로 setAccessToken이 다시 불리면 그때 첫 등록이 나간다.
-  if (mustChangePassword(token)) return false;
+  if (mustChangePassword(token)) return emrGate().allowed;
+  const login = readTokenIdentity(token);
+  if (!login) return emrGate().allowed;
+  if (_registering) {
+    // A call is in flight (perhaps for another login): look again once it has answered, within the limits.
+    _askAgain = true;
+    return emrGate().allowed;
+  }
 
   const now = Date.now();
-  if (now - _lastRegisterAttempt < REGISTER_RETRY_INTERVAL_MS) return false;
-  _lastRegisterAttempt = now;
+  _registerAttempts = _registerAttempts.filter(t => now - t < 60 * 60 * 1000);
+  const decision = shouldRegister({
+    meta: _meta, login, startedFresh: _freshProcess, deviceProblem: _deviceProblem, checkedOrgId: _checkedOrgId,
+    attempts: _registerAttempts,
+  }, now);
+  if (!decision.register) {
+    if (decision.reason && QUICK_RETRY_REASONS.has(decision.reason)) scheduleRetry();
+    return emrGate().allowed;
+  }
 
+  _registerAttempts.push(now);
+  const problemSeqAtStart = _deviceProblemSeq;
+  _registering = true;
+  let result;
   try {
-    const { data } = await httpPost(
+    const { status, data } = await httpPost(
       `${_apiBaseUrl}/api/devices/register`,
       { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
       JSON.stringify({ publicKey: _state.publicKeyB64, buildTarget: 'intranet' })
     );
-    const newStatus = data?.status === 'active' ? 'active' : 'pending';
-    _state.status = newStatus;
-    const meta = loadMeta();
-    if (meta) saveMeta({ ...meta, status: newStatus });
-    console.log('[audit] device registration status:', newStatus);
-    return newStatus === 'active';
+    result = { ok: true, status, data };
   } catch (err) {
-    // 429 means the server is still reachable and the device may already be
-    // pending/approved — treat it as "try again later", not a hard failure.
-    // Demoting to 'error' here previously surfaced a misleading "device
-    // registration required" message even for devices already awaiting
-    // (or holding) admin approval.
-    if (err.status === 429) {
-      console.warn('[audit] tryRegister rate-limited, will retry in', REGISTER_RETRY_INTERVAL_MS / 60000, 'min:', err.message);
-      return false;
-    }
-    // 위 사전 검사를 빠져나간 경우(클레임을 못 읽은 토큰 등)에도 장치를 'error'로 내리지 않는다 — 비밀번호 변경이 끝나면 풀린다.
-    if (err.status === 403 && err.code === 'PASSWORD_CHANGE_REQUIRED') {
-      console.warn('[audit] tryRegister deferred until the password is changed');
-      return false;
-    }
-    console.error('[audit] tryRegister failed:', err.message);
-    _state.status = 'error';
-    return false;
+    result = { ok: false, err };
+  } finally {
+    _registering = false;
   }
+
+  const outcome = interpretRegisterResult(result);
+  // Called again while this call was in flight, or the login changed organisation meanwhile: ask again (scheduled,
+  // so the spacing between calls holds); shouldRegister decides then whether it is still needed.
+  const loginNow = currentLogin();
+  if (_askAgain || (loginNow && loginNow.orgId !== login.orgId)) scheduleRetry();
+  _askAgain = false;
+  if (outcome.kind === 'pc' || outcome.kind === 'legacy') {
+    _freshProcess = false;
+    _checkedOrgId = login.orgId;
+    // A device refusal that came in while this call was in flight is not answered by it — ask again (within limits).
+    if (_deviceProblemSeq === problemSeqAtStart) _deviceProblem = false;
+    else scheduleRetry();
+    const next = applyRegisterOutcome(_meta, outcome, Date.now());
+    if (next !== _meta) {
+      _meta = next;
+      saveMeta(_meta);
+    }
+    if (_meta.status === 'active') _state.status = 'active';
+    else if (_state.status !== 'active') _state.status = _meta.status || 'pending';
+    console.log('[audit] device registration:', outcome.kind === 'pc' ? `${outcome.status} (per PC)` : outcome.status);
+  } else {
+    if (outcome.kind === 'retry_later') console.warn('[audit] tryRegister rate-limited, will retry later');
+    else if (outcome.kind === 'password_change') console.warn('[audit] tryRegister deferred until the password is changed');
+    else console.error('[audit] tryRegister failed:', result.err?.message ?? 'unexpected response');
+    if (QUICK_RETRY_REASONS.has(decision.reason)) scheduleRetry();
+  }
+  return emrGate().allowed;
 }
 
-// ── Ed25519 signing ──────────────────────────────────────────────────────────
-
-// Canonical message matches server audit.ts: "{deviceId}.{ts}.{nonce}.{sortedBodyJson}"
-function signPayload(body, deviceTs, deviceNonce) {
-  const sorted = Object.fromEntries(Object.keys(body).sort().map(k => [k, body[k]]));
-  const canonical = `${_state.deviceId}.${deviceTs}.${deviceNonce}.${JSON.stringify(sorted)}`;
-  return crypto.sign(null, Buffer.from(canonical, 'utf-8'), _state.privateKey).toString('base64');
+// An audit send was refused because of the device (not the token): ask for the PC's state again.
+function noteSendError(err) {
+  if (err?.status === 401 && !isTokenExpiryError(err)) {
+    _deviceProblem = true;
+    _deviceProblemSeq += 1;
+    tryRegister().catch(e => console.error('[audit] register after device refusal:', e.message));
+  }
 }
 
 // ── Send ─────────────────────────────────────────────────────────────────────
 
 async function doSend(entry, accessToken) {
-  const deviceTs    = new Date().toISOString();
-  const deviceNonce = crypto.randomUUID();
-
-  const body = {
-    action:  entry.action,
-    outcome: entry.outcome,
-    ...(entry.targetId ? { targetId: entry.targetId } : {}),
-    ...(entry.extra    ? { extra:    entry.extra    } : {}),
-  };
-
-  const sig = signPayload(body, deviceTs, deviceNonce);
-
-  await httpPost(
-    `${_apiBaseUrl}/api/audit/emr`,
-    {
-      'Content-Type':    'application/json',
-      'X-WR-Device-Id':  _state.deviceId,
-      'X-WR-Device-Sig': sig,
-      'X-WR-Device-Ts':  deviceTs,
-      'X-WR-Device-Nonce': deviceNonce,
-      'X-WR-Source':     'electron-main',
-      ...(accessToken ? { 'Authorization': `Bearer ${accessToken}` } : {}),
-    },
-    JSON.stringify(body)
-  );
+  const { headers, body } = buildSignedAuditRequest({
+    entry, deviceId: _state.deviceId, privateKey: _state.privateKey, accessToken,
+  });
+  await httpPost(`${_apiBaseUrl}/api/audit/emr`, headers, body);
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
@@ -217,75 +279,123 @@ function getDeviceStatus() {
   return { status: _state.status, deviceId: _state.deviceId };
 }
 
-// 401 codes that indicate the token itself is bad (expired / revoked).
-// UNAUTHORIZED is returned by the audit route for device-level failures
-// (mismatch, bad signature, device not active) and must NOT be retried as
-// session_missing — that would allow a mismatched session to bypass the
-// device.user_id ≡ session.user_id identity check.
-const TOKEN_EXPIRY_CODES = new Set(['TOKEN_INVALID', 'SESSION_REVOKED']);
+/** EMR gate for main.js: { allowed, reason } — reason 'ok' | 'pending' | 'revoked' | 'other_org' | 'org_unconfirmed' | 'unregistered'. */
+function getEmrGate() {
+  return emrGate();
+}
 
-// Send with automatic session-missing fallback.
-// If the call fails with TOKEN_INVALID or SESSION_REVOKED, strips the
-// Authorization header and retries once. Any other 401 (device mismatch,
-// bad signature, device not active) propagates to the caller for enqueue.
+function canSend() {
+  return sendingAllowed(_meta, _state.status);
+}
+
+// Send with a tokenless retry: if the call fails because the token itself is bad (expired / revoked), the
+// Authorization header is dropped and the same entry is sent once more (the server records who sent it from
+// the PC and the entry's own actor). Any other 401 (device problems) propagates to the caller for enqueue.
 async function doSendWithSessionFallback(entry, accessToken) {
   if (!accessToken) {
-    const e = { ...entry, extra: { ...(entry.extra ?? {}), session_missing: true, actor_from_queue: true } };
-    await doSend(e, null);
+    await doSend(entry, null);
     return;
   }
   try {
     await doSend(entry, accessToken);
   } catch (err) {
-    if (err.status === 401 && TOKEN_EXPIRY_CODES.has(err.code)) {
-      console.warn('[audit] HTTP 401 token expiry/revocation, retrying as session_missing');
-      const e = { ...entry, extra: { ...(entry.extra ?? {}), session_missing: true, actor_from_queue: true } };
-      await doSend(e, null);
+    if (isTokenExpiryError(err)) {
+      console.warn('[audit] HTTP 401 token expiry/revocation, retrying without the token');
+      await doSend(entry, null);
     } else {
       throw err;
     }
   }
 }
 
-// Send an audit entry immediately if device is active; enqueue otherwise.
-async function recordAudit(entry) {
+/**
+ * Record-time information for an EMR action — call it when the action starts (before the helper runs) and pass
+ * it to recordAudit when the action ends: who was logged in then, when, and a random event id.
+ */
+function captureAuditContext() {
+  return createAuditContext(_getAccessToken(), { identity: readTokenIdentity });
+}
+
+// Send an audit entry immediately if device is active; enqueue otherwise. `context` = captureAuditContext() taken
+// when the EMR action started (taken now when absent). The stamped entry is what is sent, queued and resent.
+async function recordAudit(entry, context) {
   if (!_state.deviceId || !_state.privateKey) return;
-  if (_state.status !== 'active') { enqueue(entry); return; }
+  const stamped = stampEntry(entry, context ?? captureAuditContext());
+  if (!canSend()) { enqueue(stamped); return; }
 
   const token = _getAccessToken();
   try {
-    await doSendWithSessionFallback(entry, token);
+    await doSendWithSessionFallback(stamped, token);
   } catch (err) {
+    if (classifySendFailure(err).kind === 'quarantine') {
+      // The entry itself was refused (the server will never take it as it is): set aside, not resent. If it cannot be
+      // set aside, it goes to the queue (the next round tries again) — never dropped.
+      console.error('[audit] entry refused, set aside:', err.message);
+      if (quarantineEntry(stamped)) {
+        if (entry.action !== 'audit_queue_corrupt') await reportSetAside({ rejectedLines: 1 }).catch(() => {});
+        return;
+      }
+    }
     console.error('[audit] send failed, enqueuing:', err.message);
-    enqueue(entry);
+    enqueue(stamped);
+    noteSendError(err);
   }
 }
 
-// Attempt to flush the pending queue. Handles corrupt file gracefully.
-// Retries device registration for pending/error/unregistered statuses so
-// that admin approvals and transient network failures self-heal (within
-// REGISTER_RETRY_INTERVAL_MS) without requiring an app restart.
-async function flushQueue() {
-  if (_state.status !== 'active') {
-    await tryRegister(); // covers pending, error, unregistered
-  }
-  if (_state.status !== 'active') return;
+// Tells the server how many queued entries were set aside (diagnostic — the existing audit_queue_corrupt action).
+async function reportSetAside({ corruptLines = 0, rejectedLines = 0 }) {
+  await recordAudit({
+    action:  'audit_queue_corrupt',
+    outcome: 'failure',
+    extra:   { kind: 'set_aside', corruptLines, rejectedLines, quarantineFile: quarantineFileName() },
+  });
+}
 
-  if (checkCorrupt()) {
-    const name = handleCorrupt();
-    console.error('[audit] corrupt queue file renamed:', name);
-    await recordAudit({
-      action:  'audit_queue_corrupt',
-      outcome: 'failure',
-      extra:   { corruptFile: name },
-    }).catch(() => {});
-    return;
+let _nextRoundAt = 0; // a 429's Retry-After: no resend round before this time
+let _roundRunning = false; // one flushQueue at a time, from the state check to the end of the round
+
+// One resend round of the queue (see auditQueueStore.js): at most RESEND_MAX_PER_ROUND entries, RESEND_GAP_MS
+// apart. The round stops and keeps the rest on 429 (and waits for Retry-After), 5xx, network errors, timeouts,
+// 403 and unknown answers; a device problem 401 also stops it and asks for the device state again; an entry the
+// server refuses as such (400 INVALID_BODY, 413) is set aside and the round goes on. Asks for the device state
+// first when it is due (approvals of a pending PC and transient failures heal without an app restart).
+async function flushQueue() {
+  if (_roundRunning || Date.now() < _nextRoundAt) return;
+  _roundRunning = true;
+  try {
+    await flushQueueRound();
+  } finally {
+    _roundRunning = false;
   }
+}
+
+async function flushQueueRound() {
+  await tryRegister();
+  if (!canSend() || Date.now() < _nextRoundAt) return;
 
   const token = _getAccessToken();
-  await flush(async entry => {
-    await doSendWithSessionFallback(entry, token);
-  });
+  let stop = null;
+  const result = await flush(async entry => {
+    try {
+      await doSendWithSessionFallback(forQueuedSend(entry), token);
+      return 'ok';
+    } catch (err) {
+      const kind = classifySendFailure(err);
+      if (kind.kind === 'quarantine') return 'quarantine';
+      stop = { err, ...kind };
+      return 'stop';
+    }
+  }, { maxPerRound: RESEND_MAX_PER_ROUND, gapMs: RESEND_GAP_MS });
+  if (result.skipped) return;
+
+  if (stop?.retryAfterMs) _nextRoundAt = Date.now() + stop.retryAfterMs;
+  if (stop?.kind === 'device_problem') noteSendError(stop.err);
+  if (stop) console.warn('[audit] resend round stopped:', stop.err?.message ?? stop.kind);
+  const { corrupt, rejected } = result.quarantined;
+  if (corrupt + rejected > 0) {
+    console.error('[audit] queue entries set aside:', corrupt, 'unreadable,', rejected, 'refused');
+    await reportSetAside({ corruptLines: corrupt, rejectedLines: rejected }).catch(() => {});
+  }
 }
 
 // Called once from app.whenReady() after main window is created.
@@ -300,12 +410,7 @@ async function initAudit({ getAccessToken, apiBaseUrl }) {
   }
 
   initDevice();
-
-  if (_state.status !== 'active') {
-    await tryRegister();
-  }
-
-  await flushQueue();
+  await flushQueue(); // asks for the device state first (tryRegister)
 }
 
-module.exports = { initAudit, getDeviceStatus, tryRegister, recordAudit, flushQueue };
+module.exports = { initAudit, getDeviceStatus, getEmrGate, tryRegister, captureAuditContext, recordAudit, flushQueue };
