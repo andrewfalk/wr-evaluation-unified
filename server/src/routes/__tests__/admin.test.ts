@@ -11,6 +11,7 @@ vi.mock('../../config', async () => ({
 vi.mock('../../middleware/audit', () => ({ writeAuditLog: vi.fn() }));
 
 import { createAdminRouter } from '../admin';
+import { writeAuditLog } from '../../middleware/audit';
 import {
   createFakePool, authSessionHandler, sequenceHandler, pgError,
   type FakePool, type FakeQueryReply, type RecordedQuery,
@@ -71,7 +72,7 @@ function fakeAuditPool(...results: unknown[][]): FakePool {
 const DEVICE_ROW = {
   id: 'dev-1', user_id: 'user-1', user_name: 'Dr. Kim',
   user_login_id: 'doc1', organization_id: 'org-1',
-  public_key: 'abc', build_target: 'intranet', status: 'pending',
+  public_key: 'abc', public_key_fingerprint: 'a1b2c3d4e5f60718', build_target: 'intranet', status: 'pending',
   approved_by: null, approver_name: null, approved_at: null,
   registered_at: new Date(), revoked_at: null, last_seen_at: null,
   register_origin: 'https://wr.hospital.local:8443',
@@ -116,6 +117,8 @@ describe('GET /api/admin/devices', () => {
     expect(res.body.devices[0].status).toBe('pending');
     // Electron UA → not suspicious
     expect(res.body.devices[0].suspicious).toBe(false);
+    // Rows of one PC share the first 8 hex digits of the key fingerprint.
+    expect(res.body.devices[0].keyPrefix).toBe('a1b2c3d4');
   });
 
   it('flags non-Electron UA as suspicious', async () => {
@@ -134,6 +137,47 @@ describe('GET /api/admin/devices', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Devices: a small in-memory devices table behind the queries the handlers make.
+// ---------------------------------------------------------------------------
+interface DevRow { id: string; status: string; organization_id: string | null; public_key_fingerprint: string }
+
+function deviceTableFake(table: DevRow[]): FakePool & { table: DevRow[] } {
+  const fake = createFakePool({
+    handlers: [
+      authSessionHandler(),
+      { name: 'devices.lock', via: 'client', match: /pg_advisory_xact_lock/, reply: { rows: [{}] } },
+      {
+        name: 'devices.target', via: 'client', match: /SELECT id, status, public_key_fingerprint FROM devices\s+WHERE id = \$1 AND/,
+        reply: (_sql, p) => ({ rows: table.filter((r) => r.id === p[0] && (p[1] === null || r.organization_id === p[1])) }),
+      },
+      {
+        name: 'devices.relock', via: 'client', match: (sql) => /^SELECT id, status, public_key_fingerprint FROM devices WHERE id = \$1$/.test(sql.trim()),
+        reply: (_sql, p) => ({ rows: table.filter((r) => r.id === p[0]) }),
+      },
+      {
+        name: 'devices.revokedOfPc', via: 'client', match: /status = 'revoked' LIMIT 1/,
+        reply: (_sql, p) => ({ rows: table.filter((r) => r.public_key_fingerprint === p[0] && r.status === 'revoked').slice(0, 1) }),
+      },
+      {
+        name: 'devices.approve', via: 'client', match: /SET status = 'active'/,
+        reply: (_sql, p) => { for (const r of table) if (r.id === p[1]) r.status = 'active'; return { rows: [], rowCount: 1 }; },
+      },
+      {
+        name: 'devices.revokePc', via: 'client', match: /SET status = 'revoked'/,
+        reply: (_sql, p) => {
+          const hit = table.filter((r) => r.public_key_fingerprint === p[0] && r.status !== 'revoked' && (p[1] === null || r.organization_id === p[1]));
+          for (const r of hit) r.status = 'revoked';
+          return { rows: hit.map((r) => ({ id: r.id })) };
+        },
+      },
+    ],
+  });
+  return Object.assign(fake, { table });
+}
+
+const dev = (id: string, status: string, fp = 'fp-a', org: string | null = 'org-1'): DevRow => ({ id, status, organization_id: org, public_key_fingerprint: fp });
+
+// ---------------------------------------------------------------------------
 // POST /api/admin/devices/:id/approve
 // ---------------------------------------------------------------------------
 describe('POST /api/admin/devices/:id/approve', () => {
@@ -148,43 +192,41 @@ describe('POST /api/admin/devices/:id/approve', () => {
     fake.assertNoUnmatched();
   });
 
-  it('returns 404 when device does not exist', async () => {
-    const fake = fakeQueries(
-      [],               // UPDATE returns nothing (no pending row with this id)
-      []                // SELECT status returns nothing
-    );
-    const res = await request(adminApp(fake))
-      .post('/api/admin/devices/missing-id/approve')
-      .set(authHeaders(token('admin')));
-    expect(res.status).toBe(404);
+  it('returns 404 when the device does not exist or is outside the organisation', async () => {
+    const fake = deviceTableFake([dev('dev-other', 'pending', 'fp-a', 'org-2')]);
+    for (const id of ['missing-id', 'dev-other']) {
+      const res = await request(adminApp(fake)).post(`/api/admin/devices/${id}/approve`).set(authHeaders(token('admin')));
+      expect(res.status).toBe(404);
+      expect(res.body.code).toBe('DEVICE_NOT_FOUND');
+    }
     fake.assertNoUnmatched();
-    expect(res.body.code).toBe('DEVICE_NOT_FOUND');
   });
 
-  it('returns 409 when device is not pending', async () => {
-    const fake = fakeQueries(
-      [],                                   // UPDATE: no pending row
-      [{ status: 'active' }]                // SELECT: device exists but not pending
-    );
-    const res = await request(adminApp(fake))
-      .post('/api/admin/devices/dev-1/approve')
-      .set(authHeaders(token('admin')));
+  it('returns 409 when the device is not pending', async () => {
+    const fake = deviceTableFake([dev('dev-1', 'active')]);
+    const res = await request(adminApp(fake)).post('/api/admin/devices/dev-1/approve').set(authHeaders(token('admin')));
     expect(res.status).toBe(409);
+    expect(res.body).toMatchObject({ code: 'DEVICE_NOT_PENDING', status: 'active' });
     fake.assertNoUnmatched();
-    expect(res.body.code).toBe('DEVICE_NOT_PENDING');
   });
 
-  it('approves pending device and returns active status', async () => {
-    const fake = fakeQueries([{ id: 'dev-1', status: 'active' }]);
-
-    const res = await request(adminApp(fake))
-      .post('/api/admin/devices/dev-1/approve')
-      .set(authHeaders(token('admin')));
-
+  it('approves a pending device under the PC lock and returns active status', async () => {
+    const fake = deviceTableFake([dev('dev-1', 'pending')]);
+    const res = await request(adminApp(fake)).post('/api/admin/devices/dev-1/approve').set(authHeaders(token('admin')));
     expect(res.status).toBe(200);
+    expect(res.body).toEqual({ deviceId: 'dev-1', status: 'active' });
+    expect(fake.table[0].status).toBe('active');
+    expect(fake.callsTo('devices.lock')).toHaveLength(1);
     fake.assertNoUnmatched();
-    expect(res.body.deviceId).toBe('dev-1');
-    expect(res.body.status).toBe('active');
+  });
+
+  it('a pending row of a PC that has a revoked row cannot be approved (409 DEVICE_PC_REVOKED)', async () => {
+    const fake = deviceTableFake([dev('dev-1', 'pending'), dev('dev-2', 'revoked')]);
+    const res = await request(adminApp(fake)).post('/api/admin/devices/dev-1/approve').set(authHeaders(token('admin')));
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('DEVICE_PC_REVOKED');
+    expect(fake.table[0].status).toBe('pending');
+    fake.assertNoUnmatched();
   });
 });
 
@@ -195,37 +237,37 @@ describe('POST /api/admin/devices/:id/revoke', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('returns 404 when device does not exist', async () => {
-    const fake = fakeQueries([], []);
-    const res = await request(adminApp(fake))
-      .post('/api/admin/devices/gone/revoke')
-      .set(authHeaders(token('admin')));
+    const fake = deviceTableFake([]);
+    const res = await request(adminApp(fake)).post('/api/admin/devices/gone/revoke').set(authHeaders(token('admin')));
     expect(res.status).toBe(404);
     fake.assertNoUnmatched();
   });
 
-  it('returns 409 when device is already revoked', async () => {
-    const fake = fakeQueries(
-      [],                               // UPDATE: nothing (already revoked)
-      [{ status: 'revoked' }]           // SELECT confirms it exists
-    );
-    const res = await request(adminApp(fake))
-      .post('/api/admin/devices/dev-1/revoke')
-      .set(authHeaders(token('admin')));
+  it('returns 409 when every row of the PC is already revoked', async () => {
+    const fake = deviceTableFake([dev('dev-1', 'revoked'), dev('dev-2', 'revoked')]);
+    const res = await request(adminApp(fake)).post('/api/admin/devices/dev-1/revoke').set(authHeaders(token('admin')));
     expect(res.status).toBe(409);
-    fake.assertNoUnmatched();
     expect(res.body.code).toBe('DEVICE_ALREADY_REVOKED');
+    fake.assertNoUnmatched();
   });
 
-  it('revokes active device and returns revoked status', async () => {
-    const fake = fakeQueries([{ id: 'dev-1', status: 'revoked' }]);
-
-    const res = await request(adminApp(fake))
-      .post('/api/admin/devices/dev-1/revoke')
-      .set(authHeaders(token('admin')));
-
+  it('revokes every row of the PC in the organisation and records them', async () => {
+    const fake = deviceTableFake([dev('dev-1', 'active'), dev('dev-2', 'pending'), dev('dev-3', 'active', 'fp-b'), dev('dev-4', 'active', 'fp-a', 'org-2')]);
+    const res = await request(adminApp(fake)).post('/api/admin/devices/dev-1/revoke').set(authHeaders(token('admin')));
     expect(res.status).toBe(200);
+    expect(res.body).toEqual({ deviceId: 'dev-1', status: 'revoked', revokedDeviceIds: ['dev-1', 'dev-2'] });
+    expect(fake.table.map((r) => r.status)).toEqual(['revoked', 'revoked', 'active', 'active']); // other PC, other organisation untouched
+    expect(vi.mocked(writeAuditLog).mock.calls.at(-1)![1]).toMatchObject({
+      action: 'device_revoke', targetId: 'dev-1', extra: { revokedDeviceIds: ['dev-1', 'dev-2'] },
+    });
     fake.assertNoUnmatched();
-    expect(res.body.status).toBe('revoked');
+  });
+
+  it('revoking an already revoked row still revokes the PC\'s other rows', async () => {
+    const fake = deviceTableFake([dev('dev-1', 'revoked'), dev('dev-2', 'active')]);
+    const res = await request(adminApp(fake)).post('/api/admin/devices/dev-1/revoke').set(authHeaders(token('admin')));
+    expect(res.status).toBe(200);
+    expect(res.body.revokedDeviceIds).toEqual(['dev-2']);
   });
 });
 

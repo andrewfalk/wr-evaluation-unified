@@ -93,6 +93,17 @@ export function summarizePc(fingerprint: string, rows: PcRow[]): PcInfo {
   };
 }
 
+/** Marker in registration responses: this server treats a device as a PC (signing key), see routes/devices.ts. */
+export const DEVICE_SCOPE_PC = 'pc';
+
+/**
+ * Transaction-scoped lock on one fingerprint, so registration, approval and revocation of the same PC are
+ * serialised (two registrations of one key cannot both insert a row). Call inside BEGIN … COMMIT.
+ */
+export async function lockPcRows(db: Pick<Pool, 'query'>, fingerprint: string): Promise<void> {
+  await db.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, [`wr.device-pc:${fingerprint}`]);
+}
+
 export async function loadPcRows(db: Pick<Pool, 'query'>, fingerprint: string): Promise<(PcRow & { public_key: string })[]> {
   const { rows } = await db.query<PcRow & { public_key: string }>(
     `SELECT id, user_id, organization_id, status, registered_at, public_key
