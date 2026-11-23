@@ -544,7 +544,14 @@ try {
     if (OLD_SERVER) {
       const state = await oldServerScenario(null);
       if (KEEP_STATE) {
-        fs.writeFileSync(KEEP_STATE, JSON.stringify({ run: RUN, orgId, org2Id, accounts, ...state }, null, 2));
+        // 시험 계정의 비밀번호가 들어 있다 — 소유자만 읽고 쓰게(0600) 새로 만들고, 토큰·CSRF는 넣지 않는다(재개 때 다시 로그인).
+        // 재개(--resume-state)가 끝나면 지운다. 시험 계정은 재개 실행이 지운다.
+        const storedAccounts = Object.fromEntries(Object.entries(accounts).map(([k, a]) => {
+          const { token: _token, csrf: _csrf, ...rest } = a;
+          return [k, rest];
+        }));
+        fs.rmSync(KEEP_STATE, { force: true });
+        fs.writeFileSync(KEEP_STATE, JSON.stringify({ run: RUN, orgId, org2Id, accounts: storedAccounts, ...state }, null, 2), { mode: 0o600, flag: 'wx' });
         keep = true;
         console.log(`상태를 ${KEEP_STATE}에 남겼습니다(시험 계정·PC 폴더 유지) — 서버를 다시 올린 뒤 --resume-state로 이어 갑니다.`);
       }
