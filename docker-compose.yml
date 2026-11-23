@@ -25,11 +25,20 @@
 #                           see scripts/export-offline-package.ps1 — this only affects a
 #                           plain build-from-source `docker compose up -d --build`.)
 
+# Container log size limit (7.3.2): every service logs to Docker's json-file driver, at most 5 files of 50 MB per
+# container (about 250 MB); the oldest lines are dropped. Extension fields and anchors work on Compose v2.22.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
 services:
   # ---------------------------------------------------------------------------
   # PostgreSQL 16
   # ---------------------------------------------------------------------------
   postgres:
+    logging: *default-logging
     image: postgres:16-alpine
     environment:
       POSTGRES_DB:       wr_evaluation
@@ -55,6 +64,7 @@ services:
   # (gives up after 10 s with a message).
   # ---------------------------------------------------------------------------
   migrate:
+    logging: *default-logging
     build:
       context: .
       dockerfile: server/Dockerfile
@@ -83,6 +93,7 @@ services:
   # (the migrate service above prepares both). Not exposed externally — Caddy proxies all inbound traffic.
   # ---------------------------------------------------------------------------
   app:
+    logging: *default-logging
     build:
       context: .
       dockerfile: server/Dockerfile
@@ -188,6 +199,7 @@ services:
   # See docs/INTRANET_DEPLOYMENT.md for full CA installation procedure.
   # ---------------------------------------------------------------------------
   caddy:
+    logging: *default-logging
     image: caddy:2-alpine
     environment:
       WR_DOMAIN: "${WR_DOMAIN:?WR_DOMAIN is required}"
@@ -228,6 +240,7 @@ services:
   # are wr_owner's with no grants — the app writes through the parent only.
   # ---------------------------------------------------------------------------
   partition:
+    logging: *default-logging
     image: postgres:16-alpine
     environment:
       PGHOST:     postgres
@@ -256,6 +269,7 @@ services:
   # Always active (no profile) — independent of GPG/backup setup.
   # ---------------------------------------------------------------------------
   backup-monitor:
+    logging: *default-logging
     build:
       context: services/backup-monitor
     environment:
@@ -282,6 +296,7 @@ services:
   # See docs/BACKUP_RESTORE.md for full runbook.
   # ---------------------------------------------------------------------------
   backup:
+    logging: *default-logging
     profiles: ["backup"]
     build:
       context: .
@@ -294,6 +309,9 @@ services:
       PGDATABASE:           wr_evaluation
       BACKUP_DIR:           /backups
       BACKUP_GPG_RECIPIENT: ${BACKUP_GPG_RECIPIENT:-}
+      # Korean time for crond and for backup file names / monthly·yearly tags (the container clock is UTC):
+      # the crontab's 02:00 is 02:00 KST. POSIX TZ string — the image has no zone database.
+      TZ:                   KST-9
     volumes:
       - ./scripts/backup.sh:/scripts/backup.sh:ro
       - ./scripts/restore.sh:/scripts/restore.sh:ro
