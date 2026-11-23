@@ -8,16 +8,22 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { enqueue, flush, checkCorrupt, handleCorrupt } = require('./auditQueue');
-const { mustChangePassword } = require('./accessTokenClaims');
+const { mustChangePassword, readTokenIdentity } = require('./accessTokenClaims');
 const {
-  REGISTER_RETRY_INTERVAL_MS,
+  REQUEST_TIMEOUT_MS,
   buildSignedAuditRequest,
   interpretHttpResponse,
   isTokenExpiryError,
   withSessionMissing,
-  registerStatusFromResponse,
-  classifyRegisterError,
 } = require('./auditLogic');
+const {
+  REGISTER_MIN_SPACING_MS,
+  interpretRegisterResult,
+  applyRegisterOutcome,
+  emrGateDecision,
+  sendingAllowed,
+  shouldRegister,
+} = require('./deviceState');
 
 // ── Module state ─────────────────────────────────────────────────────────────
 
@@ -27,9 +33,14 @@ let _state = {
   publicKeyB64: null, // raw 32-byte Ed25519 public key, base64
   status:       'unregistered', // 'unregistered' | 'pending' | 'active' | 'error'
 };
+let _meta = null;          // wr-device.json as last read/written by this process
 let _getAccessToken = () => null;
 let _apiBaseUrl = '';
-let _lastRegisterAttempt = 0;
+let _registerAttempts = [];  // registration calls of this process (ms)
+let _freshProcess = true;    // no answer to a registration call yet in this process
+let _deviceProblem = false;  // an audit send was refused for a device problem
+let _deviceProblemSeq = 0;   // counts those refusals, so an answer to a call that started earlier does not clear a newer one
+let _checkedOrgId;           // login organisation of the last answer in this process (undefined until the first)
 
 // ── File helpers ─────────────────────────────────────────────────────────────
 
@@ -72,6 +83,7 @@ function initDevice() {
   const privateKey = meta ? loadPrivateKey() : null;
 
   if (meta?.deviceId && privateKey) {
+    _meta = meta;
     _state = {
       deviceId:     meta.deviceId,
       privateKey,
@@ -89,7 +101,8 @@ function initDevice() {
   const deviceId     = crypto.randomUUID();
 
   savePrivateKey(pkcs8Der);
-  saveMeta({ deviceId, publicKeyB64, status: 'unregistered' });
+  _meta = { deviceId, publicKeyB64, status: 'unregistered' };
+  saveMeta(_meta);
 
   _state = { deviceId, privateKey: pk, publicKeyB64, status: 'unregistered' };
   return true;
@@ -97,68 +110,152 @@ function initDevice() {
 
 // ── HTTP helper ──────────────────────────────────────────────────────────────
 
+// One request, with a time limit (a request that does not finish in REQUEST_TIMEOUT_MS is aborted and fails
+// like a network error) — so a registration call that never answers cannot hold _registering forever.
 function httpPost(url, headers, body) {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn(value);
+    };
     const req = net.request({ url, method: 'POST' });
+    const timer = setTimeout(() => {
+      try { req.abort(); } catch { /* 이미 끝남 */ }
+      finish(reject, new Error('request timeout'));
+    }, REQUEST_TIMEOUT_MS);
     for (const [k, v] of Object.entries(headers)) req.setHeader(k, String(v));
     req.on('response', res => {
       let data = '';
       res.on('data', c => { data += c; });
+      res.on('error', err => finish(reject, err));
       res.on('end', () => {
         const result = interpretHttpResponse(res.statusCode, data);
-        if (result instanceof Error) reject(result);
-        else resolve(result);
+        if (result instanceof Error) finish(reject, result);
+        else finish(resolve, result);
       });
     });
-    req.on('error', reject);
+    req.on('error', err => finish(reject, err));
     req.write(body);
     req.end();
   });
 }
 
-// ── Device registration ──────────────────────────────────────────────────────
+// ── Device registration (approval state) ─────────────────────────────────────
+//
+// When to call the registration API and what its answer does: deviceState.js. In short —
+//  - right after the first token of this process, when the login organisation changes, and after an audit send
+//    was refused for a device problem (never more often than the server's registration limits allow);
+//  - an answer from a server that works per PC (deviceScope: 'pc') is stored as is (pc field) and from then on
+//    the EMR gate opens only for that organisation's logins while the PC is active there;
+//  - an older server's answer can raise the profile-wide status to active but never lowers it;
+//  - a failed call changes nothing.
+
+let _registering = false;
+let _askAgain = false; // tryRegister was called while a call was in flight
+let _retryTimer = null;
+const QUICK_RETRY_REASONS = new Set(['first_token', 'org_changed', 'device_problem']);
+
+function currentLogin() {
+  const token = _getAccessToken();
+  return token ? readTokenIdentity(token) : null;
+}
+
+function emrGate() {
+  return emrGateDecision(_meta, currentLogin(), _state.status);
+}
+
+// A short retry while the first answer (or the answer for a new login organisation) is still missing.
+function scheduleRetry() {
+  if (_retryTimer) return;
+  _retryTimer = setTimeout(() => {
+    _retryTimer = null;
+    tryRegister().catch(e => console.error('[audit] register retry:', e.message));
+  }, REGISTER_MIN_SPACING_MS + 1000);
+  if (typeof _retryTimer.unref === 'function') _retryTimer.unref();
+}
 
 async function tryRegister() {
-  if (_state.status === 'active') return true;
   const token = _getAccessToken();
-  if (!token || !_state.publicKeyB64 || !_apiBaseUrl) return false;
+  if (!token || !_state.publicKeyB64 || !_apiBaseUrl) return emrGate().allowed;
 
   // 임시 비밀번호 상태의 토큰은 서버가 /api/devices/register를 403으로 거절한다. 그 요청이 인증 앞단의 IP 제한
-  // (분당 1회)을 소비하면, 비밀번호를 바꾼 직후의 첫 등록이 429를 받아 20분 재시도 대기에 들어가 EMR이 잠긴다.
+  // (분당 1회)을 소비하면, 비밀번호를 바꾼 직후의 첫 등록이 429를 받아 EMR이 잠긴다.
   // 그래서 요청 자체를 보내지 않는다 — 비밀번호 변경 후 새 토큰으로 setAccessToken이 다시 불리면 그때 첫 등록이 나간다.
-  if (mustChangePassword(token)) return false;
+  if (mustChangePassword(token)) return emrGate().allowed;
+  const login = readTokenIdentity(token);
+  if (!login) return emrGate().allowed;
+  if (_registering) {
+    // A call is in flight (perhaps for another login): look again once it has answered, within the limits.
+    _askAgain = true;
+    return emrGate().allowed;
+  }
 
   const now = Date.now();
-  if (now - _lastRegisterAttempt < REGISTER_RETRY_INTERVAL_MS) return false;
-  _lastRegisterAttempt = now;
+  _registerAttempts = _registerAttempts.filter(t => now - t < 60 * 60 * 1000);
+  const decision = shouldRegister({
+    meta: _meta, login, startedFresh: _freshProcess, deviceProblem: _deviceProblem, checkedOrgId: _checkedOrgId,
+    attempts: _registerAttempts,
+  }, now);
+  if (!decision.register) {
+    if (decision.reason && QUICK_RETRY_REASONS.has(decision.reason)) scheduleRetry();
+    return emrGate().allowed;
+  }
 
+  _registerAttempts.push(now);
+  const problemSeqAtStart = _deviceProblemSeq;
+  _registering = true;
+  let result;
   try {
-    const { data } = await httpPost(
+    const { status, data } = await httpPost(
       `${_apiBaseUrl}/api/devices/register`,
       { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
       JSON.stringify({ publicKey: _state.publicKeyB64, buildTarget: 'intranet' })
     );
-    const newStatus = registerStatusFromResponse(data);
-    _state.status = newStatus;
-    const meta = loadMeta();
-    if (meta) saveMeta({ ...meta, status: newStatus });
-    console.log('[audit] device registration status:', newStatus);
-    return newStatus === 'active';
+    result = { ok: true, status, data };
   } catch (err) {
-    // 429: 서버에는 닿았고 장치는 이미 승인 대기·승인 상태일 수 있다 — 'error'로 내리지 않고 나중에 다시 한다.
-    // 비밀번호 변경 필요(사전 검사를 빠져나간 경우): 'error'로 내리지 않는다 — 비밀번호 변경이 끝나면 풀린다.
-    const kind = classifyRegisterError(err);
-    if (kind === 'retry_later') {
-      console.warn('[audit] tryRegister rate-limited, will retry in', REGISTER_RETRY_INTERVAL_MS / 60000, 'min:', err.message);
-      return false;
+    result = { ok: false, err };
+  } finally {
+    _registering = false;
+  }
+
+  const outcome = interpretRegisterResult(result);
+  // Called again while this call was in flight, or the login changed organisation meanwhile: ask again (scheduled,
+  // so the spacing between calls holds); shouldRegister decides then whether it is still needed.
+  const loginNow = currentLogin();
+  if (_askAgain || (loginNow && loginNow.orgId !== login.orgId)) scheduleRetry();
+  _askAgain = false;
+  if (outcome.kind === 'pc' || outcome.kind === 'legacy') {
+    _freshProcess = false;
+    _checkedOrgId = login.orgId;
+    // A device refusal that came in while this call was in flight is not answered by it — ask again (within limits).
+    if (_deviceProblemSeq === problemSeqAtStart) _deviceProblem = false;
+    else scheduleRetry();
+    const next = applyRegisterOutcome(_meta, outcome, Date.now());
+    if (next !== _meta) {
+      _meta = next;
+      saveMeta(_meta);
     }
-    if (kind === 'password_change') {
-      console.warn('[audit] tryRegister deferred until the password is changed');
-      return false;
-    }
-    console.error('[audit] tryRegister failed:', err.message);
-    _state.status = 'error';
-    return false;
+    if (_meta.status === 'active') _state.status = 'active';
+    else if (_state.status !== 'active') _state.status = _meta.status || 'pending';
+    console.log('[audit] device registration:', outcome.kind === 'pc' ? `${outcome.status} (per PC)` : outcome.status);
+  } else {
+    if (outcome.kind === 'retry_later') console.warn('[audit] tryRegister rate-limited, will retry later');
+    else if (outcome.kind === 'password_change') console.warn('[audit] tryRegister deferred until the password is changed');
+    else console.error('[audit] tryRegister failed:', result.err?.message ?? 'unexpected response');
+    if (QUICK_RETRY_REASONS.has(decision.reason)) scheduleRetry();
+  }
+  return emrGate().allowed;
+}
+
+// An audit send was refused because of the device (not the token): ask for the PC's state again.
+function noteSendError(err) {
+  if (err?.status === 401 && !isTokenExpiryError(err)) {
+    _deviceProblem = true;
+    _deviceProblemSeq += 1;
+    tryRegister().catch(e => console.error('[audit] register after device refusal:', e.message));
   }
 }
 
@@ -175,6 +272,15 @@ async function doSend(entry, accessToken) {
 
 function getDeviceStatus() {
   return { status: _state.status, deviceId: _state.deviceId };
+}
+
+/** EMR gate for main.js: { allowed, reason } — reason 'ok' | 'pending' | 'revoked' | 'other_org' | 'org_unconfirmed' | 'unregistered'. */
+function getEmrGate() {
+  return emrGate();
+}
+
+function canSend() {
+  return sendingAllowed(_meta, _state.status);
 }
 
 // Send with automatic session-missing fallback: if the call fails because the token itself is bad
@@ -200,7 +306,7 @@ async function doSendWithSessionFallback(entry, accessToken) {
 // Send an audit entry immediately if device is active; enqueue otherwise.
 async function recordAudit(entry) {
   if (!_state.deviceId || !_state.privateKey) return;
-  if (_state.status !== 'active') { enqueue(entry); return; }
+  if (!canSend()) { enqueue(entry); return; }
 
   const token = _getAccessToken();
   try {
@@ -208,18 +314,16 @@ async function recordAudit(entry) {
   } catch (err) {
     console.error('[audit] send failed, enqueuing:', err.message);
     enqueue(entry);
+    noteSendError(err);
   }
 }
 
 // Attempt to flush the pending queue. Handles corrupt file gracefully.
-// Retries device registration for pending/error/unregistered statuses so
-// that admin approvals and transient network failures self-heal (within
-// REGISTER_RETRY_INTERVAL_MS) without requiring an app restart.
+// Asks for the device state first when it is due (approvals of a pending PC and transient failures heal
+// without an app restart — see tryRegister).
 async function flushQueue() {
-  if (_state.status !== 'active') {
-    await tryRegister(); // covers pending, error, unregistered
-  }
-  if (_state.status !== 'active') return;
+  await tryRegister();
+  if (!canSend()) return;
 
   if (checkCorrupt()) {
     const name = handleCorrupt();
@@ -233,9 +337,16 @@ async function flushQueue() {
   }
 
   const token = _getAccessToken();
+  let refused = null;
   await flush(async entry => {
-    await doSendWithSessionFallback(entry, token);
+    try {
+      await doSendWithSessionFallback(entry, token);
+    } catch (err) {
+      if (!refused && err?.status === 401 && !isTokenExpiryError(err)) refused = err;
+      throw err;
+    }
   });
+  if (refused) noteSendError(refused);
 }
 
 // Called once from app.whenReady() after main window is created.
@@ -250,12 +361,7 @@ async function initAudit({ getAccessToken, apiBaseUrl }) {
   }
 
   initDevice();
-
-  if (_state.status !== 'active') {
-    await tryRegister();
-  }
-
-  await flushQueue();
+  await flushQueue(); // asks for the device state first (tryRegister)
 }
 
-module.exports = { initAudit, getDeviceStatus, tryRegister, recordAudit, flushQueue };
+module.exports = { initAudit, getDeviceStatus, getEmrGate, tryRegister, recordAudit, flushQueue };

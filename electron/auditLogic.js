@@ -1,16 +1,14 @@
 'use strict';
 // electron/auditLogic.js
-// EMR 감사 전송의 판단 로직 — electron 모듈을 require하지 않아 vitest에서 바로 테스트한다(audit.js는 연결부).
+// EMR 감사 전송의 판단 로직(등록·승인 상태는 deviceState.js) — electron 모듈을 require하지 않아 vitest에서 바로 테스트한다(audit.js는 연결부).
 // 서버 계약(server/src/routes/audit.ts): 서명 대상 = "<장치 ID>.<ts>.<nonce>.<키를 정렬한 본문 JSON>".
 const crypto = require('crypto');
-
-// 서버의 등록 제한은 사용자당 시간당 5회다(server/src/middleware/rateLimit.ts). 5분 주기의 재전송 타이머만으로도
-// 시간당 12회가 되므로, 승인 대기 중의 재등록은 이 간격으로 띄운다.
-const REGISTER_RETRY_INTERVAL_MS = 20 * 60 * 1000;
 
 // 토큰 자체가 문제인 401(만료·폐기). 감사 경로가 장치 문제로 돌려주는 401(UNAUTHORIZED)은 여기에 넣지 않는다 —
 // 토큰 없이 다시 보내는 것은 토큰 문제일 때만이다.
 const TOKEN_EXPIRY_CODES = new Set(['TOKEN_INVALID', 'SESSION_REVOKED']);
+// 서버 요청 하나의 시간 제한 — 넘기면 요청을 끊고 네트워크 오류처럼 실패한다.
+const REQUEST_TIMEOUT_MS = 30 * 1000;
 
 /** 서버로 보내는 본문: action·outcome, 있을 때만 targetId·extra. */
 function buildAuditBody(entry) {
@@ -65,10 +63,16 @@ function interpretHttpResponse(statusCode, rawBody) {
     return new Error(`parse error HTTP ${statusCode}`);
   }
   if (statusCode >= 400) {
-    const msg = (typeof json?.error === 'string' ? json.error : json?.error?.message) || `HTTP ${statusCode}`;
-    const err = new Error(msg);
+    let err;
+    try {
+      const msg = (typeof json?.error === 'string' ? json.error : json?.error?.message) || `HTTP ${statusCode}`;
+      err = new Error(msg);
+    } catch {
+      err = new Error(`HTTP ${statusCode}`); // 문자열로 바꿀 수 없는 메시지
+    }
     err.status = statusCode;
     err.code   = json?.code ?? null;
+    err.body   = json;
     return err;
   }
   return { status: statusCode, data: json };
@@ -83,27 +87,13 @@ function withSessionMissing(entry) {
   return { ...entry, extra: { ...(entry.extra ?? {}), session_missing: true, actor_from_queue: true } };
 }
 
-/** 등록 응답의 상태: active만 active, 그 밖에는 pending. */
-function registerStatusFromResponse(data) {
-  return data?.status === 'active' ? 'active' : 'pending';
-}
-
-/** 등록 실패를 어떻게 다룰지: 429·비밀번호 변경 필요는 'retry_later'(상태 유지), 그 밖에는 'error'. */
-function classifyRegisterError(err) {
-  if (err?.status === 429) return 'retry_later';
-  if (err?.status === 403 && err.code === 'PASSWORD_CHANGE_REQUIRED') return 'password_change';
-  return 'error';
-}
-
 module.exports = {
-  REGISTER_RETRY_INTERVAL_MS,
   TOKEN_EXPIRY_CODES,
+  REQUEST_TIMEOUT_MS,
   buildAuditBody,
   canonicalMessage,
   buildSignedAuditRequest,
   interpretHttpResponse,
   isTokenExpiryError,
   withSessionMissing,
-  registerStatusFromResponse,
-  classifyRegisterError,
 };

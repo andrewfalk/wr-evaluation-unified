@@ -1,15 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import crypto from 'crypto';
 import {
-  REGISTER_RETRY_INTERVAL_MS,
   buildAuditBody,
   canonicalMessage,
   buildSignedAuditRequest,
   interpretHttpResponse,
   isTokenExpiryError,
   withSessionMissing,
-  registerStatusFromResponse,
-  classifyRegisterError,
 } from '../auditLogic.js';
 
 // 서버(server/src/routes/audit.ts)가 서명을 확인하는 방식 그대로.
@@ -74,6 +71,12 @@ describe('auditLogic — 응답 해석', () => {
     expect(interpretHttpResponse(500, '{"error":{"message":"boom"}}')).toMatchObject({ message: 'boom', status: 500, code: null });
   });
 
+  it('문자열로 바꿀 수 없는 오류 메시지도 던지지 않고 Error로 돌려준다', () => {
+    const e = interpretHttpResponse(500, '{"error":{"message":{"toString":null}}}');
+    expect(e).toBeInstanceOf(Error);
+    expect(e).toMatchObject({ message: 'HTTP 500', status: 500 });
+  });
+
   it('JSON이 아니면 상태와 무관하게 parse error(status·code 없음)', () => {
     for (const status of [200, 502]) {
       const e = interpretHttpResponse(status, '<html>');
@@ -96,27 +99,5 @@ describe('auditLogic — 응답 해석', () => {
     expect(withSessionMissing({ action: 'a', outcome: 'success', extra: { source: 'auto' } }))
       .toEqual({ action: 'a', outcome: 'success', extra: { source: 'auto', session_missing: true, actor_from_queue: true } });
     expect(withSessionMissing({ action: 'a', outcome: 'success' }).extra).toEqual({ session_missing: true, actor_from_queue: true });
-  });
-});
-
-describe('auditLogic — 등록', () => {
-  it('등록 응답: active만 active, 그 밖은 pending', () => {
-    expect(registerStatusFromResponse({ status: 'active' })).toBe('active');
-    expect(registerStatusFromResponse({ status: 'pending' })).toBe('pending');
-    expect(registerStatusFromResponse({ status: 'revoked' })).toBe('pending');
-    expect(registerStatusFromResponse(null)).toBe('pending');
-  });
-
-  it('등록 실패: 429는 나중에, 비밀번호 변경 필요 403은 보류, 그 밖은 error', () => {
-    const err = (status, code) => Object.assign(new Error('x'), { status, code });
-    expect(classifyRegisterError(err(429, 'RATE_LIMITED'))).toBe('retry_later');
-    expect(classifyRegisterError(err(403, 'PASSWORD_CHANGE_REQUIRED'))).toBe('password_change');
-    expect(classifyRegisterError(err(403, 'FORBIDDEN'))).toBe('error');
-    expect(classifyRegisterError(err(500, null))).toBe('error');
-    expect(classifyRegisterError(new Error('network'))).toBe('error');
-  });
-
-  it('승인 대기 중 재등록 간격 20분', () => {
-    expect(REGISTER_RETRY_INTERVAL_MS).toBe(20 * 60 * 1000);
   });
 });

@@ -19,4 +19,22 @@ function mustChangePassword(token) {
   }
 }
 
-module.exports = { mustChangePassword };
+/**
+ * 토큰의 사용자·기관(sub·orgId). 읽을 수 없거나 sub가 없으면 null. 기관이 없는 계정은 orgId: null.
+ * 서명을 검증하지 않는다 — EMR 게이트가 "지금 로그인한 기관"을 비교하고, 감사 기록에 "동작을 시작한 사용자"를 적는 데만 쓴다
+ * (서버가 그 값을 다시 확인한다).
+ */
+function readTokenIdentity(token) {
+  try {
+    const payload = String(token).split('.')[1];
+    if (!payload) return null;
+    const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf-8'));
+    if (typeof claims?.sub !== 'string' || !claims.sub) return null;
+    const orgId = typeof claims.orgId === 'string' ? claims.orgId : null;
+    return { userId: claims.sub, orgId };
+  } catch {
+    return null;
+  }
+}
+
+module.exports = { mustChangePassword, readTokenIdentity };
