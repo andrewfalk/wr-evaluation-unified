@@ -20,8 +20,9 @@ function store() {
 }
 
 module.exports = {
-  enqueue:       (entry) => store().enqueue(entry),
-  flush:         (sendFn) => store().flush(sendFn),
-  checkCorrupt:  () => store().checkCorrupt(),
-  handleCorrupt: () => store().handleCorrupt(),
+  enqueue:            (entry) => store().enqueue(entry),
+  quarantineEntry:    (entry) => store().quarantineEntry(entry),
+  flush:              (sendFn, options) => store().flush(sendFn, options),
+  pendingCount:       () => store().pendingCount(),
+  quarantineFileName: () => store().quarantineFileName,
 };

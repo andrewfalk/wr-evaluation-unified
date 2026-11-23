@@ -230,7 +230,8 @@ describe('audit.js 특성화 — 전송과 대기열', () => {
     expect(unstamp(sent.body).extra).toEqual({ source: 'edited', ...SESSION_MISSING() });
   });
 
-  it('flushQueue: 대기열 전부를 순서대로 간격 없이 보내고, 실패(이유 무관)는 남기고, 다 보내면 파일을 지운다', async () => {
+  // EA-8에서 바뀐 동작(재전송 정책) — 7.1.4 사본만. 현재 설치본은 auditResend.test.js.
+  it.runIf(shellDir === LEGACY_DIR)('flushQueue: 대기열 전부를 순서대로 간격 없이 보내고, 실패(이유 무관)는 남기고, 다 보내면 파일을 지운다', async () => {
     const replies = [ok, { status: 429, body: { code: 'RATE_LIMITED', error: 'x' } }, ok, { status: 400, body: { code: 'INVALID_BODY', error: [] } }, ok];
     const { pc, server, audit, fake } = await activePc(() => replies.shift() ?? ok);
     const queue = loadShellModuleCached();
@@ -244,7 +245,8 @@ describe('audit.js 특성화 — 전송과 대기열', () => {
     expect(fs.existsSync(queueFile(pc))).toBe(false);
   });
 
-  it('flushQueue: 한 줄이라도 깨지면 파일 전체를 이름 바꿔 격리하고 audit_queue_corrupt를 보낸다', async () => {
+  // EA-8에서 바뀐 동작(재전송 정책) — 7.1.4 사본만. 현재 설치본은 auditResend.test.js.
+  it.runIf(shellDir === LEGACY_DIR)('flushQueue: 한 줄이라도 깨지면 파일 전체를 이름 바꿔 격리하고 audit_queue_corrupt를 보낸다', async () => {
     const { pc, server, audit } = await activePc();
     const queue = loadShellModuleCached();
     queue.enqueue({ action: 'emr_inject', outcome: 'success' });
@@ -256,7 +258,8 @@ describe('audit.js 특성화 — 전송과 대기열', () => {
     expect(server.audits().map((r) => unstamp(r.body))).toEqual([{ action: 'audit_queue_corrupt', outcome: 'failure', extra: { corruptFile: renamed[0] } }]);
   });
 
-  it('전송 중에 추가된 항목은 회차 끝의 파일 쓰기에 덮일 수 있다(지금 동작 — EA-8에서 고친다)', async () => {
+  // EA-8에서 바뀐 동작(재전송 정책) — 7.1.4 사본만. 현재 설치본은 auditResend.test.js.
+  it.runIf(shellDir === LEGACY_DIR)('전송 중에 추가된 항목은 회차 끝의 파일 쓰기에 덮일 수 있다(지금 동작 — EA-8에서 고친다)', async () => {
     let resolveFirst;
     const replies = [
       () => new Promise((r) => { resolveFirst = () => r({ status: 503, body: { error: 'x' } }); }),
