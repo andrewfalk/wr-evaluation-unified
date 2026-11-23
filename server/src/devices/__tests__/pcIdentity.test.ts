@@ -82,7 +82,7 @@ describe('emr audit record helpers', () => {
 });
 
 describe('createPacedLimiter', () => {
-  it('burst at once, then waits at the rate; refuses beyond maxWaiting; refund gives the slot back', () => {
+  it('burst at once, then waits at the rate; refuses beyond maxWaiting real waiters; refund gives the slot back', () => {
     let t = 0;
     const lim = createPacedLimiter({ burst: 2, ratePerSec: 10, maxWaiting: 2, now: () => t });
     const a = lim.acquire('k');
@@ -95,7 +95,10 @@ describe('createPacedLimiter', () => {
     const e = lim.acquire('k');
     expect(e.allowed).toBe(false);
     if (!e.allowed) expect(e.retryAfterSec).toBeGreaterThanOrEqual(1);
-    if (d.allowed) d.refund();
+    // A refund returns a token but the two waiters are still waiting: no third waiter.
+    if (a.allowed) a.refund();
+    expect(lim.acquire('k').allowed).toBe(false);
+    if (c.allowed) c.doneWaiting();
     const f = lim.acquire('k');
     expect(f.allowed && f.delayMs).toBe(200);
     t = 10_000; // refilled

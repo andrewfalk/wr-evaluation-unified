@@ -126,6 +126,9 @@ export interface PcResolver {
   resolve(headerId: string, message: string, signature: string): Promise<PcLookup>;
 }
 
+// Remembered keys per header id (see createPcResolver).
+const KEYS_PER_HEADER_ID = 4;
+
 export const PC_SCAN_DEFAULTS = {
   inactiveKeyCap: 50,
   scansPerMinute: 600,
@@ -135,8 +138,8 @@ export const PC_SCAN_DEFAULTS = {
 
 /**
  * Finds a PC by signature. A header id seen with a verified signature is remembered, and the next request with
- * that id is checked against that one key only (one verification per request for a known PC — a failure there
- * is a 401 without a full scan). Other requests scan the registered keys: every key with an active row, then
+ * that id is checked against the remembered key(s) first (one verification per request for a known PC). When
+ * those do not verify, or the id is new, the registered keys are scanned: every key with an active row, then
  * at most `inactiveKeyCap` other keys (newest first). Full scans are limited per minute and in parallel across
  * the server; over the limit nothing is scanned.
  */
@@ -150,12 +153,17 @@ export function createPcResolver(pool: Pick<Pool, 'query'>, options: PcResolverO
     maxKeys: 1,
     now: options.now,
   });
-  const known = new Map<string, string>(); // header id → fingerprint, oldest first
+  // header id → fingerprints that verified a request with it (most recent first, at most
+  // KEYS_PER_HEADER_ID). More than one key can sign with the same id, so a hit is only a hint: when none of
+  // the remembered keys verifies, the request falls back to the (limited) full scan, and the key found there
+  // is remembered too — a registered key signing with another PC's id cannot shut that PC out.
+  const known = new Map<string, string[]>();
   let running = 0;
 
   function remember(headerId: string, fingerprint: string): void {
+    const fps = [fingerprint, ...(known.get(headerId) ?? []).filter((fp) => fp !== fingerprint)].slice(0, KEYS_PER_HEADER_ID);
     known.delete(headerId);
-    known.set(headerId, fingerprint);
+    known.set(headerId, fps);
     while (known.size > cacheSize) known.delete(known.keys().next().value as string);
   }
 
@@ -169,12 +177,12 @@ export function createPcResolver(pool: Pick<Pool, 'query'>, options: PcResolverO
     async resolve(headerId, message, signature) {
       if (!isUuid(headerId)) return { kind: 'not_found' };
 
-      const knownFp = known.get(headerId);
-      if (knownFp !== undefined) {
+      for (const knownFp of known.get(headerId) ?? []) {
         const rows = await loadPcRows(pool, knownFp);
-        if (rows.length === 0 || !verifyDeviceSignature(rows[0].public_key, message, signature)) return { kind: 'not_found' };
-        remember(headerId, knownFp);
-        return { kind: 'found', pc: summarizePc(knownFp, rows) };
+        if (rows.length > 0 && verifyDeviceSignature(rows[0].public_key, message, signature)) {
+          remember(headerId, knownFp);
+          return { kind: 'found', pc: summarizePc(knownFp, rows) };
+        }
       }
 
       if (running >= maxConcurrent) return { kind: 'scan_limited', retryAfterSec: 1 };

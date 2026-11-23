@@ -280,16 +280,29 @@ describe('POST /api/audit/emr', () => {
     expect(writeAuditLogStrict).not.toHaveBeenCalled();
   });
 
-  it('a known header id is checked against its key only; a wrong signature with it is refused without a full scan', async () => {
+  it('a known header id is checked against its remembered key first; a wrong signature falls back to the limited full scan', async () => {
     const pc = makePc();
     const fake = makeFake([row(pc)]);
     const app = auditApp(fake);
     expect((await send(app, pc)).status).toBe(200);
     expect(fake.callsTo('devices.scan')).toHaveLength(1);
     expect((await send(app, pc)).status).toBe(200);
+    expect(fake.callsTo('devices.scan')).toHaveLength(1); // remembered: no scan
     const forged = await send(app, pc, { signWith: makePc().privateKey });
     expect(forged.status).toBe(401);
-    expect(fake.callsTo('devices.scan')).toHaveLength(1); // still the first scan only
+    expect(fake.callsTo('devices.scan')).toHaveLength(2);
+  });
+
+  it("another registered key signing with an approved PC's header id first does not shut that PC out", async () => {
+    const approved = makePc();
+    const other = makePc();
+    const fake = makeFake([row(approved), row(other, { status: 'pending', user_id: 'user-2' })]);
+    const app = auditApp(fake);
+    const first = await send(app, other, { headerId: SHELL_ID });
+    expect(first.status).toBe(401); // the other key is not approved
+    for (let i = 0; i < 2; i += 1) expect((await send(app, approved, { headerId: SHELL_ID })).status).toBe(200);
+    expect((await send(app, other, { headerId: SHELL_ID })).status).toBe(401);
+    expect((await send(app, approved, { headerId: SHELL_ID })).status).toBe(200);
   });
 
   it('a pending PC → 401; a PC with any revoked row → 401 even when another row is active', async () => {
@@ -577,7 +590,7 @@ describe('POST /api/audit/emr', () => {
     expect((await send(app, pc)).status).toBe(429);
   });
 
-  it('accepted requests do not use up the address limit (120 failed requests per minute)', async () => {
+  it('accepted requests do not use up the address limit (120 failed requests per minute), also while in progress', async () => {
     const pc = makePc();
     const fake = makeFake([row(pc)]);
     const app = auditApp(fake);
@@ -585,5 +598,22 @@ describe('POST /api/audit/emr', () => {
       const res = await send(app, pc);
       expect(res.status).toBe(200);
     }
+    // 130 at once from one address (the PC is known, so no key scan): none refused by the address limit.
+    const results = await Promise.all(Array.from({ length: 130 }, () => send(app, pc)));
+    expect(results.every((r) => r.status === 200)).toBe(true);
+  }, 30_000);
+
+  it('120 failed requests from one address → the next one is refused before any lookup', async () => {
+    const pc = makePc();
+    const fake = makeFake([row(pc)]);
+    const app = auditApp(fake);
+    for (let i = 0; i < 120; i += 1) {
+      expect((await send(app, pc, { headerId: 'not-a-uuid' })).status).toBe(401);
+    }
+    const blocked = await send(app, pc);
+    expect(blocked.status).toBe(429);
+    expect(blocked.body).toEqual({ code: 'RATE_LIMITED', error: 'Too many audit requests, please try again later' });
+    expect(Number(blocked.headers['retry-after'])).toBeGreaterThanOrEqual(1);
+    expect(fake.callsTo('devices.scan')).toHaveLength(0);
   }, 30_000);
 });

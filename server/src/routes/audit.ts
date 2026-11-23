@@ -189,7 +189,13 @@ async function handleEmrAudit(pool: Pool, deps: AuditDeps, req: Request, res: Re
     res.status(429).json({ code: 'RATE_LIMITED', error: 'Too many audit events from this device, please retry later' });
     return;
   }
-  if (slot.delayMs > 0) await sleep(slot.delayMs);
+  if (slot.delayMs > 0) {
+    try {
+      await sleep(slot.delayMs);
+    } finally {
+      slot.doneWaiting();
+    }
+  }
 
   // --- 10. Actor and flags ---
   const legacy = !isCurrentShellEvent(body.extra);
