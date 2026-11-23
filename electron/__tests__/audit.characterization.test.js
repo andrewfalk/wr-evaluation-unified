@@ -94,23 +94,25 @@ describe('audit.js 특성화 — 장치와 등록', () => {
     });
   });
 
-  it('active 응답 → active 저장. 재시작하면 등록을 다시 부르지 않는다(로컬 상태가 active)', async () => {
+  // EA-6에서 바뀐 동작: 현재 설치본은 프로세스마다 첫 토큰에서 상태를 한 번 확인한다(해지·기관을 반영하려고).
+  it('active 응답 → active 저장. 재시작 뒤 등록 호출: 7.1.4는 없음(로컬 active), 현재 설치본은 첫 토큰에서 한 번', async () => {
     const pc = newPc();
     const server = makeServer({ '/api/devices/register': registered('active') });
     await start(pc, server).audit.initAudit({ getAccessToken: () => TOKEN, apiBaseUrl: 'https://server.test' });
     expect(meta(pc).status).toBe('active');
     const { audit } = start(pc, server);
     await audit.initAudit({ getAccessToken: () => TOKEN, apiBaseUrl: 'https://server.test' });
-    expect(server.requests.filter((r) => r.path === '/api/devices/register')).toHaveLength(1);
+    expect(server.requests.filter((r) => r.path === '/api/devices/register')).toHaveLength(SHELL_DIR === LEGACY_DIR ? 1 : 2);
     expect(audit.getDeviceStatus().status).toBe('active');
   });
 
-  it('등록 실패: 429·비밀번호 변경 필요는 상태 유지, 그 밖(5xx·네트워크)은 메모리 상태 error(파일은 그대로)', async () => {
+  // EA-6에서 바뀐 동작: 현재 설치본은 실패한 호출로 상태를 바꾸지 않는다(7.1.4는 5xx·네트워크에서 메모리 상태 error).
+  it('등록 실패: 429·비밀번호 변경 필요는 상태 유지, 5xx·네트워크는 7.1.4만 메모리 상태 error(파일은 그대로)', async () => {
     for (const [reply, expected] of [
       [{ status: 429, body: { code: 'RATE_LIMITED', error: 'x' } }, 'unregistered'],
       [{ status: 403, body: { code: 'PASSWORD_CHANGE_REQUIRED', error: 'x' } }, 'unregistered'],
-      [{ status: 500, body: { code: 'INTERNAL_ERROR', error: 'x' } }, 'error'],
-      [new Error('ECONNREFUSED'), 'error'],
+      [{ status: 500, body: { code: 'INTERNAL_ERROR', error: 'x' } }, SHELL_DIR === LEGACY_DIR ? 'error' : 'unregistered'],
+      [new Error('ECONNREFUSED'), SHELL_DIR === LEGACY_DIR ? 'error' : 'unregistered'],
     ]) {
       const pc = newPc();
       const server = makeServer({ '/api/devices/register': () => reply });

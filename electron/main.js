@@ -1246,6 +1246,14 @@ function runHelper(args, timeoutMs = 15000) {
 
 // ── EMR helpers ───────────────────────────────────────────────────────────────
 
+const EMR_GATE_MESSAGES = {
+  pending:         '이 PC의 EMR 접근이 관리자 승인 대기 중입니다.',
+  revoked:         '이 PC의 EMR 접근이 해지되었습니다. 관리자에게 문의하세요.',
+  other_org:       '이 PC는 다른 기관에 등록되어 있어 EMR 연동을 사용할 수 없습니다.',
+  org_unconfirmed: '이 PC의 EMR 장치 승인을 확인하는 중입니다. 잠시 후 다시 시도하세요.',
+  unregistered:    'EMR 장치 등록이 필요합니다. 관리자에게 문의하세요.',
+};
+
 // Shared origin + device gate for all EMR ipc handlers.
 // Returns a rejection object if access should be denied, null if access is allowed.
 function emrGate(event, action) {
@@ -1255,12 +1263,11 @@ function emrGate(event, action) {
     return { success: false, message: 'EMR access denied: sender origin not allowed.' };
   }
   if (IS_INTRANET_BUILD) {
-    const { status } = audit.getDeviceStatus();
-    if (status !== 'active') {
-      const msg = status === 'pending'
-        ? '이 PC의 EMR 접근이 관리자 승인 대기 중입니다.'
-        : 'EMR 장치 등록이 필요합니다. 관리자에게 문의하세요.';
-      return { success: false, message: msg };
+    // 승인 상태는 PC(장치 키) 단위이고 그 PC가 속한 기관의 로그인에서만 열린다(audit.getEmrGate, deviceState.js).
+    const { allowed, reason } = audit.getEmrGate();
+    if (!allowed) {
+      if (reason === 'org_unconfirmed') audit.tryRegister().catch(() => {});
+      return { success: false, message: EMR_GATE_MESSAGES[reason] ?? EMR_GATE_MESSAGES.unregistered };
     }
   }
   return null; // access allowed
