@@ -124,6 +124,8 @@ function httpJson(method, url, { headers = {}, body } = {}) {
       rejectUnauthorized: !INSECURE,
     }, (res) => {
       let data = '';
+      res.on('error', reject);
+      res.on('aborted', () => reject(new Error('response aborted')));
       res.on('data', (c) => { data += c; });
       res.on('end', () => {
         let json = null;
@@ -169,6 +171,8 @@ function realSend({ url, method, headers, body }) {
       rejectUnauthorized: !INSECURE,
     }, (res) => {
       let data = '';
+      res.on('error', reject);
+      res.on('aborted', () => reject(new Error('response aborted')));
       res.on('data', (c) => { data += c; });
       res.on('end', () => {
         requestLog.push({ at: started, path: u.pathname, status: res.statusCode, ms: Date.now() - started });
