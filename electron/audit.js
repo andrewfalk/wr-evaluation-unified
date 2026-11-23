@@ -139,6 +139,7 @@ function httpPost(url, headers, body) {
 //  - a failed call changes nothing.
 
 let _registering = false;
+let _askAgain = false; // tryRegister was called while a call was in flight
 let _retryTimer = null;
 const QUICK_RETRY_REASONS = new Set(['first_token', 'org_changed', 'device_problem']);
 
@@ -170,7 +171,12 @@ async function tryRegister() {
   // 그래서 요청 자체를 보내지 않는다 — 비밀번호 변경 후 새 토큰으로 setAccessToken이 다시 불리면 그때 첫 등록이 나간다.
   if (mustChangePassword(token)) return emrGate().allowed;
   const login = readTokenIdentity(token);
-  if (!login || _registering) return emrGate().allowed;
+  if (!login) return emrGate().allowed;
+  if (_registering) {
+    // A call is in flight (perhaps for another login): look again once it has answered, within the limits.
+    _askAgain = true;
+    return emrGate().allowed;
+  }
 
   const now = Date.now();
   _registerAttempts = _registerAttempts.filter(t => now - t < 60 * 60 * 1000);
@@ -201,6 +207,11 @@ async function tryRegister() {
   }
 
   const outcome = interpretRegisterResult(result);
+  // Called again while this call was in flight, or the login changed organisation meanwhile: ask again (scheduled,
+  // so the spacing between calls holds); shouldRegister decides then whether it is still needed.
+  const loginNow = currentLogin();
+  if (_askAgain || (loginNow && loginNow.orgId !== login.orgId)) scheduleRetry();
+  _askAgain = false;
   if (outcome.kind === 'pc' || outcome.kind === 'legacy') {
     _freshProcess = false;
     _checkedOrgId = login.orgId;

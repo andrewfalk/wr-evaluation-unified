@@ -291,6 +291,31 @@ describe('audit.js — 상태 갱신과 기관에 묶인 게이트', () => {
     await vi.waitFor(() => expect(audit.getEmrGate()).toEqual({ allowed: false, reason: 'revoked' }));
   });
 
+  it('등록 응답을 기다리는 동안 다른 기관으로 바뀌면, 응답 뒤 61초 안에 그 기관으로 다시 묻는다(다른 호출 없이)', async () => {
+    const tokenRef = { current: tokenA };
+    const pc = await approvedPc(tokenRef);
+    let release;
+    const replies = [() => new Promise((r) => { release = () => r(pcAnswer('active')); }), () => otherOrgAnswer(ORG_B)];
+    const regs = [];
+    const send = async (req) => {
+      regs.push(new URL(req.url).pathname);
+      const r = await replies.shift()();
+      return { status: r.status, body: JSON.stringify(r.body) };
+    };
+    const audit = loadShellModule(ELECTRON_DIR, 'audit.js', createFakeElectron({ userDataDir: pc, send }));
+    const initing = audit.initAudit({ getAccessToken: () => tokenRef.current, apiBaseUrl: 'https://server.test' });
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+    tokenRef.current = tokenB;
+    await audit.tryRegister(); // 호출 중 — 바로 돌아온다
+    release();
+    await initing;
+    expect(audit.getEmrGate()).toEqual({ allowed: false, reason: 'org_unconfirmed' });
+    advance(REGISTER_MIN_SPACING_MS + 1000);
+    await vi.advanceTimersByTimeAsync(REGISTER_MIN_SPACING_MS + 1000);
+    await vi.waitFor(() => expect(audit.getEmrGate()).toEqual({ allowed: false, reason: 'other_org' }));
+    expect(regs).toHaveLength(2);
+  });
+
   it('같은 기관의 다른 사용자로 바뀌어도 호출하지 않고 열려 있다', async () => {
     const tokenRef = { current: tokenA };
     const pc = await approvedPc(tokenRef);
