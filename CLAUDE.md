@@ -114,8 +114,8 @@ Patient = {
 - **workspaces.ts**: 환자 목록 스냅샷(워크스페이스) CRUD (사용자/조직 범위)
 - **autosave.ts**: 워크스페이스 자동저장 스냅샷 조회/저장/삭제
 - **presets.ts**: 직업 노출 프리셋 CRUD (공유/조직/개인 범위)
-- **devices.ts**: Ed25519 공개키 + UA 검증 기반 디바이스 등록
-- **audit.ts**: Electron 메인 프로세스에서 전송한 EMR 감사 로그 수신 (Ed25519 서명 검증)
+- **devices.ts**: 디바이스 등록 — PC(Ed25519 장치 키 지문) 단위, 한 PC는 한 기관(`server/src/devices/pcIdentity.ts`)
+- **audit.ts**: Electron 메인 프로세스에서 전송한 EMR 감사 로그 수신 — 서명으로 PC를 찾고 기관·행위자·표시를 정한다(`server/src/devices/`)
 - **opsStatus.ts**: 백업 실행 상태 조회, 실행/알림 확인 작업
 - **config.ts**: `/api/config/public` — 배포 모드, AI 활성화 여부, 서버 시간 등 공개 설정
 - **ai.ts**: `/api/ai/analyze` — 내부 LLM 또는 승인된 외부 벤더로 AI 분석 요청 프록시
