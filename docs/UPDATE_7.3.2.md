@@ -51,7 +51,7 @@
 
 ## 예상 다운타임
 
-- **서버**: 1분 안팎(정지 → `migrate`(변경 0) → 앱 기동).
+- **서버**: 1분 안팎(정지 → `migrate`(변경 0) → 앱 기동). 로그 설정이 바뀌므로 **postgres·caddy 등 모든 컨테이너가 다시 만들어진다**(데이터는 볼륨에 그대로 — 되돌릴 때도 같다).
 - **EMR 사용**: 서버를 올린 뒤 각 PC에 쌓여 있던 기록이 들어오는 동안(아래 C) EMR 사용을 멈추는 것을 권한다.
 - **설치본**: PC마다 설치하는 동안만.
 
@@ -192,7 +192,7 @@ docker exec wr-prod-backup-1 crontab -l                                 # → 0 
    ```powershell
    docker exec wr-prod-postgres-1 psql -U wr_user -d wr_evaluation -c "select left(extra->>'deviceId', 8) as pc, count(*), count(*) filter (where extra->>'burst' = 'true') as burst, min(created_at), max(created_at) from audit_logs where target_type = 'emr' and created_at > now() - interval '1 hour' group by 1 order by 1"
    ```
-   PC마다 `max(created_at)`이 더 늘지 않으면 그 PC의 쌓인 기록이 다 들어온 것이다(설치본이 켜져 있어야 보낸다).
+   `max(created_at)`이 더 늘지 않는 것은 **보조 지표**다 — 그 PC의 설치본이 꺼져 있거나 다음 재전송(5분)을 기다리는 동안에도 멈춰 보인다. 각 EMR PC에서 대기열 파일이 비었는지(아래 D의 명령 — `audit-emr-pending.enc`가 없거나 0바이트)를 직접 확인한 PC만 "다 들어왔다"로 본다.
 3. 감사 요청의 응답 분포(최근 30분) — 대부분 200이어야 한다:
    ```powershell
    docker logs wr-prod-app-1 --since 30m 2>&1 | Select-String '"/api/audit/emr"' | ForEach-Object { if ($_ -match '"statusCode":(\d+)') { $Matches[1] } } | Group-Object | Format-Table Name, Count
@@ -247,7 +247,14 @@ docker exec wr-prod-backup-1 crontab -l                                 # → 0 
 - 자동 테스트: 서버 단위·실DB 통합 테스트(PC 찾기·한 PC 두 사용자·다른 기관·여러 기관에 걸친 키·nonce·해지·예약 키·제한·이전 설치본 표시·새 설치본의 행위자/발생 시각·등록/승인/해지/동시 등록), 설치본 단위 테스트(분리 전 코드와 같은 특성화, 상태 갱신·기관 게이트, 기록 시점 정보, 재전송 정책과 대기열 보존), 관리자 콘솔 렌더 테스트, compose 불변식.
 - Tier-3(개발 서버): 7.1.4 설치본 사본 — 등록·승인·대기열 151건 한 회차·행위자/표시·같은 기관 다른 사용자·세션 없는 기록·재전송 중 새 기록. 7.3.2 설치본 코드 — 한 PC 두 사용자·대기열 기록의 행위자/시각·계정 전환·429 멈춤·다른 기관 거부·해지 반영.
 - 백업 컨테이너 이미지에서 `TZ=KST-9`가 해석되고 crond가 한국 시각으로 실행됨, `docker inspect`의 로그 옵션.
-- (릴리스 가지 리허설 결과는 리허설 뒤 이 절에 더한다.)
+- **릴리스 가지 리허설**(서버 전용 패키지, 검증 스택 — 7.3.1 패키지의 볼륨을 이어서):
+  - 7.3.1 서버 + 7.3.2 설치본 코드: 승인 대기(이전 방식) → 승인 → 재시작 뒤 열림, 기록은 거부되어 대기열에 남음.
+  - 7.3.1 → 7.3.2: `migrate` roles 0 · grants 0 · verified, 마이그레이션 42행·체크섬 빈 행 0, 앱 healthy, 모든 컨테이너의 `LogConfig` = json-file 50m × 5(postgres·caddy 컨테이너 재생성, 데이터 그대로). 7.3.1 동안 쌓인 7.3.2 설치본의 기록이 올린 뒤 시작한 사용자·발생 시각으로 들어감.
+  - 백업 컨테이너(패키지 compose로 일회성 실행): `TZ=KST-9`, `date`가 한국 시각, 크론 `0 2 * * *`.
+  - Tier-3(패키지 스택): 7.1.4 사본 — 쌓인 기록 1,201건이 한 회차에 거부 없이 들어감(약 90초: 300건 뒤 초당 약 10건으로 늦춰짐), 1,200건에 "몰아서 전송", 그 회차 도중의 새 기록도 기록됨. 7.3.2 설치본 코드 — 한 PC 두 사용자, 대기열 기록의 행위자·시각, 계정 전환, 429와 Retry-After, 다른 기관 거부, 해지 반영. 30/30.
+  - 7.3.1 이미지로 되돌리기(DB 복원 없음): `migrate` 0 · 0, 데이터 그대로, 7.3.2 설치본 코드는 열린 채 기록을 대기열에 보존 → 다시 7.3.2로 올리면 그 기록이 들어감.
+  - 시험 조직·사용자·장치는 매번 지웠고 검증 DB의 조직·사용자·환자·장치 건수가 시작 때와 같다(감사 로그 행은 추가 전용이라 남는다).
+- 인트라넷 설치본 빌드(`npm run electron:build:intranet`)가 된다(서명하지 않은 확인용 — 최종 패키지는 위 1)대로 사용자가 만든다).
 
 ### 확인하지 못한 것
 
