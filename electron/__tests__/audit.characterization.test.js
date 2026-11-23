@@ -157,6 +157,28 @@ describe('audit.js 특성화 — 장치와 등록', () => {
     expect(server.requests).toHaveLength(2);
   });
 
+  // 현재 설치본만: 등록 요청에 시간 제한이 있다 — 응답이 끝나지 않는 요청이 그 뒤의 상태 확인을 막지 않는다.
+  it.runIf(shellDir === ELECTRON_DIR)('응답이 끝나지 않는 등록 요청은 시간 제한으로 끊기고, 정해진 간격 뒤 다시 확인한다', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    vi.setSystemTime(new Date('2026-11-23T00:00:00Z'));
+    const pc = newPc();
+    let calls = 0;
+    const server = makeServer({
+      '/api/devices/register': () => { calls += 1; return calls === 1 ? new Promise(() => {}) : registered('active')(); },
+    });
+    const { audit } = start(pc, server);
+    let initDone = false;
+    const init = audit.initAudit({ getAccessToken: () => TOKEN, apiBaseUrl: 'https://server.test' }).then(() => { initDone = true; });
+    await vi.advanceTimersByTimeAsync(29_000);
+    expect(initDone).toBe(false);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await init;
+    expect(audit.getDeviceStatus().status).toBe('unregistered');
+    await vi.advanceTimersByTimeAsync(62_000);
+    expect(server.requests.filter((r) => r.path === '/api/devices/register')).toHaveLength(2);
+    expect(audit.getDeviceStatus().status).toBe('active');
+  });
+
   it('safeStorage를 못 쓰면 감사 모듈이 꺼진다(요청 없음, 상태 error)', async () => {
     const pc = newPc();
     const server = makeServer({});
