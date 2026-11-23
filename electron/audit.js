@@ -10,6 +10,7 @@ const crypto = require('crypto');
 const { enqueue, flush, checkCorrupt, handleCorrupt } = require('./auditQueue');
 const { mustChangePassword, readTokenIdentity } = require('./accessTokenClaims');
 const {
+  REQUEST_TIMEOUT_MS,
   buildSignedAuditRequest,
   interpretHttpResponse,
   isTokenExpiryError,
@@ -109,20 +110,34 @@ function initDevice() {
 
 // ── HTTP helper ──────────────────────────────────────────────────────────────
 
+// One request, with a time limit (a request that does not finish in REQUEST_TIMEOUT_MS is aborted and fails
+// like a network error) — so a registration call that never answers cannot hold _registering forever.
 function httpPost(url, headers, body) {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn(value);
+    };
     const req = net.request({ url, method: 'POST' });
+    const timer = setTimeout(() => {
+      try { req.abort(); } catch { /* 이미 끝남 */ }
+      finish(reject, new Error('request timeout'));
+    }, REQUEST_TIMEOUT_MS);
     for (const [k, v] of Object.entries(headers)) req.setHeader(k, String(v));
     req.on('response', res => {
       let data = '';
       res.on('data', c => { data += c; });
+      res.on('error', err => finish(reject, err));
       res.on('end', () => {
         const result = interpretHttpResponse(res.statusCode, data);
-        if (result instanceof Error) reject(result);
-        else resolve(result);
+        if (result instanceof Error) finish(reject, result);
+        else finish(resolve, result);
       });
     });
-    req.on('error', reject);
+    req.on('error', err => finish(reject, err));
     req.write(body);
     req.end();
   });
