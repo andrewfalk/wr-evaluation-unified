@@ -82,31 +82,44 @@ function createAuditQueueStore(options) {
     try { fs.unlinkSync(grave); } catch { /* 다음에 정리 */ }
   }
 
-  /** 잠금을 잡으면 true. LOCK_WAIT_MS 안에 못 잡으면 false. */
+  // 잠금을 원자적으로 게시한다: 표식을 다 쓴 임시 파일을 잠금 이름에 하드 링크로 건다(이미 있으면 실패) — 잠금 파일은 처음부터
+  // 표식을 담고 있어 "막 만들어진 빈 잠금"이 없다. 'created' | 'exists' | 'error'.
+  function publishLock(token) {
+    const tmp = `${lockFile}.${process.pid}-${(seq += 1)}.tmp`;
+    try {
+      fs.writeFileSync(tmp, token, 'utf-8');
+      fs.linkSync(tmp, lockFile);
+      return 'created';
+    } catch (err) {
+      return err.code === 'EEXIST' ? 'exists' : 'error';
+    } finally {
+      try { fs.unlinkSync(tmp); } catch { /* 이미 없음 */ }
+    }
+  }
+
+  /** 잠금을 잡으면 true. LOCK_WAIT_MS 안에 못 잡으면 false — 어느 경로로 실패해도 제한 시간 안에 끝난다. */
   function acquireLock() {
     const deadline = now() + LOCK_WAIT_MS;
     const token = `${process.pid}:${Math.random().toString(36).slice(2)}${now().toString(36)}`;
     for (;;) {
-      try {
-        const fd = fs.openSync(lockFile, 'wx');
-        try { fs.writeSync(fd, token); } finally { fs.closeSync(fd); }
+      const published = publishLock(token);
+      if (published === 'created') {
         lockToken = token;
         return true;
-      } catch (err) {
-        if (err.code !== 'EEXIST') return false;
+      }
+      if (published === 'exists') {
         let seen = null;
         let age = 0;
         try {
           seen = fs.readFileSync(lockFile, 'utf-8');
           age = now() - fs.statSync(lockFile).mtimeMs;
-        } catch { continue; } // 그사이 풀렸다
-        if (processGone(seen.split(':')[0]) || age > LOCK_STALE_MS) {
-          tryTakeOver(seen);
-          continue;
-        }
-        if (now() >= deadline) return false;
-        sleepSync(10);
+        } catch { /* 그사이 풀렸다 — 아래에서 다시 */ }
+        const owner = seen ? seen.split(':')[0] : '';
+        // 표식이 없는 잠금(이전 형식 등)은 오래됐을 때만, 표식이 있으면 그 프로세스가 없거나 오래됐을 때 넘겨받는다.
+        if (seen !== null && ((owner && processGone(owner)) || age > LOCK_STALE_MS)) tryTakeOver(seen);
       }
+      if (now() >= deadline) return false;
+      sleepSync(10);
     }
   }
 

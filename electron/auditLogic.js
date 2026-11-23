@@ -61,8 +61,17 @@ function buildSignedAuditRequest({ entry, deviceId, privateKey, accessToken }, d
  * HTTP 응답 해석: 2xx·3xx JSON → { status, data }, 4xx·5xx JSON → Error(status·code), JSON이 아니면 Error('parse error').
  * 성공이면 객체를 돌려주고 실패면 Error를 돌려준다(던지지 않는다 — 호출부가 reject한다).
  */
+/** Retry-After: 초(정수) 또는 HTTP 날짜. 날짜는 지금과의 차이(지난 날짜면 0). 읽을 수 없으면 NaN. */
+function parseRetryAfterSec(value, nowMs = Date.now()) {
+  if (value === undefined || value === null) return NaN;
+  const text = String(value).trim();
+  if (/^\d+$/.test(text)) return Number(text);
+  const at = Date.parse(text);
+  return Number.isNaN(at) ? NaN : Math.max(0, Math.ceil((at - nowMs) / 1000));
+}
+
 function interpretHttpResponse(statusCode, rawBody, headers) {
-  const retryAfter = Number(Array.isArray(headers?.['retry-after']) ? headers['retry-after'][0] : headers?.['retry-after']);
+  const retryAfter = parseRetryAfterSec(Array.isArray(headers?.['retry-after']) ? headers['retry-after'][0] : headers?.['retry-after']);
   let json;
   try {
     json = JSON.parse(rawBody);
@@ -157,6 +166,7 @@ function forQueuedSend(entry) {
 }
 
 module.exports = {
+  parseRetryAfterSec,
   RESEND_MAX_PER_ROUND,
   RESEND_GAP_MS,
   REQUEST_TIMEOUT_MS,

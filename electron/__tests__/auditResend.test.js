@@ -56,6 +56,7 @@ describe('응답 분류', () => {
     ['JSON이 아닌 429 + Retry-After', interpretHttpResponse(429, 'Too Many Requests', { 'retry-after': '900' }), { kind: 'stop', retryAfterMs: 900_000 }],
     ['JSON이 아닌 413(프록시)', interpretHttpResponse(413, '<html>Request Entity Too Large</html>', {}), { kind: 'quarantine' }],
     ['JSON이 아닌 502', interpretHttpResponse(502, '<html>bad gateway</html>', {}), { kind: 'stop' }],
+    ['429 + 날짜형 Retry-After(20분 뒤)', interpretHttpResponse(429, '{"code":"RATE_LIMITED","error":"x"}', { 'retry-after': new Date(Date.now() + 20 * 60_000).toUTCString() }), { kind: 'stop', retryAfterMs: expect.any(Number) }],
     ['400 INVALID_BODY', err(400, 'INVALID_BODY'), { kind: 'quarantine' }],
     ['400(다른 코드)', err(400, 'OTHER'), { kind: 'stop' }],
     ['413', err(413, null), { kind: 'quarantine' }],
@@ -149,7 +150,7 @@ describe('대기열 회차(auditQueueStore)', () => {
 
   it('임시 파일 쓰기 도중 중단돼도 원본은 온전하고, 시작할 때 남은 임시 파일은 버린다', async () => {
     const dir = tempDir();
-    const fsProxy = { ...fs, writeFileSync: (p, ...a) => { if (String(p).endsWith('.tmp')) { fs.writeFileSync(p, 'enc:partial'); throw new Error('ENOSPC'); } return fs.writeFileSync(p, ...a); } };
+    const fsProxy = { ...fs, writeFileSync: (p, ...a) => { if (String(p).endsWith('audit-emr-pending.enc.tmp')) { fs.writeFileSync(p, 'enc:partial'); throw new Error('ENOSPC'); } return fs.writeFileSync(p, ...a); } };
     const store = makeStore(dir, { fs: fsProxy });
     for (let i = 0; i < 2; i += 1) store.enqueue(e(i));
     const before = fs.readFileSync(path.join(dir, 'audit-emr-pending.enc'), 'utf8');
@@ -209,6 +210,52 @@ describe('대기열 회차(auditQueueStore)', () => {
     expect(fileLines(dir)).toEqual([]); // 잠금이 없으니 대기열 파일은 그대로
     expect(fs.readdirSync(dir).filter((n) => n.startsWith('audit-emr-pending.spool-'))).toHaveLength(1);
     expect(fs.readdirSync(dir).filter((n) => n.includes('.stale-'))).toEqual([]);
+  });
+
+  it('날짜형 Retry-After는 지금과의 차이로 읽는다', () => {
+    const r = classifySendFailure(interpretHttpResponse(429, 'Too Many Requests', { 'retry-after': new Date(Date.now() + 20 * 60_000).toUTCString() }));
+    expect(r.retryAfterMs).toBeGreaterThanOrEqual(19 * 60_000);
+    expect(r.retryAfterMs).toBeLessThanOrEqual(20 * 60_000 + 1000);
+    expect(classifySendFailure(interpretHttpResponse(429, '', { 'retry-after': 'Mon, 01 Jan 2001 00:00:00 GMT' })).retryAfterMs).toBe(0);
+  });
+
+  it('잠금 파일은 표식을 담은 채로 생긴다 — 다른 프로세스가 생성 직후의 빈 잠금을 넘겨받을 틈이 없다', () => {
+    const dir = tempDir();
+    const lock = path.join(dir, 'audit-emr-pending.enc.lock');
+    const seen = [];
+    const fsProxy = { ...fs, linkSync: (from, to) => { const r = fs.linkSync(from, to); seen.push(fs.readFileSync(to, 'utf8')); return r; } };
+    makeStore(dir, { fs: fsProxy }).enqueue(e(1));
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatch(new RegExp(`^${process.pid}:`)); // 잠금이 보이는 첫 순간부터 표식이 있다
+    expect(fs.existsSync(lock)).toBe(false);
+    expect(fs.readdirSync(dir).filter((n) => n.endsWith('.tmp'))).toEqual([]);
+  });
+
+  it('표식이 없는(빈) 잠금은 오래되기 전에는 넘겨받지 않는다', () => {
+    const dir = tempDir();
+    const lock = path.join(dir, 'audit-emr-pending.enc.lock');
+    fs.writeFileSync(lock, '');
+    let t = Date.now();
+    makeStore(dir, { now: () => { t += 500; return t; } }).enqueue(e(1));
+    expect(fs.existsSync(lock)).toBe(true);
+    expect(fileLines(dir)).toEqual([]);
+    expect(fs.readdirSync(dir).filter((n) => n.startsWith('audit-emr-pending.spool-'))).toHaveLength(1);
+  });
+
+  it('넘겨받기·읽기가 계속 실패해도 제한 시간 안에 끝나고 보조 파일에 남긴다(무한 반복 없음)', () => {
+    const dir = tempDir();
+    const lock = path.join(dir, 'audit-emr-pending.enc.lock');
+    fs.writeFileSync(lock, '999999999:gone');
+    const fsProxy = {
+      ...fs,
+      renameSync: (from, to) => { if (from === lock) throw Object.assign(new Error('EPERM'), { code: 'EPERM' }); return fs.renameSync(from, to); },
+    };
+    let calls = 0;
+    let t = Date.now();
+    const store = makeStore(dir, { fs: fsProxy, now: () => { calls += 1; t += 100; return t; } });
+    store.enqueue(e(1));
+    expect(calls).toBeLessThan(500);
+    expect(fs.readdirSync(dir).filter((n) => n.startsWith('audit-emr-pending.spool-'))).toHaveLength(1);
   });
 
   it('잠금을 풀 때 자기 잠금만 지운다', () => {
