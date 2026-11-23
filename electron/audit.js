@@ -328,12 +328,13 @@ async function recordAudit(entry, context) {
     await doSendWithSessionFallback(stamped, token);
   } catch (err) {
     if (classifySendFailure(err).kind === 'quarantine') {
-      // The entry itself was refused (the server will never take it as it is): set aside, not resent.
+      // The entry itself was refused (the server will never take it as it is): set aside, not resent. If it cannot be
+      // set aside, it goes to the queue (the next round tries again) — never dropped.
       console.error('[audit] entry refused, set aside:', err.message);
-      if (quarantineEntry(stamped) && entry.action !== 'audit_queue_corrupt') {
-        await reportSetAside({ rejectedLines: 1 }).catch(() => {});
+      if (quarantineEntry(stamped)) {
+        if (entry.action !== 'audit_queue_corrupt') await reportSetAside({ rejectedLines: 1 }).catch(() => {});
+        return;
       }
-      return;
     }
     console.error('[audit] send failed, enqueuing:', err.message);
     enqueue(stamped);
@@ -351,6 +352,7 @@ async function reportSetAside({ corruptLines = 0, rejectedLines = 0 }) {
 }
 
 let _nextRoundAt = 0; // a 429's Retry-After: no resend round before this time
+let _roundRunning = false; // one flushQueue at a time, from the state check to the end of the round
 
 // One resend round of the queue (see auditQueueStore.js): at most RESEND_MAX_PER_ROUND entries, RESEND_GAP_MS
 // apart. The round stops and keeps the rest on 429 (and waits for Retry-After), 5xx, network errors, timeouts,
@@ -358,9 +360,18 @@ let _nextRoundAt = 0; // a 429's Retry-After: no resend round before this time
 // server refuses as such (400 INVALID_BODY, 413) is set aside and the round goes on. Asks for the device state
 // first when it is due (approvals of a pending PC and transient failures heal without an app restart).
 async function flushQueue() {
-  if (Date.now() < _nextRoundAt) return;
+  if (_roundRunning || Date.now() < _nextRoundAt) return;
+  _roundRunning = true;
+  try {
+    await flushQueueRound();
+  } finally {
+    _roundRunning = false;
+  }
+}
+
+async function flushQueueRound() {
   await tryRegister();
-  if (!canSend()) return;
+  if (!canSend() || Date.now() < _nextRoundAt) return;
 
   const token = _getAccessToken();
   let stop = null;

@@ -9,7 +9,9 @@
 //   · 'stop'(회차를 멈추고 이 줄과 나머지를 남긴다). 복호화·해석이 안 되는 줄은 그 줄만 격리한다.
 // - 회차 끝에 "파일 다시 읽기 → 처리한 줄만 빼고 임시 파일에 쓰기 → 이름 바꾸기"를 await 없는 동기 구간으로 한다. 항목 추가
 //   (enqueue)도 동기라 같은 프로세스 안에서는 끼어들 수 없고, 다른 프로세스(같은 프로필의 다른 셸)와는 잠금 파일로 나눈다.
-//   그래서 전송 중에 추가된 줄은 지워지지 않는다.
+//   그래서 전송 중에 추가된 줄은 지워지지 않는다. 대기열 파일은 잠금을 잡았을 때만 바꾼다 — 잠금을 못 잡은 추가는 이 프로세스의
+//   보조 파일(audit-emr-pending.side-<pid>.enc)에 쓰고, 다음 회차가 잠금 아래에서 대기열 파일로 옮긴다. 잠금을 못 잡은 교체는
+//   다음 회차로 미룬다.
 // - 원본을 잘라 쓰지 않는다. 이름 바꾸기가 실패하면 원본을 그대로 두고, 이미 처리한 줄은 기억해 다음 회차에 다시 보내지 않는다
 //   (프로세스가 다시 시작되면 한 번 더 나갈 수 있다 — 이 설치본의 항목은 eventId로 알아볼 수 있다). 시작할 때 남은 임시 파일은 버린다.
 // - 대기열을 크기 때문에 버리지 않는다(임계를 넘으면 로그만).
@@ -78,13 +80,36 @@ function createAuditQueueStore(options) {
     try { fs.unlinkSync(lockFile); } catch { /* 이미 없음 */ }
   }
 
-  function withLock(fn) {
-    const locked = acquireLock();
-    if (!locked) log.warn('[auditQueue] queue lock not acquired — continuing without it');
+/** 잠금을 잡았을 때만 fn을 실행한다. 못 잡으면 fallback()(없으면 undefined). */
+  function withLock(fn, fallback) {
+    if (!acquireLock()) {
+      log.warn('[auditQueue] queue lock not acquired');
+      return fallback ? fallback() : undefined;
+    }
     try {
       return fn();
     } finally {
-      if (locked) releaseLock();
+      releaseLock();
+    }
+  }
+
+  // 이 프로세스의 보조 파일(잠금을 못 잡은 추가) — 다른 프로세스와 겹치지 않는다.
+  const sideFile = path.join(dir, `${path.basename(file, '.enc')}.side-${process.pid}.enc`);
+  const sidePrefix = `${path.basename(file, '.enc')}.side-`;
+
+  // 잠금 아래에서: 보조 파일들의 줄을 대기열 파일 끝에 옮기고 보조 파일을 지운다.
+  function mergeSideFiles() {
+    let names;
+    try { names = fs.readdirSync(dir).filter(n => n.startsWith(sidePrefix) && n.endsWith('.enc')); } catch { return; }
+    for (const name of names) {
+      const p = path.join(dir, name);
+      try {
+        const content = fs.readFileSync(p, 'utf-8');
+        if (content.trim()) fs.appendFileSync(file, content.endsWith('\n') ? content : content + '\n', 'utf-8');
+        fs.unlinkSync(p);
+      } catch (err) {
+        log.error('[auditQueue] side file merge failed:', err.message);
+      }
     }
   }
 
@@ -119,13 +144,14 @@ function createAuditQueueStore(options) {
       log.error('[auditQueue] enqueue failed:', err.message);
       return;
     }
-    withLock(() => {
+    const append = (target) => {
       try {
-        fs.appendFileSync(file, line, 'utf-8');
+        fs.appendFileSync(target, line, 'utf-8');
       } catch (err) {
         log.error('[auditQueue] enqueue failed:', err.message);
       }
-    });
+    };
+    withLock(() => append(file), () => append(sideFile));
   }
 
   function pendingCount() {
@@ -166,7 +192,7 @@ function createAuditQueueStore(options) {
         try { if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile); } catch { /* 다음 시작 때 버린다 */ }
         return false;
       }
-    });
+    }, () => false); // 잠금을 못 잡으면 바꾸지 않는다(다음 회차)
   }
 
   function quarantine(line) {
@@ -212,11 +238,12 @@ function createAuditQueueStore(options) {
 
       let lines;
       try {
-        lines = withLock(() => readLines());
+        lines = withLock(() => { mergeSideFiles(); return readLines(); }, () => null);
       } catch (err) {
         log.error('[auditQueue] flush: read error:', err.message);
         return result;
       }
+      if (lines === null) return { ...result, skipped: true }; // 잠금을 못 잡음 — 다음 회차
       if (lines.length > LARGE_QUEUE_LINES && !warnedLarge) {
         warnedLarge = true;
         log.warn('[auditQueue] large queue:', lines.length, 'lines');

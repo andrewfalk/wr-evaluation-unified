@@ -158,7 +158,7 @@ describe('대기열 회차(auditQueueStore)', () => {
     expect(fs.readFileSync(path.join(dir, 'audit-emr-pending.enc'), 'utf8')).toBe(before);
   });
 
-  it('다른 프로세스의 잠금: 오래된 잠금은 넘겨받고, 살아 있는 잠금은 잠시 기다린 뒤 진행한다(항목을 버리지 않음)', () => {
+  it('다른 프로세스의 잠금: 오래된 잠금은 넘겨받고, 살아 있는 잠금이면 대기열 파일을 건드리지 않고 보조 파일에 쓴 뒤 다음 회차가 옮긴다', async () => {
     const dir = tempDir();
     const lock = path.join(dir, 'audit-emr-pending.enc.lock');
     fs.writeFileSync(lock, 'other 0');
@@ -173,8 +173,42 @@ describe('대기열 회차(auditQueueStore)', () => {
     let t = Date.now();
     const fastClock = makeStore(dir, { now: () => { t += 500; return t; } });
     fastClock.enqueue(e(2));
-    expect(entries(dir).map((x) => x.targetId)).toEqual(['t1', 't2']);
+    expect(entries(dir).map((x) => x.targetId)).toEqual(['t1']); // 잠금 없이 대기열 파일을 바꾸지 않는다
+    const side = `audit-emr-pending.side-${process.pid}.enc`;
+    expect(entries(dir, side).map((x) => x.targetId)).toEqual(['t2']);
     expect(fs.existsSync(lock)).toBe(true); // 남의 잠금은 지우지 않는다
+    // 잠금이 살아 있는 동안 회차는 시작하지 않는다.
+    expect(await fastClock.flush(async () => 'ok')).toMatchObject({ skipped: true });
+    fs.unlinkSync(lock);
+    const sent = [];
+    await makeStore(dir).flush(async (entry) => { sent.push(entry.targetId); return 'ok'; });
+    expect(sent).toEqual(['t1', 't2']);
+    expect(fs.existsSync(path.join(dir, side))).toBe(false);
+    expect(fileLines(dir)).toEqual([]);
+  });
+
+  it('회차 끝에 잠금을 못 잡으면 파일을 바꾸지 않고(다른 프로세스의 추가 보존), 보낸 줄은 다음 회차에 다시 보내지 않는다', async () => {
+    const dir = tempDir();
+    const lock = path.join(dir, 'audit-emr-pending.enc.lock');
+    let t = Date.now();
+    const store = makeStore(dir, { now: () => { t += 500; return t; } });
+    store.enqueue(e(1));
+    store.enqueue(e(2));
+    const sent = [];
+    await store.flush(async (entry) => {
+      sent.push(entry.targetId);
+      if (entry.targetId === 't2') {
+        fs.writeFileSync(lock, 'other');                                              // 다른 프로세스가 잠금을 잡고
+        fs.appendFileSync(path.join(dir, 'audit-emr-pending.enc'), fileLines(dir)[0].replace(/./, 'e') + '\n'); // 줄을 더했다(형식만 흉내)
+      }
+      return 'ok';
+    });
+    expect(fileLines(dir)).toHaveLength(3); // 바꾸지 않았다
+    fs.unlinkSync(lock);
+    sent.length = 0;
+    await store.flush(async (entry) => { sent.push(entry.targetId); return 'ok'; });
+    expect(sent).toEqual(['t1']); // 다른 프로세스가 더한 줄(같은 내용)만 보내고 t1·t2는 다시 보내지 않는다
+    expect(fileLines(dir)).toEqual([]);
   });
 
   it('7.1.4 설치본이 새 설치본의 대기열 파일을 읽고 보낼 수 있다', async () => {
@@ -305,6 +339,42 @@ describe('audit.js 재전송 회차 — 응답별', () => {
     await round;
     expect(s.audits()).toHaveLength(1);
     expect(entries(s.dir).map((x) => x.targetId)).toEqual(['t0', 't1']);
+  });
+
+  it('즉시 전송의 격리가 실패하면(격리 파일을 쓸 수 없음) 버리지 않고 대기열에 둔다', async () => {
+    const s = await started((body) => (body.action === 'emr_inject' ? { status: 413, body: { error: 'too large' } } : { status: 200 }), 0);
+    fs.mkdirSync(path.join(s.dir, 'audit-emr-quarantine.enc')); // 파일 자리에 폴더 — 추가가 실패한다
+    await s.audit.recordAudit({ action: 'emr_inject', outcome: 'success' });
+    expect(entries(s.dir).map((x) => x.action)).toEqual(['emr_inject']);
+  });
+
+  it('회차는 상태 확인부터 끝까지 하나 — 상태 확인 응답을 기다리는 동안 다시 부르면 바로 끝난다(Retry-After를 건너뛰지 않음)', async () => {
+    const dir = tempDir();
+    // 먼저 승인된 PC로 만들어 둔다(이전 실행).
+    const first = loadShellModule(ELECTRON_DIR, 'audit.js', createFakeElectron({ userDataDir: dir, send: async () => ({ status: 200,
+      body: JSON.stringify({ deviceId: 's', status: 'active', deviceScope: 'pc', organizationId: 'org-1' }) }) }));
+    await first.initAudit({ getAccessToken: () => TOKEN, apiBaseUrl: 'https://server.test' });
+    let releaseRegister;
+    const audits = [];
+    const send = async (req) => {
+      const p = new URL(req.url).pathname;
+      if (p === '/api/devices/register') {
+        await new Promise((r) => { releaseRegister = r; });
+        return { status: 200, body: JSON.stringify({ deviceId: 's', status: 'active', deviceScope: 'pc', organizationId: 'org-1' }) };
+      }
+      audits.push(JSON.parse(req.body.toString('utf8')));
+      return { status: 200, body: '{"ok":true}' };
+    };
+    const audit = loadShellModule(ELECTRON_DIR, 'audit.js', createFakeElectron({ userDataDir: dir, send }));
+    const queue = require(path.join(ELECTRON_DIR, 'auditQueue.js'));
+    const init = audit.initAudit({ getAccessToken: () => TOKEN, apiBaseUrl: 'https://server.test' });
+    await vi.waitFor(() => expect(releaseRegister).toBeTypeOf('function')); // 첫 회차가 상태 확인 응답을 기다리는 중
+    queue.enqueue(e(1));
+    await audit.flushQueue(); // 두 번째 회차 — 바로 끝나야 한다
+    expect(audits).toHaveLength(0);
+    releaseRegister();
+    await init;
+    expect(audits.map((b) => b.targetId)).toEqual(['t1']);
   });
 
   it('즉시 전송이 그 항목만의 문제로 거부되면 대기열이 아니라 격리 파일로 간다', async () => {
