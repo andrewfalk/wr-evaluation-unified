@@ -78,8 +78,8 @@
 | `device_register_duplicate` | `devices.ts:91` | |
 | `device_approve` | `admin.ts:126` | |
 | `device_revoke` | `admin.ts:171` | |
-| `device_user_mismatch` | `audit.ts:165` | EMR 서명 검증 실패 |
-| `device_org_mismatch` | `audit.ts:165` | EMR 서명 검증 실패 |
+| `device_user_mismatch` | (7.3.2부터 기록하지 않음) | 예전 기록만 남아 있다 — 같은 기관 사용자는 승인된 PC에서 EMR 감사 기록을 남길 수 있다 |
+| `device_org_mismatch` | `routes/audit.ts` | EMR 감사 요청의 세션 기관 ≠ PC의 기관. PC당 10분에 한 건, 그사이 건수는 다음 행의 `extra.suppressed` |
 
 ### 관리자 콘솔
 | action | 파일:라인 |
@@ -120,6 +120,26 @@
 
 `EMR_AUDIT_ACTIONS` Set(`audit.ts:51-55`) 밖의 값은 요청 자체가 400으로 거부되므로,
 이 4개 외의 `emr_*` 액션은 존재할 수 없다.
+
+**PC와 기관**: 서버는 요청 헤더의 장치 ID가 아니라 서명으로 PC(장치 서명 키 = 공개키 지문)를 찾는다. 행의
+`actor_org_id`는 언제나 그 PC의 기관이다. 같은 키가 여러 기관에 등록돼 있으면 행위자·기관을 비우고
+`org_unresolved`를 단다(최상위 관리자에게만 보인다).
+
+**`extra`의 서버 표시**(`devices/emrAuditRecord.ts`의 `SERVER_RESERVED_EXTRA_KEYS` — 클라이언트가 같은 이름을
+보내면 지우고 서버 값을 쓴다):
+
+| 키 | 뜻 |
+|---|---|
+| `deviceId` | PC의 첫 등록 행 ID(승인·해지로 바뀌지 않는다) |
+| `header_device_id` | 요청 헤더의 장치 ID 원문 |
+| `source` | 항상 `electron-main`. 클라이언트가 보낸 `source`(직접입력의 `auto`/`edited`)는 `client_source` |
+| `actor_source` | 행위자를 정한 방법: `session_fallback`(세션 사용자) · `device_registrant`(PC의 첫 승인 행 등록자) · `none`(기관 미확정) |
+| `actor_uncertain` | 행위자를 기록 시점 그대로 확인하지 못함 |
+| `session_missing`·`actor_from_queue` | 로그인 세션 없이 들어온 기록 |
+| `sent_by_user_id` | 행위자와 다른 경우의 전송 세션 사용자 |
+| `legacy_shell`·`occurred_at_unknown` | 발생 시각을 보내지 않는 이전 설치본의 기록 — 행 시각은 서버 수신 시각 |
+| `burst` | 이전 설치본의 기록이 같은 PC의 직전 기록과 1초 안에 들어옴(쌓인 기록을 몰아서 보낸 것) |
+| `org_unresolved` | 같은 키가 여러 기관에 등록돼 있어 기관을 정하지 못함 |
 
 ## 개선 여지
 
