@@ -62,11 +62,19 @@ function buildSignedAuditRequest({ entry, deviceId, privateKey, accessToken }, d
  * 성공이면 객체를 돌려주고 실패면 Error를 돌려준다(던지지 않는다 — 호출부가 reject한다).
  */
 function interpretHttpResponse(statusCode, rawBody, headers) {
+  const retryAfter = Number(Array.isArray(headers?.['retry-after']) ? headers['retry-after'][0] : headers?.['retry-after']);
   let json;
   try {
     json = JSON.parse(rawBody);
   } catch {
-    return new Error(`parse error HTTP ${statusCode}`);
+    const err = new Error(`parse error HTTP ${statusCode}`);
+    // 본문이 JSON이 아닌 오류 응답(프록시 등)도 상태와 Retry-After는 남긴다 — 429·413을 그대로 처리할 수 있게.
+    if (statusCode >= 400) {
+      err.status = statusCode;
+      err.code = null;
+      if (Number.isFinite(retryAfter) && retryAfter >= 0) err.retryAfterSec = retryAfter;
+    }
+    return err;
   }
   if (statusCode >= 400) {
     let err;
@@ -79,7 +87,6 @@ function interpretHttpResponse(statusCode, rawBody, headers) {
     err.status = statusCode;
     err.code   = json?.code ?? null;
     err.body   = json;
-    const retryAfter = Number(Array.isArray(headers?.['retry-after']) ? headers['retry-after'][0] : headers?.['retry-after']);
     if (Number.isFinite(retryAfter) && retryAfter >= 0) err.retryAfterSec = retryAfter;
     return err;
   }

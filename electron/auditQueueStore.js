@@ -9,9 +9,9 @@
 //   · 'stop'(회차를 멈추고 이 줄과 나머지를 남긴다). 복호화·해석이 안 되는 줄은 그 줄만 격리한다.
 // - 회차 끝에 "파일 다시 읽기 → 처리한 줄만 빼고 임시 파일에 쓰기 → 이름 바꾸기"를 await 없는 동기 구간으로 한다. 항목 추가
 //   (enqueue)도 동기라 같은 프로세스 안에서는 끼어들 수 없고, 다른 프로세스(같은 프로필의 다른 셸)와는 잠금 파일로 나눈다.
-//   그래서 전송 중에 추가된 줄은 지워지지 않는다. 대기열 파일은 잠금을 잡았을 때만 바꾼다 — 잠금을 못 잡은 추가는 이 프로세스의
-//   보조 파일(audit-emr-pending.side-<pid>.enc)에 쓰고, 다음 회차가 잠금 아래에서 대기열 파일로 옮긴다. 잠금을 못 잡은 교체는
-//   다음 회차로 미룬다.
+//   그래서 전송 중에 추가된 줄은 지워지지 않는다. 대기열 파일은 잠금을 잡았을 때만 바꾼다 — 잠금을 못 잡은 추가는 항목마다
+//   보조 파일(audit-emr-pending.spool-*.enc, 완성된 뒤 게시)로 남기고, 다음 회차가 잠금 아래에서 대기열 파일로 옮긴다. 잠금을
+//   못 잡은 교체는 다음 회차로 미룬다.
 // - 원본을 잘라 쓰지 않는다. 이름 바꾸기가 실패하면 원본을 그대로 두고, 이미 처리한 줄은 기억해 다음 회차에 다시 보내지 않는다
 //   (프로세스가 다시 시작되면 한 번 더 나갈 수 있다 — 이 설치본의 항목은 eventId로 알아볼 수 있다). 시작할 때 남은 임시 파일은 버린다.
 // - 대기열을 크기 때문에 버리지 않는다(임계를 넘으면 로그만).
@@ -57,19 +57,53 @@ function createAuditQueueStore(options) {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
   }
 
-  /** 잠금을 잡으면 true. 오래된 잠금(LOCK_STALE_MS)은 넘겨받는다. LOCK_WAIT_MS 안에 못 잡으면 false. */
+  // 잠금 파일 내용 = "<pid>:<무작위 표식>". 잠금을 잡은 프로세스가 그 표식을 기억해, 풀 때 자기 잠금만 지운다.
+  // 넘겨받기: 잠금을 잡은 프로세스가 더는 없거나(pid 확인) 잠금이 LOCK_STALE_MS보다 오래된 경우에만. 넘겨받을 때는 잠금 파일을
+  // 고유한 이름으로 옮긴 뒤 옮긴 내용이 확인한 내용과 같은지 본다 — 그사이 다른 프로세스가 새 잠금을 만들었으면(내용이 다르면)
+  // 그 잠금을 되돌려 놓는다(지우지 않는다).
+  let lockToken = null;
+  let seq = 0;
+
+  function processGone(pidText) {
+    const pid = Number(pidText);
+    if (!Number.isInteger(pid) || pid <= 0) return true;
+    if (pid === process.pid) return false;
+    try { process.kill(pid, 0); return false; } catch (err) { return err.code === 'ESRCH'; }
+  }
+
+  function tryTakeOver(seen) {
+    const grave = `${lockFile}.stale-${process.pid}-${(seq += 1)}`;
+    try { fs.renameSync(lockFile, grave); } catch { return; } // 그사이 풀렸거나 다른 프로세스가 옮겼다
+    let moved = null;
+    try { moved = fs.readFileSync(grave, 'utf-8'); } catch { /* 읽을 수 없으면 아래에서 되돌린다 */ }
+    if (moved !== seen) {
+      try { fs.linkSync(grave, lockFile); } catch { /* 이미 새 잠금이 있다 */ }
+    }
+    try { fs.unlinkSync(grave); } catch { /* 다음에 정리 */ }
+  }
+
+  /** 잠금을 잡으면 true. LOCK_WAIT_MS 안에 못 잡으면 false. */
   function acquireLock() {
     const deadline = now() + LOCK_WAIT_MS;
+    const token = `${process.pid}:${Math.random().toString(36).slice(2)}${now().toString(36)}`;
     for (;;) {
       try {
         const fd = fs.openSync(lockFile, 'wx');
-        try { fs.writeSync(fd, `${process.pid} ${now()}`); } finally { fs.closeSync(fd); }
+        try { fs.writeSync(fd, token); } finally { fs.closeSync(fd); }
+        lockToken = token;
         return true;
       } catch (err) {
         if (err.code !== 'EEXIST') return false;
+        let seen = null;
+        let age = 0;
         try {
-          if (now() - fs.statSync(lockFile).mtimeMs > LOCK_STALE_MS) { fs.unlinkSync(lockFile); continue; }
+          seen = fs.readFileSync(lockFile, 'utf-8');
+          age = now() - fs.statSync(lockFile).mtimeMs;
         } catch { continue; } // 그사이 풀렸다
+        if (processGone(seen.split(':')[0]) || age > LOCK_STALE_MS) {
+          tryTakeOver(seen);
+          continue;
+        }
         if (now() >= deadline) return false;
         sleepSync(10);
       }
@@ -77,10 +111,13 @@ function createAuditQueueStore(options) {
   }
 
   function releaseLock() {
-    try { fs.unlinkSync(lockFile); } catch { /* 이미 없음 */ }
+    try {
+      if (lockToken && fs.readFileSync(lockFile, 'utf-8') === lockToken) fs.unlinkSync(lockFile);
+    } catch { /* 이미 없음 */ }
+    lockToken = null;
   }
 
-/** 잠금을 잡았을 때만 fn을 실행한다. 못 잡으면 fallback()(없으면 undefined). */
+  /** 잠금을 잡았을 때만 fn을 실행한다. 못 잡으면 fallback()(없으면 undefined). */
   function withLock(fn, fallback) {
     if (!acquireLock()) {
       log.warn('[auditQueue] queue lock not acquired');
@@ -93,22 +130,36 @@ function createAuditQueueStore(options) {
     }
   }
 
-  // 이 프로세스의 보조 파일(잠금을 못 잡은 추가) — 다른 프로세스와 겹치지 않는다.
-  const sideFile = path.join(dir, `${path.basename(file, '.enc')}.side-${process.pid}.enc`);
-  const sidePrefix = `${path.basename(file, '.enc')}.side-`;
+  // 잠금을 못 잡은 추가는 항목마다 따로 게시하는 보조 파일(spool)에 쓴다: 임시 이름으로 다 쓴 뒤 이름을 바꿔 게시하므로 게시된
+  // 파일은 완성돼 있고 다시 바뀌지 않는다. 다음 회차가 잠금 아래에서 게시된 파일을 대기열 파일로 옮긴다.
+  const spoolBase = `${path.basename(file, '.enc')}.spool-`;
+  const SPOOL_ORPHAN_MS = 60 * 1000; // 게시 전에 프로세스가 끝나 남은 임시 파일(완성된 줄이면 옮긴다)
 
-  // 잠금 아래에서: 보조 파일들의 줄을 대기열 파일 끝에 옮기고 보조 파일을 지운다.
-  function mergeSideFiles() {
+  function spool(line) {
+    const name = `${spoolBase}${process.pid}-${now()}-${(seq += 1)}`;
+    const tmp = path.join(dir, `${name}.tmp`);
+    fs.writeFileSync(tmp, line, 'utf-8');
+    fs.renameSync(tmp, path.join(dir, `${name}.enc`));
+  }
+
+  // 잠금 아래에서: 게시된 보조 파일의 줄을 대기열 파일 끝에 옮기고 지운다.
+  function mergeSpool() {
     let names;
-    try { names = fs.readdirSync(dir).filter(n => n.startsWith(sidePrefix) && n.endsWith('.enc')); } catch { return; }
-    for (const name of names) {
+    try { names = fs.readdirSync(dir).filter(n => n.startsWith(spoolBase)); } catch { return; }
+    for (const name of names.sort()) {
       const p = path.join(dir, name);
       try {
+        if (name.endsWith('.tmp')) {
+          if (now() - fs.statSync(p).mtimeMs < SPOOL_ORPHAN_MS) continue; // 다른 프로세스가 쓰는 중일 수 있다
+        } else if (!name.endsWith('.enc')) {
+          continue;
+        }
         const content = fs.readFileSync(p, 'utf-8');
-        if (content.trim()) fs.appendFileSync(file, content.endsWith('\n') ? content : content + '\n', 'utf-8');
+        const lines = content.split('\n').filter(l => l.trim() && (!name.endsWith('.tmp') || content.endsWith('\n')));
+        if (lines.length) fs.appendFileSync(file, lines.join('\n') + '\n', 'utf-8');
         fs.unlinkSync(p);
       } catch (err) {
-        log.error('[auditQueue] side file merge failed:', err.message);
+        log.error('[auditQueue] spool merge failed:', err.message);
       }
     }
   }
@@ -151,7 +202,13 @@ function createAuditQueueStore(options) {
         log.error('[auditQueue] enqueue failed:', err.message);
       }
     };
-    withLock(() => append(file), () => append(sideFile));
+    withLock(() => append(file), () => {
+      try {
+        spool(line);
+      } catch (err) {
+        log.error('[auditQueue] enqueue (spool) failed:', err.message);
+      }
+    });
   }
 
   function pendingCount() {
@@ -238,7 +295,7 @@ function createAuditQueueStore(options) {
 
       let lines;
       try {
-        lines = withLock(() => { mergeSideFiles(); return readLines(); }, () => null);
+        lines = withLock(() => { mergeSpool(); return readLines(); }, () => null);
       } catch (err) {
         log.error('[auditQueue] flush: read error:', err.message);
         return result;

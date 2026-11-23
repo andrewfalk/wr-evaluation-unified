@@ -5,7 +5,7 @@ import path from 'path';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { createAuditQueueStore } from '../auditQueueStore.js';
-import { classifySendFailure } from '../auditLogic.js';
+import { classifySendFailure, interpretHttpResponse } from '../auditLogic.js';
 
 // EA-8: 재전송 정책 — 한 번에 한 회차, 응답별 처리, 항목 단위 격리, 전송 중 추가된 항목 보존, 원본을 잘라 쓰지 않음.
 const require = createRequire(import.meta.url);
@@ -53,6 +53,9 @@ describe('응답 분류', () => {
     ['네트워크 오류·시간 초과', new Error('request timeout'), { kind: 'stop' }],
     ['403', err(403, 'FORBIDDEN'), { kind: 'stop' }],
     ['형식을 알 수 없는 응답', new Error('parse error HTTP 200'), { kind: 'stop' }],
+    ['JSON이 아닌 429 + Retry-After', interpretHttpResponse(429, 'Too Many Requests', { 'retry-after': '900' }), { kind: 'stop', retryAfterMs: 900_000 }],
+    ['JSON이 아닌 413(프록시)', interpretHttpResponse(413, '<html>Request Entity Too Large</html>', {}), { kind: 'quarantine' }],
+    ['JSON이 아닌 502', interpretHttpResponse(502, '<html>bad gateway</html>', {}), { kind: 'stop' }],
     ['400 INVALID_BODY', err(400, 'INVALID_BODY'), { kind: 'quarantine' }],
     ['400(다른 코드)', err(400, 'OTHER'), { kind: 'stop' }],
     ['413', err(413, null), { kind: 'quarantine' }],
@@ -161,30 +164,83 @@ describe('대기열 회차(auditQueueStore)', () => {
   it('다른 프로세스의 잠금: 오래된 잠금은 넘겨받고, 살아 있는 잠금이면 대기열 파일을 건드리지 않고 보조 파일에 쓴 뒤 다음 회차가 옮긴다', async () => {
     const dir = tempDir();
     const lock = path.join(dir, 'audit-emr-pending.enc.lock');
-    fs.writeFileSync(lock, 'other 0');
-    const old = new Date(Date.now() - 60_000);
-    fs.utimesSync(lock, old, old);
+    fs.writeFileSync(lock, '999999999:gone'); // 끝난 프로세스의 잠금
     const store = makeStore(dir);
     store.enqueue(e(1));
     expect(entries(dir).map((x) => x.targetId)).toEqual(['t1']);
     expect(fs.existsSync(lock)).toBe(false);
 
-    fs.writeFileSync(lock, 'other now');
+    fs.writeFileSync(lock, `${process.ppid}:live`); // 살아 있는 프로세스의 잠금
     let t = Date.now();
     const fastClock = makeStore(dir, { now: () => { t += 500; return t; } });
     fastClock.enqueue(e(2));
     expect(entries(dir).map((x) => x.targetId)).toEqual(['t1']); // 잠금 없이 대기열 파일을 바꾸지 않는다
-    const side = `audit-emr-pending.side-${process.pid}.enc`;
-    expect(entries(dir, side).map((x) => x.targetId)).toEqual(['t2']);
-    expect(fs.existsSync(lock)).toBe(true); // 남의 잠금은 지우지 않는다
+    const spooled = fs.readdirSync(dir).filter((n) => n.startsWith('audit-emr-pending.spool-'));
+    expect(spooled).toHaveLength(1);
+    expect(spooled[0]).toMatch(/\.enc$/); // 다 쓴 뒤 게시된 이름
+    expect(entries(dir, spooled[0]).map((x) => x.targetId)).toEqual(['t2']);
+    expect(fs.readFileSync(lock, 'utf8')).toBe(`${process.ppid}:live`); // 남의 잠금은 지우지 않는다
     // 잠금이 살아 있는 동안 회차는 시작하지 않는다.
     expect(await fastClock.flush(async () => 'ok')).toMatchObject({ skipped: true });
     fs.unlinkSync(lock);
     const sent = [];
     await makeStore(dir).flush(async (entry) => { sent.push(entry.targetId); return 'ok'; });
     expect(sent).toEqual(['t1', 't2']);
-    expect(fs.existsSync(path.join(dir, side))).toBe(false);
+    expect(fs.readdirSync(dir).filter((n) => n.startsWith('audit-emr-pending.spool-'))).toEqual([]);
     expect(fileLines(dir)).toEqual([]);
+  });
+
+  it('넘겨받으려던 잠금이 그사이 다른 프로세스의 새 잠금으로 바뀌었으면 지우지 않고 되돌려 놓는다', () => {
+    const dir = tempDir();
+    const lock = path.join(dir, 'audit-emr-pending.enc.lock');
+    fs.writeFileSync(lock, '999999999:gone');
+    let swapped = false;
+    const fsProxy = {
+      ...fs,
+      renameSync: (from, to) => {
+        if (from === lock && !swapped) { swapped = true; fs.writeFileSync(lock, `${process.ppid}:new-owner`); } // 확인과 옮기기 사이
+        return fs.renameSync(from, to);
+      },
+    };
+    let t = Date.now();
+    const store = makeStore(dir, { fs: fsProxy, now: () => { t += 500; return t; } });
+    store.enqueue(e(1));
+    expect(fs.readFileSync(lock, 'utf8')).toBe(`${process.ppid}:new-owner`);
+    expect(fileLines(dir)).toEqual([]); // 잠금이 없으니 대기열 파일은 그대로
+    expect(fs.readdirSync(dir).filter((n) => n.startsWith('audit-emr-pending.spool-'))).toHaveLength(1);
+    expect(fs.readdirSync(dir).filter((n) => n.includes('.stale-'))).toEqual([]);
+  });
+
+  it('잠금을 풀 때 자기 잠금만 지운다', () => {
+    const dir = tempDir();
+    const lock = path.join(dir, 'audit-emr-pending.enc.lock');
+    const fsProxy = {
+      ...fs,
+      appendFileSync: (p, ...a) => {
+        const r = fs.appendFileSync(p, ...a);
+        if (String(p).endsWith('audit-emr-pending.enc')) fs.writeFileSync(lock, `${process.ppid}:someone-else`); // 잠금이 바뀐 상황
+        return r;
+      },
+    };
+    makeStore(dir, { fs: fsProxy }).enqueue(e(1));
+    expect(fs.readFileSync(lock, 'utf8')).toBe(`${process.ppid}:someone-else`);
+  });
+
+  it('게시되지 않은 보조 파일: 막 쓰는 중이면 두고, 오래되고 완성된 줄이면 옮긴다', async () => {
+    const dir = tempDir();
+    const store = makeStore(dir);
+    const line = fileLines((() => { const d = tempDir(); makeStore(d).enqueue(e('orphan')); return d; })())[0];
+    const young = path.join(dir, 'audit-emr-pending.spool-1-1-1.tmp');
+    const old = path.join(dir, 'audit-emr-pending.spool-2-2-2.tmp');
+    fs.writeFileSync(young, line + '\n');
+    fs.writeFileSync(old, line + '\n');
+    const past = new Date(Date.now() - 5 * 60_000);
+    fs.utimesSync(old, past, past);
+    const sent = [];
+    await store.flush(async (entry) => { sent.push(entry.targetId); return 'ok'; });
+    expect(sent).toEqual(['torphan']);
+    expect(fs.existsSync(young)).toBe(true);
+    expect(fs.existsSync(old)).toBe(false);
   });
 
   it('회차 끝에 잠금을 못 잡으면 파일을 바꾸지 않고(다른 프로세스의 추가 보존), 보낸 줄은 다음 회차에 다시 보내지 않는다', async () => {
@@ -198,7 +254,7 @@ describe('대기열 회차(auditQueueStore)', () => {
     await store.flush(async (entry) => {
       sent.push(entry.targetId);
       if (entry.targetId === 't2') {
-        fs.writeFileSync(lock, 'other');                                              // 다른 프로세스가 잠금을 잡고
+        fs.writeFileSync(lock, `${process.ppid}:other`);                              // 다른 프로세스가 잠금을 잡고
         fs.appendFileSync(path.join(dir, 'audit-emr-pending.enc'), fileLines(dir)[0].replace(/./, 'e') + '\n'); // 줄을 더했다(형식만 흉내)
       }
       return 'ok';
