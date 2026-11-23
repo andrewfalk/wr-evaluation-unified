@@ -197,7 +197,7 @@ function createAuditQueueStore(options) {
         }
         const content = fs.readFileSync(p, 'utf-8');
         const lines = content.split('\n').filter(l => l.trim() && (!name.endsWith('.tmp') || content.endsWith('\n')));
-        if (lines.length) fs.appendFileSync(file, lines.join('\n') + '\n', 'utf-8');
+        if (lines.length) appendLines(file, lines.join('\n') + '\n');
         fs.unlinkSync(p);
       } catch (err) {
         log.error('[auditQueue] spool merge failed:', err.message);
@@ -206,6 +206,28 @@ function createAuditQueueStore(options) {
   }
 
   // ── 줄 ─────────────────────────────────────────────────────────────────────
+
+  // 파일 끝이 줄바꿈이 아니면(이전 덧붙이기가 도중에 실패해 조각이 남았으면) 줄바꿈부터 쓴다 — 새 줄이 그 조각에 붙어
+  // 함께 읽을 수 없게 되지 않도록(조각은 그 줄만 격리된다).
+  function appendLines(target, text) {
+    let prefix = '';
+    try {
+      const size = fs.statSync(target).size;
+      if (size > 0) {
+        const fd = fs.openSync(target, 'r');
+        try {
+          const last = Buffer.alloc(1);
+          fs.readSync(fd, last, 0, 1, size - 1);
+          if (last[0] !== 0x0a) prefix = '\n';
+        } finally {
+          fs.closeSync(fd);
+        }
+      }
+    } catch (err) {
+      if (err.code !== 'ENOENT') throw err;
+    }
+    fs.appendFileSync(target, prefix + text, 'utf-8');
+  }
 
   // 실패하면 평문으로 쓰지 않고 버린다(fail-closed). Windows(EMR 대상)에서는 항상 쓸 수 있다.
   function encryptLine(plaintext) {
@@ -238,7 +260,7 @@ function createAuditQueueStore(options) {
     }
     const append = (target) => {
       try {
-        fs.appendFileSync(target, line, 'utf-8');
+        appendLines(target, line);
       } catch (err) {
         log.error('[auditQueue] enqueue failed:', err.message);
       }
@@ -295,7 +317,7 @@ function createAuditQueueStore(options) {
 
   function quarantine(line) {
     try {
-      fs.appendFileSync(quarantineFile, line + '\n', 'utf-8');
+      appendLines(quarantineFile, line + '\n');
       return true;
     } catch (err) {
       log.error('[auditQueue] quarantine write failed:', err.message);

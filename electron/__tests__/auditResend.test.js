@@ -257,6 +257,25 @@ describe('대기열 회차(auditQueueStore)', () => {
     expect(fs.existsSync(young)).toBe(true);
   });
 
+  it('대기열 끝에 덧붙이기가 도중에 실패해 남은 조각이 있어도, 뒤에 붙는 항목(직접 추가·보조 파일에서 옮김)은 따로 읽힌다', async () => {
+    const dir = tempDir();
+    const queue = path.join(dir, 'audit-emr-pending.enc');
+    const lock = path.join(dir, 'audit-emr-pending.enc.lock');
+    makeStore(dir).enqueue(e(1));
+    fs.appendFileSync(queue, 'enc:QUJD'); // 줄바꿈 없이 끝난 조각(디스크가 가득 차 쓰기가 끊긴 경우)
+    makeStore(dir).enqueue(e(2));
+    fs.appendFileSync(queue, 'enc:REVG');
+    fs.writeFileSync(lock, `${process.ppid}:live`); // 다른 프로세스가 잠금을 쥔 동안의 추가는 보조 파일로
+    let t = Date.now();
+    makeStore(dir, { now: () => { t += 500; return t; } }).enqueue(e(3));
+    fs.unlinkSync(lock);
+    const sent = [];
+    await makeStore(dir).flush(async (entry) => { sent.push(entry.targetId); return 'ok'; });
+    expect(sent).toEqual(['t1', 't2', 't3']);
+    expect(fileLines(dir, 'audit-emr-quarantine.enc')).toEqual(['enc:QUJD', 'enc:REVG']); // 조각은 그 줄만 격리
+    expect(fileLines(dir)).toEqual([]);
+  });
+
   it('날짜형 Retry-After는 지금과의 차이로 읽는다', () => {
     const r = classifySendFailure(interpretHttpResponse(429, 'Too Many Requests', { 'retry-after': new Date(Date.now() + 20 * 60_000).toUTCString() }));
     expect(r.retryAfterMs).toBeGreaterThanOrEqual(19 * 60_000);
