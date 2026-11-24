@@ -3,6 +3,9 @@ import { showAlert, showConfirm } from '../utils/platform';
 import { patientTx } from '../state/patientStore/transitions';
 import { getEmrBridge } from '../../platform/bridge';
 import { useGuardedDialogs } from '../../app/useWorkspaceLifetime';
+import {
+  EXTRACT_FAILURE_EXCEPTION, EXTRACT_FAILURE_PATIENT_MISMATCH, addExtractFailure, extractFailureReason, formatExtractFailures,
+} from './extractFailureReasons';
 
 export function useEMRIntegration({ activePatient, patients, selectedIds, session, setPatients, dirtyAssessmentPatientId }) {
   // 적용 여부(receipt) — 전이 patient/sharedPatched는 적용 시점 목록으로 판정해 receipt에 적는다(P2-39b). 환자 스토어가
@@ -144,6 +147,7 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
 
     let successCount = 0, failCount = 0, skippedCount = 0;
     const warnings = [];
+    const failures = new Map(); // 실패 사유 → 명 수(FX-4)
     setExtractProgress({ current: 0, total: targets.length, currentName: '', status: 'running' });
 
     for (let i = 0; i < targets.length; i++) {
@@ -164,6 +168,7 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
           // patientNo 교차검증: EMR이 다른 환자 데이터를 반환한 경우 skip
           if (result.patientNo && result.patientNo !== p.data.shared.patientNo) {
             failCount++;
+            addExtractFailure(failures, EXTRACT_FAILURE_PATIENT_MISMATCH);
             continue;
           }
           // 새 상병 후보의 id는 전이 밖에서 미리 만든다 — 전이(updater)는 StrictMode에서 두 번 돌 수 있어 순수해야 한다.
@@ -208,9 +213,11 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
           }
         } else {
           failCount++;
+          addExtractFailure(failures, extractFailureReason(result));
         }
       } catch {
         failCount++;
+        addExtractFailure(failures, EXTRACT_FAILURE_EXCEPTION);
       }
     }
 
@@ -218,6 +225,9 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
     setExtractProgress(null);
     let doneMsg = `EMR 추출 완료: ${targets.length}명 중 성공 ${successCount}명, 실패 ${failCount}명`;
     if (skippedCount > 0) doneMsg += `, 건너뜀 ${skippedCount}명`;
+    // 실패 사유(FX-4) — 많이 나온 순 3가지까지 + 그 밖. 실패가 없으면 줄을 더하지 않는다(문구는 전과 같음).
+    const failureLines = formatExtractFailures(failures);
+    if (failureLines.length > 0) doneMsg += `\n${failureLines.join('\n')}`;
     if (warnings.length > 0) {
       doneMsg += `\n\n⚠ 확인 필요:\n${warnings.join('\n')}`;
     }
