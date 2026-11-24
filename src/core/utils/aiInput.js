@@ -25,6 +25,7 @@ import { getEffectiveWorkPeriod } from './workPeriod';
 import { buildAssessmentUnits } from './assessmentGroups';
 import { resolveDiagnosisModule } from './diagnosisMapping';
 import { classifySpineSeverity } from '@wr/analytics-core/modules/spine/index';
+import { classifyBk2117Interpretation } from '@wr/analytics-core/modules/shoulder/index';
 import { thresholds } from '@wr/analytics-core/modules/spine/index';
 import { SPINE_FORMULA_V513 } from '@wr/analytics-core/modules/spine/index';
 import { groupSummariesByBkType as groupElbow, mergeBkGroupSummaries as mergeElbow, getElbowBurdenGrade } from '@wr/analytics-core/modules/elbow/index';
@@ -154,14 +155,6 @@ function buildKnee(calc, jobIndexOf) {
   };
 }
 
-// 보고서(reportGenerator.getShoulderInterpretation)와 같은 규칙: 초과 항목 → 복합 노출(50% 이상 3개 또는 75% 이상 2개) → 미달.
-export function classifyShoulderInterpretation(totals) {
-  if (totals.some((t) => t.exceeded)) return 'exceeded';
-  const over75 = totals.filter((t) => t.ratio >= 0.75).length;
-  const over50 = totals.filter((t) => t.ratio >= 0.5).length;
-  return over50 >= 3 || over75 >= 2 ? 'combinedSufficient' : 'insufficient';
-}
-
 function buildShoulder(calc, jobIndexOf) {
   const totals = Array.isArray(calc.totals) ? calc.totals : [];
   const byKey = (list, key) => list.find((item) => item.key === key);
@@ -176,7 +169,8 @@ function buildShoulder(calc, jobIndexOf) {
           }),
         )
       : null,
-    interpretation: complete && calc.noEvaluableJobs !== true ? classifyShoulderInterpretation(totals) : null,
+    // 소견서·EMR 문장과 같은 판정(초과 → 복합 노출(50% 이상 3개 또는 75% 이상 2개) → 미달, P2-61a).
+    interpretation: complete && calc.noEvaluableJobs !== true ? classifyBk2117Interpretation(totals).kind : null,
     jobs: (calc.jobBurdens || []).map((job) => ({
       jobIndex: jobIndexOf(job.id),
       periodYears: finite(job.periodYears),

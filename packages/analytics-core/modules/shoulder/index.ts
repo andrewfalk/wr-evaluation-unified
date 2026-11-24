@@ -1,5 +1,6 @@
 export * from './derived';
 export * from './extractors';
+export * from './interpretation';
 export * from './metadata';
 
 import { registerAnalyticsModule } from '../../analyticsRegistry';

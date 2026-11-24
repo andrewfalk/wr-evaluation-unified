@@ -12,7 +12,8 @@ import { getModule } from '../../moduleRegistry';
 import { createTestPatients } from '../../fixtures/createTestPatients';
 import { createPatient } from '../data';
 import { getShoulderInterpretation, generateUnifiedReport } from '../reportGenerator';
-import { buildAiInput, buildAiInputResult, buildRawAiInput, classifyShoulderInterpretation } from '../aiInput';
+import { buildAiInput, buildAiInputResult, buildRawAiInput } from '../aiInput';
+import { classifyBk2117Interpretation } from '@wr/analytics-core/modules/shoulder/index';
 import {
   createElbowModuleData, createElbowJobEvaluation, createElbowDiagnosisEntry,
 } from '../../../modules/elbow/utils/data';
@@ -284,10 +285,10 @@ describe('buildAiInput — 모듈 값', () => {
 
   it('어깨 해석 규칙: 초과 > 복합 노출(50% 3개 또는 75% 2개) > 미달', () => {
     const t = (ratio, exceeded = false) => ({ ratio, exceeded });
-    expect(classifyShoulderInterpretation([t(1.2, true), t(0)])).toBe('exceeded');
-    expect(classifyShoulderInterpretation([t(0.5), t(0.5), t(0.5), t(0)])).toBe('combinedSufficient');
-    expect(classifyShoulderInterpretation([t(0.75), t(0.75), t(0)])).toBe('combinedSufficient');
-    expect(classifyShoulderInterpretation([t(0.75), t(0.5), t(0.49)])).toBe('insufficient');
+    expect(classifyBk2117Interpretation([t(1.2, true), t(0)]).kind).toBe('exceeded');
+    expect(classifyBk2117Interpretation([t(0.5), t(0.5), t(0.5), t(0)]).kind).toBe('combinedSufficient');
+    expect(classifyBk2117Interpretation([t(0.75), t(0.75), t(0)]).kind).toBe('combinedSufficient');
+    expect(classifyBk2117Interpretation([t(0.75), t(0.5), t(0.49)]).kind).toBe('insufficient');
   });
 
   it('무릎: 부담 정도·기여도·누적 신체부담이 계산 결과와 같다', () => {

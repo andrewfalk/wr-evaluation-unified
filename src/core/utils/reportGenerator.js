@@ -1,3 +1,4 @@
+import { classifyBk2117Interpretation } from '@wr/analytics-core/modules/shoulder/index';
 import { getModule } from '../moduleRegistry';
 import { getSideText } from '../i18n/sideLabels';
 import { buildSpineSectionText } from '../../modules/spine/utils/sectionText';
@@ -10,15 +11,14 @@ import { BK_TYPE_LABELS as ELBOW_BK_LABELS } from '../../modules/elbow/utils/dat
 import { groupSummariesByBkType as groupWristSummaries, mergeBkGroupSummaries as mergeWristGroups } from '../../modules/wrist/utils/calculations';
 import { BK_TYPE_LABELS as WRIST_BK_LABELS } from '../../modules/wrist/utils/data';
 
+// BK2117 해석 문장 — 판정은 analytics-core의 classifyBk2117Interpretation(EMR·AI 입력과 같은 규칙, P2-61a).
 export function getShoulderInterpretation(totals) {
-  const exceeded = (totals || []).filter(t => t.exceeded);
-  if (exceeded.length > 0) {
-    const names = exceeded.map(t => t.label).join(', ');
+  const { kind, exceededLabels } = classifyBk2117Interpretation(totals);
+  if (kind === 'exceeded') {
+    const names = exceededLabels.join(', ');
     return `** ${names} 기준을 초과하여 누적 신체부담은 충분함.`;
   }
-  const over75 = (totals || []).filter(t => t.ratio >= 0.75);
-  const over50 = (totals || []).filter(t => t.ratio >= 0.50);
-  if (over50.length >= 3 || over75.length >= 2) {
+  if (kind === 'combinedSufficient') {
     return `** 개별 기준 초과 항목은 없으나, 복합 노출을 고려하여 누적 신체부담은 충분함.`;
   }
   return `** 노출 기준치에 미달하여 누적 신체부담 불충분함.`;
