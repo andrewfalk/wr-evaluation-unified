@@ -1,60 +1,14 @@
-import { classifyBk2117Interpretation } from '@wr/analytics-core/modules/shoulder/index';
 import { getModule } from '../moduleRegistry';
 import { getSideText } from '../i18n/sideLabels';
 import { buildSpineSectionText } from '../../modules/spine/utils/sectionText';
 import { buildAssessmentBlocks, formatGroupedAssessment } from './assessmentGroups';
 import { calculateAge, calculateBMI } from './common';
-import { buildJobHistoryLines, resolveJobNumber, NO_EVALUABLE_JOBS_NOTE } from './jobHistory';
+import { buildJobHistoryLines, NO_EVALUABLE_JOBS_NOTE } from './jobHistory';
 import { selectModuleNote } from './moduleNotes';
 import { groupSummariesByBkType as groupElbowSummaries, mergeBkGroupSummaries as mergeElbowGroups } from '../../modules/elbow/utils/calculations';
 import { BK_TYPE_LABELS as ELBOW_BK_LABELS } from '../../modules/elbow/utils/data';
 import { groupSummariesByBkType as groupWristSummaries, mergeBkGroupSummaries as mergeWristGroups } from '../../modules/wrist/utils/calculations';
 import { BK_TYPE_LABELS as WRIST_BK_LABELS } from '../../modules/wrist/utils/data';
-
-// BK2117 해석 문장 — 판정은 analytics-core의 classifyBk2117Interpretation(EMR·AI 입력과 같은 규칙, P2-61a).
-export function getShoulderInterpretation(totals) {
-  const { kind, exceededLabels } = classifyBk2117Interpretation(totals);
-  if (kind === 'exceeded') {
-    const names = exceededLabels.join(', ');
-    return `** ${names} 기준을 초과하여 누적 신체부담은 충분함.`;
-  }
-  if (kind === 'combinedSufficient') {
-    return `** 개별 기준 초과 항목은 없으나, 복합 노출을 고려하여 누적 신체부담은 충분함.`;
-  }
-  return `** 노출 기준치에 미달하여 누적 신체부담 불충분함.`;
-}
-
-// jobNumbering: 미포함 직력이 있을 때만 전달되는 jobId → 직업력 번호 맵(jobHistory.js). 이 블록은 직종명이 빈
-// 직력을 뺀 뒤 번호를 다시 매기므로, 맵이 있으면 [직업력] 목록과 같은 번호를 쓴다.
-function genShoulderBurdenSection(calc, jobNumbering = null) {
-  const { totals, jobBurdens } = calc;
-  let text = `\n< 어깨(견관절) >\n`;
-  if (calc.noEvaluableJobs) return `${text}${NO_EVALUABLE_JOBS_NOTE}\n`;
-  text += `독일의 산재보험 번호 BK2117 장기간의 집중적인 기계적 부하로 인한 어깨 회전근개 병변에 사용하는 어깨 부담 평가 지침을 이용하여 평가하였음.\n\n`;
-
-  (totals || []).forEach(total => {
-    const pct = total.totalHours > 0 ? `${(total.ratio * 100).toFixed(0)}%` : '';
-    const exceeded = total.exceeded ? ' [초과]' : '';
-    text += `- ${total.label}: ${total.totalHours > 0 ? `${total.totalHours.toFixed(1)}시간` : '-'} (기준 ${total.limit.toLocaleString()}시간${pct ? ` / ${pct}` : ''}${exceeded})\n`;
-  });
-
-  text += `\n${getShoulderInterpretation(totals)}\n`;
-
-  const jobsWithData = (jobBurdens || []).filter(job => job.jobName);
-  if (jobsWithData.length > 1) {
-    text += `\n[직력별 기여]\n`;
-    jobsWithData.forEach((job, index) => {
-      text += `- 직력${resolveJobNumber(jobNumbering, job.id, index + 1)}: ${job.jobName} (${job.periodYears > 0 ? `${job.periodYears.toFixed(1)}년` : '-'})\n`;
-      (job.exposures || []).forEach(exposure => {
-        if (exposure.dailyHours > 0) {
-          text += `  ${exposure.label}: ${exposure.dailyHours}시간/일, 누적 ${exposure.cumulativeHours.toFixed(1)}시간\n`;
-        }
-      });
-    });
-  }
-
-  return text;
-}
 
 function genSpineBurdenSection(calc) {
   return buildSpineSectionText(calc);
@@ -215,11 +169,10 @@ export function generateUnifiedReport(patient) {
     });
 
     // P2-60 ~ P2-63: 옮긴 모듈은 매니페스트 narrative가 블록을 만든다(서술 없는 모듈은 건너뛴다).
-    if (moduleId === 'knee' && moduleManifest.narrative) {
+    if ((moduleId === 'knee' || moduleId === 'shoulder') && moduleManifest.narrative) {
       text += moduleManifest.narrative.render('report', calc, { jobNumberingByJobId: jobHistory.numberingByJobId });
     }
     if (moduleId === 'wrist') text += genWristBurdenSection(calc);
-    if (moduleId === 'shoulder') text += genShoulderBurdenSection(calc, jobHistory.numberingByJobId);
     if (moduleId === 'spine') text += genSpineBurdenSection(calc);
     if (moduleId === 'elbow') text += genElbowBurdenSection(calc);
     if (moduleId === 'cervical') text += genCervicalBurdenSection(calc);
