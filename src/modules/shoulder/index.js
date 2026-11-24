@@ -70,11 +70,11 @@ registerModule({
     columns: {
       ellmanRight: ['ellman(우)', 'ellman_right'],
       ellmanLeft: ['ellman(좌)', 'ellman_left'],
-      shoulderOverhead: ['오버헤드', 'overhead'],
-      shoulderMedium: ['반복중간', 'repetitivemedium'],
-      shoulderFast: ['반복빠름', 'repetitivefast'],
-      shoulderHeavyCount: ['중량물횟수', 'heavyloadcount'],
-      shoulderHeavySeconds: ['중량물시간', 'heavyloadseconds'],
+      shoulderOverhead: ['오버헤드(시간/일)', '오버헤드', 'overhead'],
+      shoulderMedium: ['반복중간(시간/일)', '반복중간', 'repetitivemedium'],
+      shoulderFast: ['반복빠름(시간/일)', '반복빠름', 'repetitivefast'],
+      shoulderHeavyCount: ['중량물횟수(회/일)', '중량물횟수', 'heavyloadcount'],
+      shoulderHeavySeconds: ['중량물시간(초/회)', '중량물시간', 'heavyloadseconds'],
       shoulderVibration: ['진동(시간/일)', 'vibration'],
     },
     applyRow({ patient, row, diagnosis, job, colMap, getCell }) {

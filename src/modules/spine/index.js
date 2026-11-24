@@ -65,7 +65,7 @@ registerModule({
     columns: {
       taskName: ['작업명', 'task'],
       posture: ['자세코드', 'posture'],
-      taskWeight: ['작업중량', 'taskweight'],
+      taskWeight: ['작업중량(kg)', '작업중량', 'taskweight'],
       frequency: ['횟수/분', 'frequency'],
       timeValue: ['시간값', 'timevalue'],
       timeUnit: ['시간단위', 'timeunit'],

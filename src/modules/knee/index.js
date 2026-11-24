@@ -74,7 +74,7 @@ registerModule({
       klgRight: ['klg(우)', 'klg_right'],
       klgLeft: ['klg(좌)', 'klg_left'],
       kneeWeight: ['중량물(kg)', 'jobweight'],
-      kneeSquatting: ['쪼그려앉기', 'squat'],
+      kneeSquatting: ['쪼그려앉기(분)', '쪼그려앉기', 'squat'],
       kneeStairs: ['계단오르내리기', 'stair'],
       kneeTwist: ['무릎비틀기', 'twist'],
       kneeStartStop: ['출발정지반복', 'startstop'],
