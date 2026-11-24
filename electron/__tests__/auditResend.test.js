@@ -276,6 +276,93 @@ describe('대기열 회차(auditQueueStore)', () => {
     expect(fileLines(dir)).toEqual([]);
   });
 
+  it.each([
+    ['덧붙이기 오류(EPERM)', 'appendFileSync'],
+    ['파일 끝 확인 오류(EPERM)', 'statSync'],
+    ['디스크 가득 참(ENOSPC)', 'appendFileSync', 'ENOSPC'],
+  ])('잠금을 잡았어도 대기열 파일에 쓰지 못한 기록은 보조 파일로 남고 다음 회차에 전송된다 — %s', async (_label, method, code = 'EPERM') => {
+    const dir = tempDir();
+    const queue = path.join(dir, 'audit-emr-pending.enc');
+    makeStore(dir).enqueue(e(1));
+    let failed = 0;
+    const fsProxy = {
+      ...fs,
+      [method]: (p, ...a) => {
+        if (p === queue && failed === 0) { failed += 1; throw Object.assign(new Error(code), { code }); }
+        return fs[method](p, ...a);
+      },
+    };
+    makeStore(dir, { fs: fsProxy }).enqueue(e(2));
+    expect(failed).toBe(1);
+    expect(fs.existsSync(path.join(dir, 'audit-emr-pending.enc.lock'))).toBe(false); // 잠금은 잡았다가 풀었다
+    expect(fs.readdirSync(dir).filter((n) => n.startsWith('audit-emr-pending.spool-'))).toHaveLength(1);
+    const sent = [];
+    await makeStore(dir).flush(async (entry) => { sent.push(entry.targetId); return 'ok'; });
+    expect(sent).toEqual(['t1', 't2']);
+    expect(fs.readdirSync(dir).filter((n) => n.startsWith('audit-emr-pending.spool-'))).toEqual([]);
+  });
+
+  it('회차 끝 다시 읽기에서 파일 존재 확인이 한 번 틀려도, 실제로 읽은 줄에 근거해 보낸 줄만 빼고 나머지는 남긴다', async () => {
+    const dir = tempDir();
+    const queue = path.join(dir, 'audit-emr-pending.enc');
+    const seed = makeStore(dir);
+    for (const i of [1, 2, 3]) seed.enqueue(e(i));
+    let armed = false;
+    const fsProxy = {
+      ...fs,
+      existsSync: (p) => {
+        if (p === queue && armed) { armed = false; return false; } // 접근 오류 등으로 한 번 "없음"
+        return fs.existsSync(p);
+      },
+    };
+    const store = makeStore(dir, { fs: fsProxy });
+    const sent = [];
+    await store.flush(async (entry) => {
+      sent.push(entry.targetId);
+      if (entry.targetId === 't1') { armed = true; return 'ok'; }
+      return 'stop';
+    });
+    expect(sent).toEqual(['t1', 't2']);
+    expect(entries(dir).map((x) => x.targetId)).toEqual(['t2', 't3']);
+  });
+
+  it('회차 끝 다시 읽기가 실패하면(읽기 오류) 대기열 파일을 바꾸지 않고, 다음 회차가 보낸 줄은 다시 보내지 않고 뺀다', async () => {
+    const dir = tempDir();
+    const queue = path.join(dir, 'audit-emr-pending.enc');
+    const seed = makeStore(dir);
+    for (const i of [1, 2, 3]) seed.enqueue(e(i));
+    const before = fs.readFileSync(queue, 'utf8');
+    let armed = false;
+    const fsProxy = {
+      ...fs,
+      readFileSync: (p, ...a) => {
+        if (p === queue && armed) { armed = false; throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' }); }
+        return fs.readFileSync(p, ...a);
+      },
+    };
+    const store = makeStore(dir, { fs: fsProxy });
+    const sent = [];
+    await store.flush(async (entry) => {
+      sent.push(entry.targetId);
+      if (entry.targetId === 't1') { armed = true; return 'ok'; }
+      return 'stop';
+    });
+    expect(fs.readFileSync(queue, 'utf8')).toBe(before);
+    await store.flush(async (entry) => { sent.push(entry.targetId); return 'ok'; });
+    expect(sent).toEqual(['t1', 't2', 't2', 't3']);
+    expect(fileLines(dir)).toEqual([]);
+  });
+
+  it('대기열 파일이 없으면(ENOENT) 회차 끝에 아무것도 만들거나 지우지 않는다', async () => {
+    const dir = tempDir();
+    const queue = path.join(dir, 'audit-emr-pending.enc');
+    const store = makeStore(dir);
+    store.enqueue(e(1));
+    await store.flush(async () => { fs.unlinkSync(queue); return 'ok'; });
+    expect(fs.existsSync(queue)).toBe(false);
+    expect(fs.readdirSync(dir).filter((n) => n.startsWith('audit-emr-pending'))).toEqual([]);
+  });
+
   it('날짜형 Retry-After는 지금과의 차이로 읽는다', () => {
     const r = classifySendFailure(interpretHttpResponse(429, 'Too Many Requests', { 'retry-after': new Date(Date.now() + 20 * 60_000).toUTCString() }));
     expect(r.retryAfterMs).toBeGreaterThanOrEqual(19 * 60_000);
