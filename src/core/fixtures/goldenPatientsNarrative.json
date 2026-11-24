@@ -1,0 +1,1463 @@
+[
+  {
+    "id": "golden-narr-all-modules",
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "phase": "intake",
+    "data": {
+      "shared": {
+        "patientNo": "GN-1",
+        "name": "서술여섯부위",
+        "gender": "male",
+        "height": "172",
+        "weight": "74",
+        "birthDate": "1968-04-02",
+        "injuryDate": "2025-05-10",
+        "hospitalName": "테스트병원",
+        "department": "직업환경의학과",
+        "doctorName": "김의사",
+        "evaluationDate": "2025-06-20",
+        "medicalRecord": "",
+        "highBloodPressure": "무",
+        "diabetes": "무",
+        "visitHistory": "",
+        "consultReplyOrtho": "",
+        "consultReplyNeuro": "",
+        "consultReplyRehab": "",
+        "consultReplyOther": "",
+        "specialNotes": "",
+        "diagnoses": [
+          {
+            "id": "gn1-dx-knee",
+            "code": "M17.0",
+            "name": "양측 원발성 무릎관절증",
+            "side": "right",
+            "confirmedRight": "confirmed",
+            "assessmentRight": "high",
+            "klgRight": "3"
+          },
+          {
+            "id": "gn1-dx-shoulder",
+            "code": "M75.1",
+            "name": "회전근개 증후군",
+            "side": "right",
+            "confirmedRight": "confirmed",
+            "assessmentRight": "high"
+          },
+          {
+            "id": "gn1-dx-elbow",
+            "code": "M77.1",
+            "name": "외측상과염",
+            "side": "right",
+            "confirmedRight": "confirmed",
+            "assessmentRight": "high"
+          },
+          {
+            "id": "gn1-dx-wrist",
+            "code": "G56.0",
+            "name": "수근관증후군",
+            "side": "left",
+            "confirmedLeft": "confirmed",
+            "assessmentLeft": "high"
+          },
+          {
+            "id": "gn1-dx-spine",
+            "code": "M51.1",
+            "name": "요추 추간판 장애",
+            "side": ""
+          },
+          {
+            "id": "gn1-dx-cervical",
+            "code": "M50.1",
+            "name": "경추 추간판 장애",
+            "side": ""
+          }
+        ],
+        "jobs": [
+          {
+            "id": "gn1-job-1",
+            "jobName": "자동차 부품 조립원",
+            "presetId": null,
+            "startDate": "2000-03-01",
+            "endDate": "2012-02-28",
+            "workPeriodOverride": "",
+            "workDaysPerYear": 250
+          },
+          {
+            "id": "gn1-job-2",
+            "jobName": "물류 상하차원",
+            "presetId": null,
+            "startDate": "2012-03-01",
+            "endDate": "2024-12-31",
+            "workPeriodOverride": "",
+            "workDaysPerYear": 250
+          }
+        ]
+      },
+      "modules": {
+        "knee": {
+          "jobExtras": [
+            {
+              "sharedJobId": "gn1-job-1",
+              "weight": "1500",
+              "squatting": "60",
+              "evidenceSources": [],
+              "stairs": true,
+              "kneeTwist": false,
+              "startStop": false,
+              "tightSpace": false,
+              "kneeContact": false,
+              "jumpDown": false
+            },
+            {
+              "sharedJobId": "gn1-job-2",
+              "weight": "2600",
+              "squatting": "40",
+              "evidenceSources": [],
+              "stairs": false,
+              "kneeTwist": true,
+              "startStop": true,
+              "tightSpace": false,
+              "kneeContact": false,
+              "jumpDown": false
+            }
+          ],
+          "returnConsiderations": ""
+        },
+        "shoulder": {
+          "jobExtras": [
+            {
+              "sharedJobId": "gn1-job-1",
+              "overheadHours": "1.0",
+              "repetitiveMediumHours": "2",
+              "repetitiveFastHours": "",
+              "heavyLoadCount": "10",
+              "heavyLoadSeconds": "10",
+              "vibrationHours": "0.5",
+              "evidenceSources": []
+            },
+            {
+              "sharedJobId": "gn1-job-2",
+              "overheadHours": "1.0",
+              "repetitiveMediumHours": "",
+              "repetitiveFastHours": "0.4",
+              "heavyLoadCount": "",
+              "heavyLoadSeconds": "",
+              "vibrationHours": "",
+              "evidenceSources": []
+            }
+          ],
+          "returnConsiderations": ""
+        },
+        "elbow": {
+          "returnConsiderations": "",
+          "temporalSequence": {
+            "recent_task_change": "increased_load",
+            "task_change_date": "2023-01-01",
+            "symptom_onset_interval": "within3m",
+            "improves_with_rest": "yes"
+          },
+          "jobEvaluations": [
+            {
+              "sharedJobId": "gn1-job-1",
+              "diagnosisEntries": [
+                {
+                  "diagnosisId": "gn1-dx-elbow",
+                  "selectedBkType": "BK2101",
+                  "bkSelectionMode": "auto",
+                  "main_task_name": "반복 체결",
+                  "direct_anatomic_link": "yes",
+                  "exposure_types": [
+                    "repetition",
+                    "force"
+                  ],
+                  "repetition_level": "frequent",
+                  "daily_exposure_hours": "4",
+                  "shift_share_percent": "60",
+                  "days_per_week": "5",
+                  "work_pattern": "continuous",
+                  "rest_distribution": "insufficient",
+                  "force_level": "moderate",
+                  "awkward_posture_level": "frequent",
+                  "static_holding_level": "frequent",
+                  "direct_pressure_level": "",
+                  "vibration_exposure": "",
+                  "bk2101_cycle_seconds": "0.3",
+                  "bk2101_repetition_per_hour": "9000",
+                  "bk2101_monotony": "yes",
+                  "bk2101_forced_dorsal_extension": "yes",
+                  "bk2101_prosupination": "yes",
+                  "bk2106_pressure_source": [],
+                  "bk2103_vibration_tool_type": [],
+                  "bk2103_daily_vibration_hours": "",
+                  "bk2103_tool_pressing": "",
+                  "bk2103_frequent_high_force_grip": "",
+                  "bk2105_elbow_leaning": "",
+                  "bk2105_repeated_friction_impact": "",
+                  "bk2105_pressure_source": [],
+                  "bk2106_repeated_mechanical_exposure": "",
+                  "bk2106_noncorrectable_posture": "",
+                  "bk2106_prolonged_joint_position": "",
+                  "bk2103_handheld_or_guided": ""
+                }
+              ]
+            },
+            {
+              "sharedJobId": "gn1-job-2",
+              "diagnosisEntries": [
+                {
+                  "diagnosisId": "gn1-dx-elbow",
+                  "selectedBkType": "BK2101",
+                  "bkSelectionMode": "auto",
+                  "main_task_name": "",
+                  "direct_anatomic_link": "",
+                  "exposure_types": [],
+                  "repetition_level": "",
+                  "daily_exposure_hours": "",
+                  "shift_share_percent": "",
+                  "days_per_week": "",
+                  "work_pattern": "",
+                  "rest_distribution": "",
+                  "force_level": "",
+                  "awkward_posture_level": "",
+                  "static_holding_level": "",
+                  "direct_pressure_level": "",
+                  "vibration_exposure": "",
+                  "bk2101_cycle_seconds": "",
+                  "bk2101_repetition_per_hour": "",
+                  "bk2101_monotony": "",
+                  "bk2101_forced_dorsal_extension": "",
+                  "bk2101_prosupination": "",
+                  "bk2106_pressure_source": [],
+                  "bk2103_vibration_tool_type": [],
+                  "bk2103_daily_vibration_hours": "",
+                  "bk2103_tool_pressing": "",
+                  "bk2103_frequent_high_force_grip": "",
+                  "bk2105_elbow_leaning": "",
+                  "bk2105_repeated_friction_impact": "",
+                  "bk2105_pressure_source": [],
+                  "bk2106_repeated_mechanical_exposure": "",
+                  "bk2106_noncorrectable_posture": "",
+                  "bk2106_prolonged_joint_position": "",
+                  "bk2103_handheld_or_guided": ""
+                }
+              ]
+            }
+          ]
+        },
+        "wrist": {
+          "returnConsiderations": "",
+          "temporalSequence": {
+            "recent_task_change": "",
+            "task_change_date": "",
+            "symptom_onset_interval": "",
+            "improves_with_rest": ""
+          },
+          "jobEvaluations": [
+            {
+              "sharedJobId": "gn1-job-1",
+              "diagnosisEntries": [
+                {
+                  "diagnosisId": "gn1-dx-wrist",
+                  "selectedBkType": "BK2113",
+                  "bkSelectionMode": "auto",
+                  "main_task_name": "반복 체결",
+                  "direct_anatomic_link": "yes",
+                  "exposure_types": [
+                    "repetition",
+                    "force"
+                  ],
+                  "repetition_level": "frequent",
+                  "daily_exposure_hours": "4",
+                  "shift_share_percent": "60",
+                  "days_per_week": "5",
+                  "work_pattern": "continuous",
+                  "rest_distribution": "insufficient",
+                  "force_level": "moderate",
+                  "awkward_posture_level": "frequent",
+                  "static_holding_level": "frequent",
+                  "direct_pressure_level": "",
+                  "vibration_exposure": "",
+                  "bk2101_cycle_seconds": "0.3",
+                  "bk2101_repetition_per_hour": "9000",
+                  "bk2101_monotony": "yes",
+                  "bk2101_forced_dorsal_extension": "yes",
+                  "bk2101_prosupination": "yes",
+                  "bk2106_pressure_source": [],
+                  "bk2103_vibration_tool_type": [],
+                  "bk2103_daily_vibration_hours": "",
+                  "bk2103_tool_pressing": "",
+                  "bk2103_frequent_high_force_grip": "",
+                  "bk2113_repetitive_wrist_motion": "yes"
+                }
+              ]
+            }
+          ]
+        },
+        "spine": {
+          "formulaVersion": "v5.1.3",
+          "vibrationExposureStatus": "present",
+          "vibrationIntervals": [
+            {
+              "id": "gn1-iv-1",
+              "sharedJobId": "gn1-job-2",
+              "name": "지게차 운행",
+              "awMin": "0.6",
+              "awMax": "1.2",
+              "timeValue": "4",
+              "timeUnit": "hr"
+            }
+          ],
+          "tasks": [
+            {
+              "id": 9101,
+              "sharedJobId": "gn1-job-1",
+              "name": "부품 상자 이동",
+              "posture": "G4",
+              "weight": 15,
+              "frequency": 40,
+              "timeValue": 5,
+              "timeUnit": "sec",
+              "correctionFactor": 1.2,
+              "force": 0
+            },
+            {
+              "id": 9102,
+              "sharedJobId": "gn1-job-2",
+              "name": "박스 상차",
+              "posture": "G5",
+              "weight": 20,
+              "frequency": 60,
+              "timeValue": 6,
+              "timeUnit": "sec",
+              "correctionFactor": 1.2,
+              "force": 0
+            }
+          ]
+        },
+        "cervical": {
+          "tasks": [
+            {
+              "id": 9201,
+              "sharedJobId": "gn1-job-1",
+              "name": "상방 주시 체결",
+              "exposure_types": [
+                "awkward_static_neck_load"
+              ],
+              "load_weight_kg": "",
+              "carry_hours_per_shift": "",
+              "forced_neck_posture": "",
+              "neck_nonneutral_hours_per_day": "2.5",
+              "combined_flexion_rotation_posture": "yes",
+              "precision_work": "yes",
+              "notes": ""
+            },
+            {
+              "id": 9202,
+              "sharedJobId": "gn1-job-2",
+              "name": "중량물 어깨 운반",
+              "exposure_types": [
+                "shoulder_heavy_load"
+              ],
+              "load_weight_kg": "45",
+              "carry_hours_per_shift": "1.5",
+              "forced_neck_posture": "yes",
+              "neck_nonneutral_hours_per_day": "",
+              "combined_flexion_rotation_posture": "",
+              "precision_work": "",
+              "notes": ""
+            }
+          ]
+        }
+      },
+      "activeModules": [
+        "elbow",
+        "spine",
+        "wrist",
+        "cervical",
+        "knee",
+        "shoulder"
+      ]
+    }
+  },
+  {
+    "id": "golden-narr-no-evaluable-jobs",
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "phase": "intake",
+    "data": {
+      "shared": {
+        "patientNo": "GN-2",
+        "name": "서술평가대상없음",
+        "gender": "male",
+        "height": "172",
+        "weight": "74",
+        "birthDate": "1968-04-02",
+        "injuryDate": "2025-05-10",
+        "hospitalName": "테스트병원",
+        "department": "직업환경의학과",
+        "doctorName": "김의사",
+        "evaluationDate": "2025-06-20",
+        "medicalRecord": "",
+        "highBloodPressure": "무",
+        "diabetes": "무",
+        "visitHistory": "",
+        "consultReplyOrtho": "",
+        "consultReplyNeuro": "",
+        "consultReplyRehab": "",
+        "consultReplyOther": "",
+        "specialNotes": "",
+        "diagnoses": [
+          {
+            "id": "gn2-dx-1",
+            "code": "M17.0",
+            "name": "무릎관절증",
+            "side": "left",
+            "confirmedLeft": "confirmed",
+            "assessmentLeft": "low",
+            "reasonLeft": [
+              "lowBurden"
+            ],
+            "reasonLeftOther": ""
+          }
+        ],
+        "jobs": [
+          {
+            "id": "gn2-job-1",
+            "jobName": "사무원",
+            "presetId": null,
+            "startDate": "2005-01-01",
+            "endDate": "2015-12-31",
+            "workPeriodOverride": "",
+            "workDaysPerYear": 250,
+            "excludeFromAnalysis": true
+          },
+          {
+            "id": "gn2-job-2",
+            "jobName": "경비원",
+            "presetId": null,
+            "startDate": "2016-01-01",
+            "endDate": "2024-12-31",
+            "workPeriodOverride": "",
+            "workDaysPerYear": 250,
+            "excludeFromAnalysis": true
+          }
+        ]
+      },
+      "modules": {
+        "knee": {
+          "jobExtras": [
+            {
+              "sharedJobId": "gn2-job-1",
+              "weight": "100",
+              "squatting": "10",
+              "evidenceSources": [],
+              "stairs": false,
+              "kneeTwist": false,
+              "startStop": false,
+              "tightSpace": false,
+              "kneeContact": false,
+              "jumpDown": false
+            }
+          ],
+          "returnConsiderations": ""
+        },
+        "shoulder": {
+          "jobExtras": [
+            {
+              "sharedJobId": "gn2-job-1",
+              "overheadHours": "0.5",
+              "repetitiveMediumHours": "",
+              "repetitiveFastHours": "",
+              "heavyLoadCount": "",
+              "heavyLoadSeconds": "",
+              "vibrationHours": "",
+              "evidenceSources": []
+            }
+          ],
+          "returnConsiderations": ""
+        },
+        "elbow": {
+          "returnConsiderations": "",
+          "temporalSequence": {},
+          "jobEvaluations": [
+            {
+              "sharedJobId": "gn2-job-1",
+              "diagnosisEntries": [
+                {
+                  "diagnosisId": "gn2-dx-1",
+                  "selectedBkType": "BK2101",
+                  "bkSelectionMode": "auto",
+                  "main_task_name": "",
+                  "direct_anatomic_link": "",
+                  "exposure_types": [],
+                  "repetition_level": "",
+                  "daily_exposure_hours": "",
+                  "shift_share_percent": "",
+                  "days_per_week": "",
+                  "work_pattern": "",
+                  "rest_distribution": "",
+                  "force_level": "",
+                  "awkward_posture_level": "",
+                  "static_holding_level": "",
+                  "direct_pressure_level": "",
+                  "vibration_exposure": "",
+                  "bk2101_cycle_seconds": "",
+                  "bk2101_repetition_per_hour": "",
+                  "bk2101_monotony": "",
+                  "bk2101_forced_dorsal_extension": "",
+                  "bk2101_prosupination": "",
+                  "bk2106_pressure_source": [],
+                  "bk2103_vibration_tool_type": [],
+                  "bk2103_daily_vibration_hours": "",
+                  "bk2103_tool_pressing": "",
+                  "bk2103_frequent_high_force_grip": "",
+                  "bk2105_elbow_leaning": "",
+                  "bk2105_repeated_friction_impact": "",
+                  "bk2105_pressure_source": [],
+                  "bk2106_repeated_mechanical_exposure": "",
+                  "bk2106_noncorrectable_posture": "",
+                  "bk2106_prolonged_joint_position": "",
+                  "bk2103_handheld_or_guided": ""
+                }
+              ]
+            }
+          ]
+        },
+        "wrist": {
+          "returnConsiderations": "",
+          "temporalSequence": {},
+          "jobEvaluations": [
+            {
+              "sharedJobId": "gn2-job-1",
+              "diagnosisEntries": [
+                {
+                  "diagnosisId": "gn2-dx-1",
+                  "selectedBkType": "BK2101",
+                  "bkSelectionMode": "auto",
+                  "main_task_name": "",
+                  "direct_anatomic_link": "",
+                  "exposure_types": [],
+                  "repetition_level": "",
+                  "daily_exposure_hours": "",
+                  "shift_share_percent": "",
+                  "days_per_week": "",
+                  "work_pattern": "",
+                  "rest_distribution": "",
+                  "force_level": "",
+                  "awkward_posture_level": "",
+                  "static_holding_level": "",
+                  "direct_pressure_level": "",
+                  "vibration_exposure": "",
+                  "bk2101_cycle_seconds": "",
+                  "bk2101_repetition_per_hour": "",
+                  "bk2101_monotony": "",
+                  "bk2101_forced_dorsal_extension": "",
+                  "bk2101_prosupination": "",
+                  "bk2106_pressure_source": [],
+                  "bk2103_vibration_tool_type": [],
+                  "bk2103_daily_vibration_hours": "",
+                  "bk2103_tool_pressing": "",
+                  "bk2103_frequent_high_force_grip": ""
+                }
+              ]
+            }
+          ]
+        },
+        "spine": {
+          "formulaVersion": "v5.1.3",
+          "tasks": [
+            {
+              "id": 9301,
+              "sharedJobId": "gn2-job-1",
+              "name": "서류함 이동",
+              "posture": "G3",
+              "weight": 5,
+              "frequency": 5,
+              "timeValue": 5,
+              "timeUnit": "sec",
+              "correctionFactor": 1,
+              "force": 0
+            }
+          ]
+        },
+        "cervical": {
+          "tasks": [
+            {
+              "id": 9302,
+              "sharedJobId": "gn2-job-1",
+              "name": "모니터 작업",
+              "exposure_types": [
+                "awkward_static_neck_load"
+              ],
+              "load_weight_kg": "",
+              "carry_hours_per_shift": "",
+              "forced_neck_posture": "",
+              "neck_nonneutral_hours_per_day": "1",
+              "combined_flexion_rotation_posture": "no",
+              "precision_work": "no",
+              "notes": ""
+            }
+          ]
+        }
+      },
+      "activeModules": [
+        "knee",
+        "shoulder",
+        "elbow",
+        "wrist",
+        "spine",
+        "cervical"
+      ]
+    }
+  },
+  {
+    "id": "golden-narr-blank-values",
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "phase": "intake",
+    "data": {
+      "shared": {
+        "patientNo": "GN-3",
+        "name": "서술빈값",
+        "gender": "female",
+        "height": "172",
+        "weight": "74",
+        "birthDate": "1968-04-02",
+        "injuryDate": "2025-05-10",
+        "hospitalName": "테스트병원",
+        "department": "직업환경의학과",
+        "doctorName": "김의사",
+        "evaluationDate": "2025-06-20",
+        "medicalRecord": "",
+        "highBloodPressure": "무",
+        "diabetes": "무",
+        "visitHistory": "",
+        "consultReplyOrtho": "",
+        "consultReplyNeuro": "",
+        "consultReplyRehab": "",
+        "consultReplyOther": "",
+        "specialNotes": "",
+        "diagnoses": [
+          {
+            "id": "gn3-dx-knee",
+            "code": "M17.1",
+            "name": "무릎관절증",
+            "side": "right"
+          },
+          {
+            "id": "gn3-dx-elbow-1",
+            "code": "M77.0",
+            "name": "내측상과염",
+            "side": ""
+          },
+          {
+            "id": "gn3-dx-elbow-2",
+            "code": "M77.1",
+            "name": "외측상과염",
+            "side": ""
+          },
+          {
+            "id": "gn3-dx-wrist",
+            "code": "M65.3",
+            "name": "방아쇠수지",
+            "side": ""
+          },
+          {
+            "id": "gn3-dx-cervical",
+            "code": "M50.1",
+            "name": "경추 추간판 장애",
+            "side": ""
+          },
+          {
+            "id": "gn3-dx-wrist-2",
+            "code": "",
+            "name": "손목 통증",
+            "side": "",
+            "moduleId": "wrist"
+          },
+          {
+            "id": "gn3-dx-elbow-3",
+            "code": "M25.52",
+            "name": "",
+            "side": "left",
+            "moduleId": "elbow"
+          },
+          {
+            "id": "gn3-dx-elbow-4",
+            "code": "",
+            "name": "팔꿈치 통증",
+            "side": "right",
+            "moduleId": "elbow"
+          },
+          {
+            "id": "gn3-dx-wrist-3",
+            "code": "M25.53",
+            "name": "",
+            "side": "right",
+            "moduleId": "wrist"
+          }
+        ],
+        "jobs": [
+          {
+            "id": "gn3-job-1",
+            "jobName": "",
+            "presetId": null,
+            "startDate": "2010-01-01",
+            "endDate": "2016-12-31",
+            "workPeriodOverride": "",
+            "workDaysPerYear": 250
+          },
+          {
+            "id": "gn3-job-2",
+            "jobName": "청소원",
+            "presetId": null,
+            "startDate": "2017-01-01",
+            "endDate": "2024-12-31",
+            "workPeriodOverride": "",
+            "workDaysPerYear": 250
+          }
+        ]
+      },
+      "modules": {
+        "knee": {
+          "jobExtras": [
+            {
+              "sharedJobId": "gn3-job-1",
+              "weight": "",
+              "squatting": "",
+              "evidenceSources": [],
+              "stairs": false,
+              "kneeTwist": false,
+              "startStop": false,
+              "tightSpace": false,
+              "kneeContact": false,
+              "jumpDown": false
+            },
+            {
+              "sharedJobId": "gn3-job-2",
+              "weight": "",
+              "squatting": "",
+              "evidenceSources": [],
+              "stairs": false,
+              "kneeTwist": false,
+              "startStop": false,
+              "tightSpace": false,
+              "kneeContact": false,
+              "jumpDown": false
+            }
+          ],
+          "returnConsiderations": ""
+        },
+        "elbow": {
+          "returnConsiderations": "",
+          "temporalSequence": {},
+          "jobEvaluations": [
+            {
+              "sharedJobId": "gn3-job-1",
+              "diagnosisEntries": [
+                {
+                  "diagnosisId": "gn3-dx-elbow-1",
+                  "selectedBkType": "",
+                  "bkSelectionMode": "manual",
+                  "main_task_name": "",
+                  "direct_anatomic_link": "",
+                  "exposure_types": [],
+                  "repetition_level": "",
+                  "daily_exposure_hours": "",
+                  "shift_share_percent": "",
+                  "days_per_week": "",
+                  "work_pattern": "",
+                  "rest_distribution": "",
+                  "force_level": "",
+                  "awkward_posture_level": "",
+                  "static_holding_level": "",
+                  "direct_pressure_level": "",
+                  "vibration_exposure": "",
+                  "bk2101_cycle_seconds": "",
+                  "bk2101_repetition_per_hour": "",
+                  "bk2101_monotony": "",
+                  "bk2101_forced_dorsal_extension": "",
+                  "bk2101_prosupination": "",
+                  "bk2106_pressure_source": [],
+                  "bk2103_vibration_tool_type": [],
+                  "bk2103_daily_vibration_hours": "",
+                  "bk2103_tool_pressing": "",
+                  "bk2103_frequent_high_force_grip": "",
+                  "bk2105_elbow_leaning": "",
+                  "bk2105_repeated_friction_impact": "",
+                  "bk2105_pressure_source": [],
+                  "bk2106_repeated_mechanical_exposure": "",
+                  "bk2106_noncorrectable_posture": "",
+                  "bk2106_prolonged_joint_position": "",
+                  "bk2103_handheld_or_guided": ""
+                },
+                {
+                  "diagnosisId": "gn3-dx-elbow-2",
+                  "selectedBkType": "BK9999",
+                  "bkSelectionMode": "manual",
+                  "main_task_name": "",
+                  "direct_anatomic_link": "",
+                  "exposure_types": [],
+                  "repetition_level": "",
+                  "daily_exposure_hours": "",
+                  "shift_share_percent": "",
+                  "days_per_week": "",
+                  "work_pattern": "",
+                  "rest_distribution": "",
+                  "force_level": "",
+                  "awkward_posture_level": "",
+                  "static_holding_level": "",
+                  "direct_pressure_level": "",
+                  "vibration_exposure": "",
+                  "bk2101_cycle_seconds": "",
+                  "bk2101_repetition_per_hour": "",
+                  "bk2101_monotony": "",
+                  "bk2101_forced_dorsal_extension": "",
+                  "bk2101_prosupination": "",
+                  "bk2106_pressure_source": [],
+                  "bk2103_vibration_tool_type": [],
+                  "bk2103_daily_vibration_hours": "",
+                  "bk2103_tool_pressing": "",
+                  "bk2103_frequent_high_force_grip": "",
+                  "bk2105_elbow_leaning": "",
+                  "bk2105_repeated_friction_impact": "",
+                  "bk2105_pressure_source": [],
+                  "bk2106_repeated_mechanical_exposure": "",
+                  "bk2106_noncorrectable_posture": "",
+                  "bk2106_prolonged_joint_position": "",
+                  "bk2103_handheld_or_guided": ""
+                },
+                {
+                  "diagnosisId": "gn3-dx-elbow-3",
+                  "selectedBkType": "",
+                  "bkSelectionMode": "manual",
+                  "main_task_name": "",
+                  "direct_anatomic_link": "",
+                  "exposure_types": [],
+                  "repetition_level": "",
+                  "daily_exposure_hours": "",
+                  "shift_share_percent": "",
+                  "days_per_week": "",
+                  "work_pattern": "",
+                  "rest_distribution": "",
+                  "force_level": "",
+                  "awkward_posture_level": "",
+                  "static_holding_level": "",
+                  "direct_pressure_level": "",
+                  "vibration_exposure": "",
+                  "bk2101_cycle_seconds": "",
+                  "bk2101_repetition_per_hour": "",
+                  "bk2101_monotony": "",
+                  "bk2101_forced_dorsal_extension": "",
+                  "bk2101_prosupination": "",
+                  "bk2106_pressure_source": [],
+                  "bk2103_vibration_tool_type": [],
+                  "bk2103_daily_vibration_hours": "",
+                  "bk2103_tool_pressing": "",
+                  "bk2103_frequent_high_force_grip": "",
+                  "bk2105_elbow_leaning": "",
+                  "bk2105_repeated_friction_impact": "",
+                  "bk2105_pressure_source": [],
+                  "bk2106_repeated_mechanical_exposure": "",
+                  "bk2106_noncorrectable_posture": "",
+                  "bk2106_prolonged_joint_position": "",
+                  "bk2103_handheld_or_guided": ""
+                },
+                {
+                  "diagnosisId": "gn3-dx-elbow-4",
+                  "selectedBkType": "",
+                  "bkSelectionMode": "manual",
+                  "main_task_name": "",
+                  "direct_anatomic_link": "",
+                  "exposure_types": [],
+                  "repetition_level": "",
+                  "daily_exposure_hours": "",
+                  "shift_share_percent": "",
+                  "days_per_week": "",
+                  "work_pattern": "",
+                  "rest_distribution": "",
+                  "force_level": "",
+                  "awkward_posture_level": "",
+                  "static_holding_level": "",
+                  "direct_pressure_level": "",
+                  "vibration_exposure": "",
+                  "bk2101_cycle_seconds": "",
+                  "bk2101_repetition_per_hour": "",
+                  "bk2101_monotony": "",
+                  "bk2101_forced_dorsal_extension": "",
+                  "bk2101_prosupination": "",
+                  "bk2106_pressure_source": [],
+                  "bk2103_vibration_tool_type": [],
+                  "bk2103_daily_vibration_hours": "",
+                  "bk2103_tool_pressing": "",
+                  "bk2103_frequent_high_force_grip": "",
+                  "bk2105_elbow_leaning": "",
+                  "bk2105_repeated_friction_impact": "",
+                  "bk2105_pressure_source": [],
+                  "bk2106_repeated_mechanical_exposure": "",
+                  "bk2106_noncorrectable_posture": "",
+                  "bk2106_prolonged_joint_position": "",
+                  "bk2103_handheld_or_guided": ""
+                }
+              ]
+            }
+          ]
+        },
+        "wrist": {
+          "returnConsiderations": "",
+          "temporalSequence": {},
+          "jobEvaluations": [
+            {
+              "sharedJobId": "gn3-job-1",
+              "diagnosisEntries": [
+                {
+                  "diagnosisId": "gn3-dx-wrist",
+                  "selectedBkType": "",
+                  "bkSelectionMode": "manual",
+                  "main_task_name": "",
+                  "direct_anatomic_link": "",
+                  "exposure_types": [],
+                  "repetition_level": "",
+                  "daily_exposure_hours": "",
+                  "shift_share_percent": "",
+                  "days_per_week": "",
+                  "work_pattern": "",
+                  "rest_distribution": "",
+                  "force_level": "",
+                  "awkward_posture_level": "",
+                  "static_holding_level": "",
+                  "direct_pressure_level": "",
+                  "vibration_exposure": "",
+                  "bk2101_cycle_seconds": "",
+                  "bk2101_repetition_per_hour": "",
+                  "bk2101_monotony": "",
+                  "bk2101_forced_dorsal_extension": "",
+                  "bk2101_prosupination": "",
+                  "bk2106_pressure_source": [],
+                  "bk2103_vibration_tool_type": [],
+                  "bk2103_daily_vibration_hours": "",
+                  "bk2103_tool_pressing": "",
+                  "bk2103_frequent_high_force_grip": ""
+                },
+                {
+                  "diagnosisId": "gn3-dx-wrist-2",
+                  "selectedBkType": "BK9999",
+                  "bkSelectionMode": "manual",
+                  "main_task_name": "",
+                  "direct_anatomic_link": "",
+                  "exposure_types": [],
+                  "repetition_level": "",
+                  "daily_exposure_hours": "",
+                  "shift_share_percent": "",
+                  "days_per_week": "",
+                  "work_pattern": "",
+                  "rest_distribution": "",
+                  "force_level": "",
+                  "awkward_posture_level": "",
+                  "static_holding_level": "",
+                  "direct_pressure_level": "",
+                  "vibration_exposure": "",
+                  "bk2101_cycle_seconds": "",
+                  "bk2101_repetition_per_hour": "",
+                  "bk2101_monotony": "",
+                  "bk2101_forced_dorsal_extension": "",
+                  "bk2101_prosupination": "",
+                  "bk2106_pressure_source": [],
+                  "bk2103_vibration_tool_type": [],
+                  "bk2103_daily_vibration_hours": "",
+                  "bk2103_tool_pressing": "",
+                  "bk2103_frequent_high_force_grip": ""
+                },
+                {
+                  "diagnosisId": "gn3-dx-wrist-3",
+                  "selectedBkType": "",
+                  "bkSelectionMode": "manual",
+                  "main_task_name": "",
+                  "direct_anatomic_link": "",
+                  "exposure_types": [],
+                  "repetition_level": "",
+                  "daily_exposure_hours": "",
+                  "shift_share_percent": "",
+                  "days_per_week": "",
+                  "work_pattern": "",
+                  "rest_distribution": "",
+                  "force_level": "",
+                  "awkward_posture_level": "",
+                  "static_holding_level": "",
+                  "direct_pressure_level": "",
+                  "vibration_exposure": "",
+                  "bk2101_cycle_seconds": "",
+                  "bk2101_repetition_per_hour": "",
+                  "bk2101_monotony": "",
+                  "bk2101_forced_dorsal_extension": "",
+                  "bk2101_prosupination": "",
+                  "bk2106_pressure_source": [],
+                  "bk2103_vibration_tool_type": [],
+                  "bk2103_daily_vibration_hours": "",
+                  "bk2103_tool_pressing": "",
+                  "bk2103_frequent_high_force_grip": ""
+                }
+              ]
+            },
+            {
+              "sharedJobId": "gn3-job-2",
+              "diagnosisEntries": []
+            }
+          ]
+        },
+        "cervical": {
+          "tasks": [
+            {
+              "id": 9401,
+              "sharedJobId": "gn3-job-1",
+              "name": "",
+              "exposure_types": [],
+              "load_weight_kg": "",
+              "carry_hours_per_shift": "",
+              "forced_neck_posture": "",
+              "neck_nonneutral_hours_per_day": "",
+              "combined_flexion_rotation_posture": "",
+              "precision_work": "",
+              "notes": ""
+            },
+            {
+              "id": 9402,
+              "sharedJobId": "gn3-job-2",
+              "name": "바닥 청소",
+              "exposure_types": [
+                "awkward_static_neck_load"
+              ],
+              "load_weight_kg": "",
+              "carry_hours_per_shift": "",
+              "forced_neck_posture": "",
+              "neck_nonneutral_hours_per_day": "0.5",
+              "combined_flexion_rotation_posture": "no",
+              "precision_work": "no",
+              "notes": ""
+            }
+          ]
+        }
+      },
+      "activeModules": [
+        "cervical",
+        "wrist",
+        "elbow",
+        "knee"
+      ]
+    }
+  },
+  {
+    "id": "golden-narr-shoulder-combined",
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "phase": "intake",
+    "data": {
+      "shared": {
+        "patientNo": "GN-4",
+        "name": "서술어깨복합",
+        "gender": "male",
+        "height": "172",
+        "weight": "74",
+        "birthDate": "1968-04-02",
+        "injuryDate": "2025-05-10",
+        "hospitalName": "테스트병원",
+        "department": "직업환경의학과",
+        "doctorName": "김의사",
+        "evaluationDate": "2025-06-20",
+        "medicalRecord": "",
+        "highBloodPressure": "무",
+        "diabetes": "무",
+        "visitHistory": "",
+        "consultReplyOrtho": "",
+        "consultReplyNeuro": "",
+        "consultReplyRehab": "",
+        "consultReplyOther": "",
+        "specialNotes": "",
+        "diagnoses": [
+          {
+            "id": "gn4-dx-1",
+            "code": "M75.1",
+            "name": "회전근개 증후군",
+            "side": "both",
+            "confirmedRight": "confirmed",
+            "assessmentRight": "high",
+            "confirmedLeft": "confirmed",
+            "assessmentLeft": "high"
+          },
+          {
+            "id": "gn4-dx-2",
+            "code": "M75.4",
+            "name": "어깨 충돌증후군",
+            "side": "right",
+            "confirmedRight": "confirmed",
+            "assessmentRight": "high"
+          }
+        ],
+        "jobs": [
+          {
+            "id": "gn4-job-1",
+            "jobName": "도장공",
+            "presetId": null,
+            "startDate": "2008-01-01",
+            "endDate": "2017-12-31",
+            "workPeriodOverride": "",
+            "workDaysPerYear": 250
+          },
+          {
+            "id": "gn4-job-2",
+            "jobName": "현장 사무",
+            "presetId": null,
+            "startDate": "2018-01-01",
+            "endDate": "2019-12-31",
+            "workPeriodOverride": "",
+            "workDaysPerYear": 250,
+            "excludeFromAnalysis": true
+          },
+          {
+            "id": "gn4-job-3",
+            "jobName": "천장 배선공",
+            "presetId": null,
+            "startDate": "",
+            "endDate": "",
+            "workPeriodOverride": "",
+            "workDaysPerYear": 250
+          },
+          {
+            "id": "gn4-job-4",
+            "jobName": "조선 용접공",
+            "presetId": null,
+            "startDate": "2020-01-01",
+            "endDate": "2024-12-31",
+            "workPeriodOverride": "",
+            "workDaysPerYear": 250
+          }
+        ],
+        "reportOptions": {
+          "groupAssessmentResults": true
+        }
+      },
+      "modules": {
+        "shoulder": {
+          "jobExtras": [
+            {
+              "sharedJobId": "gn4-job-1",
+              "overheadHours": "1.2",
+              "repetitiveMediumHours": "10",
+              "repetitiveFastHours": "",
+              "heavyLoadCount": "",
+              "heavyLoadSeconds": "",
+              "vibrationHours": "",
+              "evidenceSources": []
+            },
+            {
+              "sharedJobId": "gn4-job-2",
+              "overheadHours": "3",
+              "repetitiveMediumHours": "",
+              "repetitiveFastHours": "",
+              "heavyLoadCount": "",
+              "heavyLoadSeconds": "",
+              "vibrationHours": "",
+              "evidenceSources": []
+            },
+            {
+              "sharedJobId": "gn4-job-3",
+              "overheadHours": "2",
+              "repetitiveMediumHours": "",
+              "repetitiveFastHours": "",
+              "heavyLoadCount": "",
+              "heavyLoadSeconds": "",
+              "vibrationHours": "",
+              "evidenceSources": []
+            },
+            {
+              "sharedJobId": "gn4-job-4",
+              "overheadHours": "0.1",
+              "repetitiveMediumHours": "5",
+              "repetitiveFastHours": "",
+              "heavyLoadCount": "",
+              "heavyLoadSeconds": "",
+              "vibrationHours": "",
+              "evidenceSources": []
+            }
+          ],
+          "returnConsiderations": ""
+        }
+      },
+      "activeModules": [
+        "shoulder"
+      ]
+    }
+  },
+  {
+    "id": "golden-narr-spine-vibration",
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "phase": "intake",
+    "data": {
+      "shared": {
+        "patientNo": "GN-5",
+        "name": "서술척추진동",
+        "gender": "male",
+        "height": "172",
+        "weight": "74",
+        "birthDate": "1968-04-02",
+        "injuryDate": "2025-05-10",
+        "hospitalName": "테스트병원",
+        "department": "직업환경의학과",
+        "doctorName": "김의사",
+        "evaluationDate": "2025-06-20",
+        "medicalRecord": "",
+        "highBloodPressure": "무",
+        "diabetes": "무",
+        "visitHistory": "",
+        "consultReplyOrtho": "",
+        "consultReplyNeuro": "",
+        "consultReplyRehab": "",
+        "consultReplyOther": "",
+        "specialNotes": "",
+        "diagnoses": [
+          {
+            "id": "gn5-dx-1",
+            "code": "M51.1",
+            "name": "요추 추간판 장애",
+            "side": ""
+          }
+        ],
+        "jobs": [
+          {
+            "id": "gn5-job-1",
+            "jobName": "덤프트럭 운전원",
+            "presetId": null,
+            "startDate": "1995-01-01",
+            "endDate": "2009-12-31",
+            "workPeriodOverride": "",
+            "workDaysPerYear": 250
+          },
+          {
+            "id": "gn5-job-2",
+            "jobName": "지게차 운전원",
+            "presetId": null,
+            "startDate": "2010-01-01",
+            "endDate": "2019-12-31",
+            "workPeriodOverride": "",
+            "workDaysPerYear": 250
+          },
+          {
+            "id": "gn5-job-3",
+            "jobName": "경비원",
+            "presetId": null,
+            "startDate": "2020-01-01",
+            "endDate": "2024-12-31",
+            "workPeriodOverride": "",
+            "workDaysPerYear": 250
+          }
+        ]
+      },
+      "modules": {
+        "spine": {
+          "formulaVersion": "v5.1.3",
+          "mddmStatus": "present",
+          "vibrationExposureStatus": "present",
+          "tasks": [
+            {
+              "id": 9501,
+              "sharedJobId": "gn5-job-1",
+              "name": "적재물 결속",
+              "posture": "G4",
+              "weight": 20,
+              "frequency": 150,
+              "timeValue": 6,
+              "timeUnit": "sec",
+              "correctionFactor": 1.2,
+              "force": 0
+            },
+            {
+              "id": 9502,
+              "sharedJobId": "gn5-job-2",
+              "name": "팔레트 정리",
+              "posture": "G7",
+              "weight": 45,
+              "frequency": 3,
+              "timeValue": 5,
+              "timeUnit": "sec",
+              "correctionFactor": 1.2,
+              "force": 0
+            },
+            {
+              "id": 9503,
+              "sharedJobId": "gn5-job-3",
+              "name": "",
+              "posture": "G3",
+              "weight": "",
+              "frequency": "",
+              "timeValue": 5,
+              "timeUnit": "sec",
+              "correctionFactor": 1,
+              "force": 0
+            }
+          ],
+          "vibrationIntervals": [
+            {
+              "id": "gn5-iv-1",
+              "sharedJobId": "gn5-job-1",
+              "name": "비포장 운행",
+              "awMin": "0.9",
+              "awMax": "1.3",
+              "timeValue": "6",
+              "timeUnit": "hr"
+            },
+            {
+              "id": "gn5-iv-2",
+              "sharedJobId": "gn5-job-1",
+              "name": "",
+              "awMin": "0.3",
+              "awMax": "0.5",
+              "timeValue": "90",
+              "timeUnit": "min"
+            },
+            {
+              "id": "gn5-iv-3",
+              "sharedJobId": "gn5-job-2",
+              "name": "창고 내 운행",
+              "awMin": "0.4",
+              "awMax": "0.7",
+              "timeValue": "7200",
+              "timeUnit": "sec"
+            },
+            {
+              "id": "gn5-iv-4",
+              "sharedJobId": "gn5-job-2",
+              "name": "잘못된 구간",
+              "awMin": "0.8",
+              "awMax": "0.2",
+              "timeValue": "1",
+              "timeUnit": "hr"
+            }
+          ]
+        }
+      },
+      "activeModules": [
+        "spine"
+      ]
+    }
+  },
+  {
+    "id": "golden-narr-spine-empty",
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "phase": "intake",
+    "data": {
+      "shared": {
+        "patientNo": "GN-6",
+        "name": "",
+        "gender": "",
+        "height": "",
+        "weight": "",
+        "birthDate": "",
+        "injuryDate": "",
+        "hospitalName": "",
+        "department": "",
+        "doctorName": "",
+        "evaluationDate": "",
+        "medicalRecord": "",
+        "highBloodPressure": "무",
+        "diabetes": "무",
+        "visitHistory": "",
+        "consultReplyOrtho": "",
+        "consultReplyNeuro": "",
+        "consultReplyRehab": "",
+        "consultReplyOther": "",
+        "specialNotes": "",
+        "diagnoses": [
+          {
+            "id": "gn6-dx-1",
+            "code": "M51.1",
+            "name": "요추 추간판 장애",
+            "side": ""
+          }
+        ],
+        "jobs": [
+          {
+            "id": "gn6-job-1",
+            "jobName": "간병인",
+            "presetId": null,
+            "startDate": "2012-01-01",
+            "endDate": "2024-12-31",
+            "workPeriodOverride": "",
+            "workDaysPerYear": 250
+          }
+        ]
+      },
+      "modules": {
+        "spine": {
+          "mddmStatus": "present",
+          "vibrationExposureStatus": "present",
+          "tasks": [],
+          "vibrationIntervals": []
+        }
+      },
+      "activeModules": [
+        "spine"
+      ]
+    }
+  },
+  {
+    "id": "golden-narr-upper-limb-no-diagnosis",
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "phase": "intake",
+    "data": {
+      "shared": {
+        "patientNo": "GN-7",
+        "name": "서술상지상병없음",
+        "gender": "male",
+        "height": "172",
+        "weight": "74",
+        "birthDate": "1968-04-02",
+        "injuryDate": "2025-05-10",
+        "hospitalName": "테스트병원",
+        "department": "직업환경의학과",
+        "doctorName": "김의사",
+        "evaluationDate": "2025-06-20",
+        "medicalRecord": "",
+        "highBloodPressure": "무",
+        "diabetes": "무",
+        "visitHistory": "",
+        "consultReplyOrtho": "",
+        "consultReplyNeuro": "",
+        "consultReplyRehab": "",
+        "consultReplyOther": "",
+        "specialNotes": "",
+        "diagnoses": [
+          {
+            "id": "gn7-dx-1",
+            "code": "M17.0",
+            "name": "무릎관절증",
+            "side": "right"
+          }
+        ],
+        "jobs": [
+          {
+            "id": "gn7-job-1",
+            "jobName": "미용사",
+            "presetId": null,
+            "startDate": "2010-01-01",
+            "endDate": "2024-12-31",
+            "workPeriodOverride": "",
+            "workDaysPerYear": 250
+          }
+        ]
+      },
+      "modules": {
+        "elbow": {
+          "returnConsiderations": "",
+          "temporalSequence": {},
+          "jobEvaluations": []
+        },
+        "wrist": {
+          "returnConsiderations": "",
+          "temporalSequence": {},
+          "jobEvaluations": []
+        }
+      },
+      "activeModules": [
+        "wrist",
+        "elbow"
+      ]
+    }
+  }
+]

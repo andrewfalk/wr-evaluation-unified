@@ -6,7 +6,7 @@
 // Rules (update only for intended output changes, never in a refactor): src/core/fixtures/goldenEnv.js
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useGoldenEnvironment } from '../../fixtures/goldenEnv';
-import { loadGoldenBatchPatients, loadGoldenPatients } from '../../fixtures/goldenPatients';
+import { loadGoldenBatchPatients, loadGoldenNarrativePatients, loadGoldenPatients } from '../../fixtures/goldenPatients';
 
 // Capture what the export functions hand to SheetJS / JSZip instead of writing files.
 const captured = vi.hoisted(() => ({ writeFile: [], write: [], zips: [] }));
@@ -107,6 +107,34 @@ describe('G3 — narrative outputs per patient', () => {
     const out = {};
     for (const p of loadGoldenPatients()) out[p.id] = aiInput.buildAiInputResult(p);
     await expect(goldenJson(out)).toMatchFileSnapshot('./__goldens__/ai-input.json');
+  });
+
+  // P2-59: branches goldenPatients.json does not reach — the batch extra cases plus the narrative extra cases
+  // (src/core/fixtures/goldenPatientsNarrative.json). Same functions, same output shape as the three tests above.
+  const extraPatients = () => [...loadGoldenBatchPatients(), ...loadGoldenNarrativePatients()];
+
+  it('extra cases: unified report text', async () => {
+    const out = {};
+    for (const p of extraPatients()) out[p.id] = reportGenerator.generateUnifiedReport(p);
+    await expect(goldenJson(out)).toMatchFileSnapshot('./__goldens__/report-text.extra.json');
+  });
+
+  it('extra cases: EMR fields, injection data, consult-reply data', async () => {
+    const out = {};
+    for (const p of extraPatients()) {
+      out[p.id] = {
+        unified: emrReport.generateUnifiedEMR(p),
+        fieldData: emrReport.generateEMRFieldData(p),
+        consultReply: emrReport.generateConsultReplyFieldData(p),
+      };
+    }
+    await expect(goldenJson(out)).toMatchFileSnapshot('./__goldens__/emr.extra.json');
+  });
+
+  it('extra cases: AI analysis input', async () => {
+    const out = {};
+    for (const p of extraPatients()) out[p.id] = aiInput.buildAiInputResult(p);
+    await expect(goldenJson(out)).toMatchFileSnapshot('./__goldens__/ai-input.extra.json');
   });
 });
 
