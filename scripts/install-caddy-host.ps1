@@ -1573,7 +1573,7 @@ function Invoke-Reconfigure {
     # An earlier version wrote its backup straight to Caddyfile.host.prev; one left behind may be incomplete, so it is
     # never used to restore from: stop and let the operator check (Codex PR review round 4).
     if (Test-Path -LiteralPath $ConfigPrev -PathType Leaf) {
-        throw "$ConfigPrev was left by an interrupted -Reconfigure of an earlier version and may be incomplete. Check that $ConfigDest is complete (-Status, caddy validate), delete $ConfigPrev, then run -Reconfigure again. Nothing was changed."
+        throw "$ConfigPrev was left by an interrupted -Reconfigure of an earlier version and may be incomplete. Check that $ConfigDest is complete (caddy validate), restart the service so it runs that file (Restart-Service $ServiceName) and check -Status, then delete $ConfigPrev and run -Reconfigure again. Nothing was changed."
     }
     # Caddyfile.host.backup exists only while an apply below is in progress (made complete under a temporary name, then
     # renamed; removed after the restart was verified, or moved back on failure). Found at the start, it means an
@@ -1760,7 +1760,7 @@ function Invoke-Status {
         Write-Fail "$ConfigBackup is left from an interrupted -Reconfigure: the service may still run the previous configuration. Run -Reconfigure again."; $problems++
     }
     if ($mode -ne 'docker' -and (Test-Path -LiteralPath $ConfigPrev -PathType Leaf)) {
-        Write-Fail "$ConfigPrev is left from an interrupted -Reconfigure of an earlier version and may be incomplete. Check that $ConfigDest is complete, delete $ConfigPrev, then run -Reconfigure again."; $problems++
+        Write-Fail "$ConfigPrev is left from an interrupted -Reconfigure of an earlier version and may be incomplete. Check that $ConfigDest is complete, restart the service so it runs that file, check -Status, then delete $ConfigPrev and run -Reconfigure again."; $problems++
     }
     if ($mode -ne 'docker' -and (Test-Path -LiteralPath $ConfigDest -PathType Leaf)) {
         try {
