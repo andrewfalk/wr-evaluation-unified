@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { showAlert } from '../utils/platform';
 import { useGuardedDialogs } from '../../app/useWorkspaceLifetime';
 import { resolveAssessment } from '../utils/emrReport';
+import { loadChunk } from '../utils/loadChunk';
 
 // hasInvalidOverride는 generatedB8과 무관하게 오버라이드 객체 자체의 형태만 본다
 // (resolveAssessment 참고) — 배치 내보내기에서 대상마다 무거운 b8 생성을 피하기 위해
@@ -41,7 +42,7 @@ export function useExportHandlers({ activePatient, patients, selectedIds, dirtyA
     if (!activePatient) return;
     if (await guardExportTargets([activePatient], dirtyAssessmentPatientId)) return;
     try {
-      const { exportSingle } = await import('../utils/exportService');
+      const { exportSingle } = await loadChunk(() => import('../utils/exportService'));
       if (!isAlive()) return;
       exportSingle(activePatient);
     } catch (err) { await alertAlive(err.message); }
@@ -51,7 +52,7 @@ export function useExportHandlers({ activePatient, patients, selectedIds, dirtyA
     const targets = patients.filter(p => selectedIds.has(p.id));
     if (await guardExportTargets(targets, dirtyAssessmentPatientId)) return;
     try {
-      const { exportSelected } = await import('../utils/exportService');
+      const { exportSelected } = await loadChunk(() => import('../utils/exportService'));
       if (!isAlive()) return;
       await exportSelected(patients, selectedIds);
     } catch (err) { await alertAlive(err.message); }
@@ -60,7 +61,7 @@ export function useExportHandlers({ activePatient, patients, selectedIds, dirtyA
   const handleExportBatch = async () => {
     if (await guardExportTargets(patients, dirtyAssessmentPatientId)) return;
     try {
-      const { exportBatch } = await import('../utils/exportService');
+      const { exportBatch } = await loadChunk(() => import('../utils/exportService'));
       if (!isAlive()) return;
       await exportBatch(patients);
     } catch (err) { await alertAlive(err.message); }
@@ -70,7 +71,7 @@ export function useExportHandlers({ activePatient, patients, selectedIds, dirtyA
     if (!activePatient) return;
     if (await guardExportTargets([activePatient], dirtyAssessmentPatientId)) return;
     try {
-      const { exportBatchFormatSingle } = await import('../utils/exportService');
+      const { exportBatchFormatSingle } = await loadChunk(() => import('../utils/exportService'));
       if (!isAlive()) return;
       exportBatchFormatSingle(activePatient);
     } catch (err) { await alertAlive(err.message); }
@@ -80,7 +81,7 @@ export function useExportHandlers({ activePatient, patients, selectedIds, dirtyA
     const targets = patients.filter(p => selectedIds.has(p.id));
     if (await guardExportTargets(targets, dirtyAssessmentPatientId)) return;
     try {
-      const { exportBatchFormatSelected } = await import('../utils/exportService');
+      const { exportBatchFormatSelected } = await loadChunk(() => import('../utils/exportService'));
       if (!isAlive()) return;
       await exportBatchFormatSelected(patients, selectedIds);
     } catch (err) { await alertAlive(err.message); }
@@ -89,7 +90,7 @@ export function useExportHandlers({ activePatient, patients, selectedIds, dirtyA
   const handleExportBatchFormatAll = async () => {
     if (await guardExportTargets(patients, dirtyAssessmentPatientId)) return;
     try {
-      const { exportBatchFormatAll } = await import('../utils/exportService');
+      const { exportBatchFormatAll } = await loadChunk(() => import('../utils/exportService'));
       if (!isAlive()) return;
       await exportBatchFormatAll(patients);
     } catch (err) { await alertAlive(err.message); }
@@ -98,7 +99,7 @@ export function useExportHandlers({ activePatient, patients, selectedIds, dirtyA
   // 헤더만 있는 빈 일괄입력 양식 — 환자 데이터를 전혀 담지 않으므로 dirty·invalid 차단에서 예외.
   const handleExportBatchTemplate = async () => {
     try {
-      const { exportBatchTemplate } = await import('../utils/exportService');
+      const { exportBatchTemplate } = await loadChunk(() => import('../utils/exportService'));
       if (!isAlive()) return;
       exportBatchTemplate();
     } catch (err) { await alertAlive(err.message); }

@@ -5,6 +5,7 @@ import { useAuth } from '../auth/AuthContext';
 import { showAlert, showConfirm } from '../utils/platform';
 import { collectImportDateErrors } from '../utils/batchImportHelpers';
 import { runBatchImport } from '../services/batchImport';
+import { loadChunk } from '../utils/loadChunk';
 
 const IMPORT_FIELD_GROUPS = [
   {
@@ -115,7 +116,7 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
 
   const handleDownloadTemplate = async () => {
     try {
-      const { exportBatchTemplate } = await import('../utils/exportService');
+      const { exportBatchTemplate } = await loadChunk(() => import('../utils/exportService'));
       exportBatchTemplate();
     } catch (err) { await showAlert(err.message); }
   };
