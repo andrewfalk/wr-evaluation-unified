@@ -1,6 +1,8 @@
 // 일괄 내보내기(엑셀 일괄 입력 형식) 어깨 구간 — Phase 2 C6 P2-55a. 옛 core 열 표의 shoulder 6열 그대로.
 // ctx = BatchRowContext(src/core/export/batchColumns.ts) — shoulderExtra는 그 행 직업의 jobExtras.
-export const shoulderBatchExport = {
+import type { BatchExportConfig } from '../../core/modules/manifest';
+
+export const shoulderBatchExport: BatchExportConfig = {
   order: 20,
   columns: [
     { header: '오버헤드(시간/일)', cell: ({ shoulderExtra }) => shoulderExtra?.overheadHours ?? '' },

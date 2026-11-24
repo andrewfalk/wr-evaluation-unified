@@ -1,7 +1,7 @@
 // 모듈 매니페스트 — 평가 모듈이 registerModule()로 내는 정보의 모양과 검사(REFACTORING_ROADMAP Phase 2 C5, P2-49).
 //
-// 모듈 파일(src/modules/*/index.js)은 아직 JS라 이 타입을 직접 쓰지 않는다. 대신 등록할 때 validateManifest()가
-// 같은 모양을 실행 중에 확인한다 — 타입과 검사가 같은 목록(MANIFEST_KEYS 등)을 보도록 이 파일 하나에 둔다.
+// 모듈 등록 파일(src/modules/*/index.js)은 아직 JS라 이 타입을 직접 쓰지 않는다 — 모듈의 batchExport.ts·narrative.ts는 TS로
+// 이 타입(BatchExportConfig·ModuleNarrative)을 쓴다. 등록할 때는 validateManifest()가 같은 모양을 실행 중에 확인한다 — 타입과 검사가 같은 목록(MANIFEST_KEYS 등)을 보도록 이 파일 하나에 둔다.
 // 새 최상위 키는 그 키를 쓰기 시작하는 PR에서 MANIFEST_KEYS에 더한다(계획 phase2-c5c6-plan.md 원칙 4).
 import type { ComponentType } from 'react';
 import type { BatchColumn } from '../export/batchColumns';

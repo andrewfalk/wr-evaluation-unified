@@ -29,4 +29,22 @@ describe('ts-progress', () => {
     ]);
     expect(s.jsInTsOnlyLayers).toEqual(['src/platform/bridge.js', 'src/core/api/apiClient.jsx']);
   });
+
+  it('flags JavaScript for the TS-only module files (batchExport, narrative) and src/core/narrative — FX-1', () => {
+    const s = summarize([
+      { rel: 'src/modules/knee/batchExport.js', lines: 10 },
+      { rel: 'src/modules/elbow/narrative.jsx', lines: 10 },
+      { rel: 'src/core/narrative/diffTable.js', lines: 10 },
+      { rel: 'src/modules/knee/batchExport.ts', lines: 10 },
+      { rel: 'src/modules/spine/narrative.ts', lines: 10 },
+      { rel: 'src/modules/knee/index.js', lines: 10 },
+      { rel: 'src/modules/spine/utils/batchExport.js', lines: 10 },
+      { rel: 'src/modules/knee/__tests__/batchExport.test.js', lines: 10 },
+    ]);
+    expect(s.jsInTsOnlyLayers).toEqual([
+      'src/modules/knee/batchExport.js',
+      'src/modules/elbow/narrative.jsx',
+      'src/core/narrative/diffTable.js',
+    ]);
+  });
 });
