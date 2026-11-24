@@ -1,5 +1,5 @@
-// src/modules/shoulder/utils/calculations.js에서 계산 함수만 이동(로직 무변경). UI 라벨 매핑
-// 함수(getSideText/getStatusText/getEllmanText/getReasonText)는 이동하지 않음 — 옛 파일에 잔류.
+// src/modules/shoulder/utils/calculations.js에서 계산 함수만 이동(로직 무변경). 옛 파일은 re-export shim이다.
+// UI 표시 문구(측 표시·상병 상태·사유)는 core에 있다(src/core/i18n/sideLabels.ts·src/core/assessment/vocabulary.ts, Phase 2 C6). BK2117 해석 판정은 interpretation.ts.
 // sync 함수 없음(§1-3) — ShoulderEvaluation.jsx의 useEffect(job extras 채움)는 UI 편의 동작.
 
 import { calculateAge, calculateBMI } from '../../common';

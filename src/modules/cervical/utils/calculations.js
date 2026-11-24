@@ -6,8 +6,8 @@
 // syncCervicalModuleData(data.js)는 그대로 잔류한다 — analytics-core의 계산 함수는 그 함수를
 // 재사용하지 않고 독립적으로 새로 작성한 정규화 로직(legacyNormalize.ts)을 쓴다. 두 구현의
 // 실제 출력 일치는 이관 시 golden characterization 테스트로 확인 후(전부 통과) 이 shim을
-// 적용했다(elbow/wrist와 동일 절차). cervical엔 UI 라벨 매핑 함수가 원래 없다(getSideText
-// 등은 knee 모듈 것을 재사용 — src/core/utils/emrReport.js:6 참고) — 잔류시킬 함수 없음.
+// 적용했다(elbow/wrist와 동일 절차). cervical엔 UI 라벨 매핑 함수가 원래 없다 — 잔류시킬 함수 없음
+// (측 표시 등은 core의 src/core/i18n/sideLabels.ts).
 export {
   FLAG_META,
   computeCervicalCalc,

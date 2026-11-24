@@ -1,7 +1,7 @@
 // src/modules/cervical/utils/calculations.js에서 계산 함수를 이동(로직 무변경). narrative
 // 생성(generateJobNarrative 등)도 계산 결과의 일부라 함께 이관한다(elbow/wrist와 동일 범위).
-// UI 라벨 매핑 함수는 cervical calculations.js에 원래 없다(getSideText 등은 knee 것을 재사용
-// 하는 구조 — src/core/utils/emrReport.js:6 참고) — 이관 대상 아님.
+// UI 라벨 매핑 함수는 cervical calculations.js에 원래 없다 — 이관 대상 아님.
+// UI 표시 문구(측 표시·상병 상태·사유)는 core에 있다(src/core/i18n/sideLabels.ts·src/core/assessment/vocabulary.ts, Phase 2 C6).
 
 import { calculateAge, calculateBMI } from '../../common';
 import { filterAnalysisJobs, hasNoEvaluableJobs } from '../../jobScope';
