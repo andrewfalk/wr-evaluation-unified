@@ -392,6 +392,8 @@ describe('install-caddy-host.ps1 -Uninstall / -Status', () => {
     expect(b).toContain('$expected = New-HostCaddyConfig ([int]$state.httpsPort) ([int]$state.httpPort) ([int]$state.upstreamPort) ([string]$state.domain)');
     expect(b).toMatch(/if \(Test-SameConfigText \(\[System\.IO\.File\]::ReadAllText\(\$ConfigDest\)\) \$expected\) \{ Write-Ok [^}]*\} else \{\s*Write-Warn "\$ConfigDest differs from the template of this version/);
     expect(b).toContain('Run -Reconfigure to apply the template');
+    // 중단된 -Reconfigure가 남긴 .prev는 문제로 보고한다(서비스가 이전 설정으로 돌고 있을 수 있음).
+    expect(b).toMatch(/if \(\$mode -ne 'docker' -and \(Test-Path -LiteralPath \$ConfigPrev -PathType Leaf\)\) \{\s*Write-Fail "\$ConfigPrev is left from an interrupted -Reconfigure[^"]*"; \$problems\+\+/);
   });
 
   it('Status는 앱 게시 규칙 위반(비루프백·없음·복수)을 문제로, Docker 조회 불가만 경고로 본다', () => {
@@ -452,11 +454,16 @@ describe('install-caddy-host.ps1 -Cutover / -Rollback / -Reconfigure (PR-3b)', (
     before(rc, '$config = New-HostCaddyConfig ([int]$state.httpsPort) ([int]$state.httpPort) $appPort', '$sameAsNew = Test-SameConfigText $live $config');
     // 바꿀 것 없음은 기록된 업스트림도 앱 포트와 같을 때만 — 새 파일을 옮긴 뒤(재시작·상태 기록 전) 중단된 실행을 다시 돌리면
     // 파일은 같아도 검증·재시작·기록으로 간다(Codex PR 리뷰 1회차).
-    expect(rc).toMatch(/if \(\$sameAsNew -and -not \$portChanged\) \{[^}]*Nothing to change\.[^}]*\n[^\n]*configuration: same\.[^\n]*\n\s*exit 0/);
+    // 포트가 같아도 템플릿만 바꾸던 적용이 파일 교체 뒤·재시작 전에 끊겼으면(적용 중에만 있는 .prev가 남음) 역시 재적용(2회차).
+    expect(rc).toContain('$interruptedApply = Test-Path -LiteralPath $ConfigPrev -PathType Leaf');
+    expect(rc).toMatch(/if \(\$sameAsNew -and -not \$portChanged -and -not \$interruptedApply\) \{[^}]*Nothing to change\.[^}]*\n[^\n]*configuration: same\.[^\n]*\n\s*exit 0/);
+    // 중단 뒤 재적용에서는 남아 있는 .prev(서비스가 돌던 설정)를 덮어쓰지 않는다 — 실패하면 그것으로 되돌린다.
+    expect(rc).toContain('if (-not $interruptedApply) { Copy-Item -LiteralPath $ConfigDest -Destination $ConfigPrev -Force }');
+    before(rc, 'if ($interruptedApply) {', 'Write-ValidatedConfig');
     // -WhatIf는 바뀜/같음을 말하고, 손으로 고친 설정을 덮어쓰게 되면 경고한다 — 둘 다 검증·적용(Write-ValidatedConfig)보다 먼저.
     // 그 중단 사례(파일 = 새 설정)에는 손편집 경고를 내지 않는다.
-    expect(rc).toContain("$whatIfState = if ($sameAsNew) { 'same, but the recorded upstream port differs (restart needed)' }");
-    before(rc, 'if ($sameAsNew -and -not $portChanged) {', '-WhatIf: configuration: $whatIfState');
+    expect(rc).toContain("$whatIfState = if ($sameAsNew) { 'same, but not applied yet (recorded upstream port differs or an apply was interrupted; restart needed)' }");
+    before(rc, 'if ($sameAsNew -and -not $portChanged -and -not $interruptedApply) {', '-WhatIf: configuration: $whatIfState');
     before(rc, 'if (-not $sameAsNew -and -not (Test-SameConfigText $live $configuredNow)) {', 'Write-ValidatedConfig');
     before(rc, '-WhatIf: configuration: $whatIfState', 'Write-ValidatedConfig');
     expect(rc).toContain('$configuredNow = New-HostCaddyConfig ([int]$state.httpsPort) ([int]$state.httpPort) ([int]$state.upstreamPort) ([string]$state.domain)');

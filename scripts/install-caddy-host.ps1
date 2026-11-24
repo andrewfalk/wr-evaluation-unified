@@ -1568,18 +1568,24 @@ function Invoke-Reconfigure {
     $config = New-HostCaddyConfig ([int]$state.httpsPort) ([int]$state.httpPort) $appPort ([string]$state.domain)
     $portChanged = $appPort -ne [int]$state.upstreamPort
     $sameAsNew = Test-SameConfigText $live $config
-    # Nothing to change only when the recorded upstream is also the app's port: a run interrupted after the new file
-    # was moved in place (before the restart and the state update) leaves the same file but the old port recorded and
-    # still served, so that case goes on to validate, restart and record (Codex PR review round 1).
-    if ($sameAsNew -and -not $portChanged) {
+    # Caddyfile.host.prev exists only while an apply below is in progress (it is removed after the restart was
+    # verified, or moved back on failure). Found at the start, it means an earlier -Reconfigure stopped after the new
+    # file was moved in place but before the service ran it (Codex PR review rounds 1-2).
+    $interruptedApply = Test-Path -LiteralPath $ConfigPrev -PathType Leaf
+    # Nothing to change only when the file is the new one, the recorded upstream is the app's port and no apply was
+    # interrupted: otherwise the service may still run the previous configuration, so validate, restart and record.
+    if ($sameAsNew -and -not $portChanged -and -not $interruptedApply) {
         Write-Ok "Upstream is already 127.0.0.1:$appPort and $ConfigDest matches the template. Nothing to change."
         if ($whatIf) { Write-Host '   -WhatIf: configuration: same.' -ForegroundColor Green }
         exit 0
     }
     if ($portChanged) {
         Write-Ok "App publishes 127.0.0.1:$appPort (configured: 127.0.0.1:$($state.upstreamPort))"
-    } else {
+    } elseif (-not $sameAsNew) {
         Write-Ok "Upstream 127.0.0.1:$appPort is unchanged; $ConfigDest differs from the template of this version"
+    }
+    if ($interruptedApply) {
+        Write-Warn "$ConfigPrev is left from an interrupted -Reconfigure: the service may still run the previous configuration. It will be applied and the service restarted; $ConfigPrev stays the configuration to go back to."
     }
     # The live file differs even from what this template gives for the configured upstream: the template changed
     # in this version, or the file was edited by hand. Hand edits are not kept.
@@ -1589,7 +1595,7 @@ function Invoke-Reconfigure {
     }
     if ($whatIf) {
         Write-Host ''
-        $whatIfState = if ($sameAsNew) { 'same, but the recorded upstream port differs (restart needed)' } else { "changed (upstream port changed: $(if ($portChanged) { 'yes' } else { 'no' }))" }
+        $whatIfState = if ($sameAsNew) { 'same, but not applied yet (recorded upstream port differs or an apply was interrupted; restart needed)' } else { "changed (upstream port changed: $(if ($portChanged) { 'yes' } else { 'no' }))" }
         Write-Host "   -WhatIf: configuration: $whatIfState. Checks passed, nothing was changed." -ForegroundColor Green
         exit 0
     }
@@ -1598,7 +1604,8 @@ function Invoke-Reconfigure {
     if (-not $ScriptCmdlet.ShouldProcess($ServiceName, "Restart with upstream 127.0.0.1:$appPort")) { exit 0 }
 
     Write-Step 'Apply'
-    Copy-Item -LiteralPath $ConfigDest -Destination $ConfigPrev -Force
+    # After an interrupted apply the existing .prev is the configuration the service ran before it: keep it.
+    if (-not $interruptedApply) { Copy-Item -LiteralPath $ConfigDest -Destination $ConfigPrev -Force }
     Move-Item -LiteralPath $ConfigNext -Destination $ConfigDest -Force
     try {
         Restart-Service -Name $ServiceName -Force
@@ -1737,6 +1744,9 @@ function Invoke-Status {
     }
     # The live configuration against this version's template for the configured upstream (FX-7): after an update
     # that changed the template it differs until -Reconfigure; a hand-edited file differs too (it would be replaced).
+    if ($mode -ne 'docker' -and (Test-Path -LiteralPath $ConfigPrev -PathType Leaf)) {
+        Write-Fail "$ConfigPrev is left from an interrupted -Reconfigure: the service may still run the previous configuration. Run -Reconfigure again."; $problems++
+    }
     if ($mode -ne 'docker' -and (Test-Path -LiteralPath $ConfigDest -PathType Leaf)) {
         try {
             $expected = New-HostCaddyConfig ([int]$state.httpsPort) ([int]$state.httpPort) ([int]$state.upstreamPort) ([string]$state.domain)
