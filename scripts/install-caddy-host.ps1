@@ -150,6 +150,7 @@ $SnapshotFile   = Join-Path $StateDir 'listeners-before.json'
 $HostModeFile   = Join-Path $StateDir 'host-mode.json'   # what -Cutover changed in the env file (no secrets)
 $ConfigNext     = Join-Path $BinDir 'Caddyfile.host.next'
 $ConfigPrev     = Join-Path $BinDir 'Caddyfile.host.prev'
+$ConfigPrevTmp  = Join-Path $BinDir 'Caddyfile.host.prev.tmp'
 $FirewallGroup  = 'WR Evaluation Caddy'
 $ReservedPorts  = @(8443, 8080)   # -Install never takes these; only -Cutover moves the service onto them
 $ProdHttpsPort  = 8443
@@ -1605,7 +1606,12 @@ function Invoke-Reconfigure {
 
     Write-Step 'Apply'
     # After an interrupted apply the existing .prev is the configuration the service ran before it: keep it.
-    if (-not $interruptedApply) { Copy-Item -LiteralPath $ConfigDest -Destination $ConfigPrev -Force }
+    # The backup is copied in full to a temporary name first and then renamed in the same folder, so a .prev that
+    # exists is always a complete copy (it is also the interrupted-apply marker above) (Codex PR review round 3).
+    if (-not $interruptedApply) {
+        Copy-Item -LiteralPath $ConfigDest -Destination $ConfigPrevTmp -Force
+        Move-Item -LiteralPath $ConfigPrevTmp -Destination $ConfigPrev -Force
+    }
     Move-Item -LiteralPath $ConfigNext -Destination $ConfigDest -Force
     try {
         Restart-Service -Name $ServiceName -Force
@@ -1842,7 +1848,7 @@ function Invoke-Uninstall {
         Remove-NetFirewallRule -Group $FirewallGroup
         Write-Ok 'Firewall rules removed'
     }
-    foreach ($f in @($ExeDest, $ConfigDest, $ConfigNext, $ConfigPrev, $StateFile, $SnapshotFile, $HostModeFile, $RootCrtPublic)) {
+    foreach ($f in @($ExeDest, $ConfigDest, $ConfigNext, $ConfigPrev, $ConfigPrevTmp, $StateFile, $SnapshotFile, $HostModeFile, $RootCrtPublic)) {
         if ((Test-Path -LiteralPath $f) -and $ScriptCmdlet.ShouldProcess($f, 'Delete file')) {
             Remove-Item -LiteralPath $f -Force
             Write-Ok "Deleted $f"

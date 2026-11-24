@@ -367,7 +367,7 @@ describe('install-caddy-host.ps1 -Uninstall / -Status', () => {
     const b = fnBody('Invoke-Uninstall');
     expect(b).toMatch(/if \(\$state -and @\('pilot', 'docker'\) -notcontains \[string\]\$state\.mode\) \{\s*throw "[^"]*-Rollback first/);
     expect(b).toMatch(/if \(\$svc -and \$svc\.PathName -notlike "\$ExeDest \*"\) \{\s*throw/);
-    expect(b).toContain('foreach ($f in @($ExeDest, $ConfigDest, $ConfigNext, $ConfigPrev, $StateFile, $SnapshotFile, $HostModeFile, $RootCrtPublic)) {');
+    expect(b).toContain('foreach ($f in @($ExeDest, $ConfigDest, $ConfigNext, $ConfigPrev, $ConfigPrevTmp, $StateFile, $SnapshotFile, $HostModeFile, $RootCrtPublic)) {');
     expect(b).not.toMatch(/Remove-Item[^\n]*(\$DataDir|\$CaDir|\$LogDir|\$Root\b|-Recurse)/);
     // 중단된 전환(기록 'applied')이 남아 있으면 모드와 상관없이 변경 전에 거부(Codex PR 리뷰 1회차).
     expect(b).toMatch(/if \(\$journal -and \[string\]\$journal\.status -eq 'applied'\) \{\s*throw/);
@@ -458,7 +458,11 @@ describe('install-caddy-host.ps1 -Cutover / -Rollback / -Reconfigure (PR-3b)', (
     expect(rc).toContain('$interruptedApply = Test-Path -LiteralPath $ConfigPrev -PathType Leaf');
     expect(rc).toMatch(/if \(\$sameAsNew -and -not \$portChanged -and -not \$interruptedApply\) \{[^}]*Nothing to change\.[^}]*\n[^\n]*configuration: same\.[^\n]*\n\s*exit 0/);
     // 중단 뒤 재적용에서는 남아 있는 .prev(서비스가 돌던 설정)를 덮어쓰지 않는다 — 실패하면 그것으로 되돌린다.
-    expect(rc).toContain('if (-not $interruptedApply) { Copy-Item -LiteralPath $ConfigDest -Destination $ConfigPrev -Force }');
+    // 백업은 임시 이름에 끝까지 복사한 뒤 같은 폴더에서 이름만 바꾼다 — 남아 있는 .prev는 늘 온전한 복사본(3회차).
+    expect(rc).toMatch(/if \(-not \$interruptedApply\) \{\s*Copy-Item -LiteralPath \$ConfigDest -Destination \$ConfigPrevTmp -Force\s*Move-Item -LiteralPath \$ConfigPrevTmp -Destination \$ConfigPrev -Force\s*\}/);
+    expect(rc).not.toContain('-Destination $ConfigPrev -Force }');
+    expect(SCRIPT).toContain("$ConfigPrevTmp  = Join-Path $BinDir 'Caddyfile.host.prev.tmp'");
+    expect(fnBody('Invoke-Uninstall')).toContain('$ConfigPrev, $ConfigPrevTmp,');
     before(rc, 'if ($interruptedApply) {', 'Write-ValidatedConfig');
     // -WhatIf는 바뀜/같음을 말하고, 손으로 고친 설정을 덮어쓰게 되면 경고한다 — 둘 다 검증·적용(Write-ValidatedConfig)보다 먼저.
     // 그 중단 사례(파일 = 새 설정)에는 손편집 경고를 내지 않는다.
