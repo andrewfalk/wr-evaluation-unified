@@ -1,3 +1,3 @@
 # backup service crontab
-# Daily DB backup at 02:00
+# Daily DB backup at 02:00 Korean time (the backup service sets TZ=KST-9 — docker-compose.yml)
 0 2 * * * sh /scripts/backup.sh

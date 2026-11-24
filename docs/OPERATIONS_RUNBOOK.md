@@ -4,7 +4,7 @@
 
 ```
 [backup 컨테이너]          [backup-monitor 컨테이너]      [app 컨테이너]
-  crond 02:00 → backup.sh    매 1시간 체크                  /api/admin/ops/backup-status
+  crond 02:00 KST → backup.sh 매 1시간 체크                 /api/admin/ops/backup-status
         ↓                          ↓                              ↓
   backup_data 볼륨 (공유)          ↓                         관리자 콘솔 > 운영 상태 탭
   /backups/daily/*.gpg       _status/monitor-report.json    ops-alert-banner (5분 폴링)
