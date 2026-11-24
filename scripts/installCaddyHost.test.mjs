@@ -367,7 +367,7 @@ describe('install-caddy-host.ps1 -Uninstall / -Status', () => {
     const b = fnBody('Invoke-Uninstall');
     expect(b).toMatch(/if \(\$state -and @\('pilot', 'docker'\) -notcontains \[string\]\$state\.mode\) \{\s*throw "[^"]*-Rollback first/);
     expect(b).toMatch(/if \(\$svc -and \$svc\.PathName -notlike "\$ExeDest \*"\) \{\s*throw/);
-    expect(b).toContain('foreach ($f in @($ExeDest, $ConfigDest, $ConfigNext, $ConfigPrev, $ConfigPrevTmp, $StateFile, $SnapshotFile, $HostModeFile, $RootCrtPublic)) {');
+    expect(b).toContain('foreach ($f in @($ExeDest, $ConfigDest, $ConfigNext, $ConfigPrev, $ConfigBackup, $ConfigBackupTmp, $StateFile, $SnapshotFile, $HostModeFile, $RootCrtPublic)) {');
     expect(b).not.toMatch(/Remove-Item[^\n]*(\$DataDir|\$CaDir|\$LogDir|\$Root\b|-Recurse)/);
     // 중단된 전환(기록 'applied')이 남아 있으면 모드와 상관없이 변경 전에 거부(Codex PR 리뷰 1회차).
     expect(b).toMatch(/if \(\$journal -and \[string\]\$journal\.status -eq 'applied'\) \{\s*throw/);
@@ -393,7 +393,7 @@ describe('install-caddy-host.ps1 -Uninstall / -Status', () => {
     expect(b).toMatch(/if \(Test-SameConfigText \(\[System\.IO\.File\]::ReadAllText\(\$ConfigDest\)\) \$expected\) \{ Write-Ok [^}]*\} else \{\s*Write-Warn "\$ConfigDest differs from the template of this version/);
     expect(b).toContain('Run -Reconfigure to apply the template');
     // 중단된 -Reconfigure가 남긴 .prev는 문제로 보고한다(서비스가 이전 설정으로 돌고 있을 수 있음).
-    expect(b).toMatch(/if \(\$mode -ne 'docker' -and \(Test-Path -LiteralPath \$ConfigPrev -PathType Leaf\)\) \{\s*Write-Fail "\$ConfigPrev is left from an interrupted -Reconfigure[^"]*"; \$problems\+\+/);
+    expect(b).toMatch(/if \(\$mode -ne 'docker' -and \(Test-Path -LiteralPath \$ConfigBackup -PathType Leaf\)\) \{\s*Write-Fail "\$ConfigBackup is left from an interrupted -Reconfigure[^"]*"; \$problems\+\+/);
   });
 
   it('Status는 앱 게시 규칙 위반(비루프백·없음·복수)을 문제로, Docker 조회 불가만 경고로 본다', () => {
@@ -455,14 +455,18 @@ describe('install-caddy-host.ps1 -Cutover / -Rollback / -Reconfigure (PR-3b)', (
     // 바꿀 것 없음은 기록된 업스트림도 앱 포트와 같을 때만 — 새 파일을 옮긴 뒤(재시작·상태 기록 전) 중단된 실행을 다시 돌리면
     // 파일은 같아도 검증·재시작·기록으로 간다(Codex PR 리뷰 1회차).
     // 포트가 같아도 템플릿만 바꾸던 적용이 파일 교체 뒤·재시작 전에 끊겼으면(적용 중에만 있는 .prev가 남음) 역시 재적용(2회차).
-    expect(rc).toContain('$interruptedApply = Test-Path -LiteralPath $ConfigPrev -PathType Leaf');
+    expect(rc).toContain('$interruptedApply = Test-Path -LiteralPath $ConfigBackup -PathType Leaf');
+    // 이전 버전이 남긴 .prev(덜 복사됐을 수 있음)는 되돌리기에 쓰지 않는다 — 아무것도 바꾸기 전에 멈추고 확인 방법을 안내(4회차).
+    before(rc, 'if (Test-Path -LiteralPath $ConfigPrev -PathType Leaf) {', '$interruptedApply = Test-Path -LiteralPath $ConfigBackup');
+    expect(rc).toMatch(/if \(Test-Path -LiteralPath \$ConfigPrev -PathType Leaf\) \{\s*throw "\$ConfigPrev was left by an interrupted -Reconfigure of an earlier version[^"]*Nothing was changed\."/);
+    expect(rc).not.toMatch(/(Move|Copy)-Item -LiteralPath \$ConfigPrev\b/);
+    expect(fnBody('Invoke-Status')).toContain("if ($mode -ne 'docker' -and (Test-Path -LiteralPath $ConfigPrev -PathType Leaf)) {");
     expect(rc).toMatch(/if \(\$sameAsNew -and -not \$portChanged -and -not \$interruptedApply\) \{[^}]*Nothing to change\.[^}]*\n[^\n]*configuration: same\.[^\n]*\n\s*exit 0/);
     // 중단 뒤 재적용에서는 남아 있는 .prev(서비스가 돌던 설정)를 덮어쓰지 않는다 — 실패하면 그것으로 되돌린다.
     // 백업은 임시 이름에 끝까지 복사한 뒤 같은 폴더에서 이름만 바꾼다 — 남아 있는 .prev는 늘 온전한 복사본(3회차).
-    expect(rc).toMatch(/if \(-not \$interruptedApply\) \{\s*Copy-Item -LiteralPath \$ConfigDest -Destination \$ConfigPrevTmp -Force\s*Move-Item -LiteralPath \$ConfigPrevTmp -Destination \$ConfigPrev -Force\s*\}/);
-    expect(rc).not.toContain('-Destination $ConfigPrev -Force }');
-    expect(SCRIPT).toContain("$ConfigPrevTmp  = Join-Path $BinDir 'Caddyfile.host.prev.tmp'");
-    expect(fnBody('Invoke-Uninstall')).toContain('$ConfigPrev, $ConfigPrevTmp,');
+    expect(rc).toMatch(/if \(-not \$interruptedApply\) \{\s*Copy-Item -LiteralPath \$ConfigDest -Destination \$ConfigBackupTmp -Force\s*Move-Item -LiteralPath \$ConfigBackupTmp -Destination \$ConfigBackup -Force\s*\}/);
+    expect(SCRIPT).toContain("$ConfigBackupTmp = Join-Path $BinDir 'Caddyfile.host.backup.tmp'");
+    expect(fnBody('Invoke-Uninstall')).toContain('$ConfigPrev, $ConfigBackup, $ConfigBackupTmp,');
     before(rc, 'if ($interruptedApply) {', 'Write-ValidatedConfig');
     // -WhatIf는 바뀜/같음을 말하고, 손으로 고친 설정을 덮어쓰게 되면 경고한다 — 둘 다 검증·적용(Write-ValidatedConfig)보다 먼저.
     // 그 중단 사례(파일 = 새 설정)에는 손편집 경고를 내지 않는다.

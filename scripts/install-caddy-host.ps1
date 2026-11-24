@@ -149,8 +149,9 @@ $RootCrtPublic  = Join-Path $StateDir 'root.crt'
 $SnapshotFile   = Join-Path $StateDir 'listeners-before.json'
 $HostModeFile   = Join-Path $StateDir 'host-mode.json'   # what -Cutover changed in the env file (no secrets)
 $ConfigNext     = Join-Path $BinDir 'Caddyfile.host.next'
-$ConfigPrev     = Join-Path $BinDir 'Caddyfile.host.prev'
-$ConfigPrevTmp  = Join-Path $BinDir 'Caddyfile.host.prev.tmp'
+$ConfigPrev     = Join-Path $BinDir 'Caddyfile.host.prev'          # backup name of earlier versions: only detected
+$ConfigBackup   = Join-Path $BinDir 'Caddyfile.host.backup'        # -Reconfigure backup and interrupted-apply marker
+$ConfigBackupTmp = Join-Path $BinDir 'Caddyfile.host.backup.tmp'
 $FirewallGroup  = 'WR Evaluation Caddy'
 $ReservedPorts  = @(8443, 8080)   # -Install never takes these; only -Cutover moves the service onto them
 $ProdHttpsPort  = 8443
@@ -1569,10 +1570,15 @@ function Invoke-Reconfigure {
     $config = New-HostCaddyConfig ([int]$state.httpsPort) ([int]$state.httpPort) $appPort ([string]$state.domain)
     $portChanged = $appPort -ne [int]$state.upstreamPort
     $sameAsNew = Test-SameConfigText $live $config
-    # Caddyfile.host.prev exists only while an apply below is in progress (it is removed after the restart was
-    # verified, or moved back on failure). Found at the start, it means an earlier -Reconfigure stopped after the new
-    # file was moved in place but before the service ran it (Codex PR review rounds 1-2).
-    $interruptedApply = Test-Path -LiteralPath $ConfigPrev -PathType Leaf
+    # An earlier version wrote its backup straight to Caddyfile.host.prev; one left behind may be incomplete, so it is
+    # never used to restore from: stop and let the operator check (Codex PR review round 4).
+    if (Test-Path -LiteralPath $ConfigPrev -PathType Leaf) {
+        throw "$ConfigPrev was left by an interrupted -Reconfigure of an earlier version and may be incomplete. Check that $ConfigDest is complete (-Status, caddy validate), delete $ConfigPrev, then run -Reconfigure again. Nothing was changed."
+    }
+    # Caddyfile.host.backup exists only while an apply below is in progress (made complete under a temporary name, then
+    # renamed; removed after the restart was verified, or moved back on failure). Found at the start, it means an
+    # earlier -Reconfigure stopped after the new file was moved in place but before the service ran it (rounds 1-3).
+    $interruptedApply = Test-Path -LiteralPath $ConfigBackup -PathType Leaf
     # Nothing to change only when the file is the new one, the recorded upstream is the app's port and no apply was
     # interrupted: otherwise the service may still run the previous configuration, so validate, restart and record.
     if ($sameAsNew -and -not $portChanged -and -not $interruptedApply) {
@@ -1586,7 +1592,7 @@ function Invoke-Reconfigure {
         Write-Ok "Upstream 127.0.0.1:$appPort is unchanged; $ConfigDest differs from the template of this version"
     }
     if ($interruptedApply) {
-        Write-Warn "$ConfigPrev is left from an interrupted -Reconfigure: the service may still run the previous configuration. It will be applied and the service restarted; $ConfigPrev stays the configuration to go back to."
+        Write-Warn "$ConfigBackup is left from an interrupted -Reconfigure: the service may still run the previous configuration. It will be applied and the service restarted; $ConfigBackup stays the configuration to go back to."
     }
     # The live file differs even from what this template gives for the configured upstream: the template changed
     # in this version, or the file was edited by hand. Hand edits are not kept.
@@ -1605,22 +1611,22 @@ function Invoke-Reconfigure {
     if (-not $ScriptCmdlet.ShouldProcess($ServiceName, "Restart with upstream 127.0.0.1:$appPort")) { exit 0 }
 
     Write-Step 'Apply'
-    # After an interrupted apply the existing .prev is the configuration the service ran before it: keep it.
-    # The backup is copied in full to a temporary name first and then renamed in the same folder, so a .prev that
+    # After an interrupted apply the existing backup is the configuration the service ran before it: keep it.
+    # The backup is copied in full to a temporary name first and then renamed in the same folder, so a backup that
     # exists is always a complete copy (it is also the interrupted-apply marker above) (Codex PR review round 3).
     if (-not $interruptedApply) {
-        Copy-Item -LiteralPath $ConfigDest -Destination $ConfigPrevTmp -Force
-        Move-Item -LiteralPath $ConfigPrevTmp -Destination $ConfigPrev -Force
+        Copy-Item -LiteralPath $ConfigDest -Destination $ConfigBackupTmp -Force
+        Move-Item -LiteralPath $ConfigBackupTmp -Destination $ConfigBackup -Force
     }
     Move-Item -LiteralPath $ConfigNext -Destination $ConfigDest -Force
     try {
         Restart-Service -Name $ServiceName -Force
         Assert-HostServing ([string]$state.domain) ([string]$state.rootSha256) $appPort ([int]$state.httpsPort) ([int]$state.httpPort)
         Update-JsonFile $StateFile @{ upstreamPort = $appPort }
-        Remove-Item -LiteralPath $ConfigPrev -Force
+        Remove-Item -LiteralPath $ConfigBackup -Force
     } catch {
         Write-Fail $_.Exception.Message
-        Move-Item -LiteralPath $ConfigPrev -Destination $ConfigDest -Force
+        Move-Item -LiteralPath $ConfigBackup -Destination $ConfigDest -Force
         Restart-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
         Write-Host '   The previous configuration was put back and the service restarted.' -ForegroundColor Yellow
         exit 1
@@ -1750,8 +1756,11 @@ function Invoke-Status {
     }
     # The live configuration against this version's template for the configured upstream (FX-7): after an update
     # that changed the template it differs until -Reconfigure; a hand-edited file differs too (it would be replaced).
+    if ($mode -ne 'docker' -and (Test-Path -LiteralPath $ConfigBackup -PathType Leaf)) {
+        Write-Fail "$ConfigBackup is left from an interrupted -Reconfigure: the service may still run the previous configuration. Run -Reconfigure again."; $problems++
+    }
     if ($mode -ne 'docker' -and (Test-Path -LiteralPath $ConfigPrev -PathType Leaf)) {
-        Write-Fail "$ConfigPrev is left from an interrupted -Reconfigure: the service may still run the previous configuration. Run -Reconfigure again."; $problems++
+        Write-Fail "$ConfigPrev is left from an interrupted -Reconfigure of an earlier version and may be incomplete. Check that $ConfigDest is complete, delete $ConfigPrev, then run -Reconfigure again."; $problems++
     }
     if ($mode -ne 'docker' -and (Test-Path -LiteralPath $ConfigDest -PathType Leaf)) {
         try {
@@ -1848,7 +1857,7 @@ function Invoke-Uninstall {
         Remove-NetFirewallRule -Group $FirewallGroup
         Write-Ok 'Firewall rules removed'
     }
-    foreach ($f in @($ExeDest, $ConfigDest, $ConfigNext, $ConfigPrev, $ConfigPrevTmp, $StateFile, $SnapshotFile, $HostModeFile, $RootCrtPublic)) {
+    foreach ($f in @($ExeDest, $ConfigDest, $ConfigNext, $ConfigPrev, $ConfigBackup, $ConfigBackupTmp, $StateFile, $SnapshotFile, $HostModeFile, $RootCrtPublic)) {
         if ((Test-Path -LiteralPath $f) -and $ScriptCmdlet.ShouldProcess($f, 'Delete file')) {
             Remove-Item -LiteralPath $f -Force
             Write-Ok "Deleted $f"
