@@ -69,7 +69,7 @@ git switch release/7.3.2
 git pull --ff-only
 npm ci
 npm run check:full                       # 전 단계 PASS
-npm run electron:build:intranet          # 인트라넷 설치본 7.3.2 (electron/build-target.json 이 intranet 으로 바뀐다 — 빌드 뒤 git restore electron/build-target.json)
+npm run electron:build:intranet          # 인트라넷 설치본 7.3.2 (electron/build-target.json 이 intranet 으로 바뀐다 — git 이 추적하지 않는 파일이라 되돌리려면 빌드 뒤 node scripts/set-build-target.mjs standalone)
 .\scripts\export-offline-package.ps1 -UpdateSigningKey "<서명 키 파일 경로>"   # 키에 암호가 있으면 먼저 $env:WR_UPDATE_SIGNING_PASSPHRASE
 # → release\wr-evaluation-unified-7.3.2-intranet(.zip)
 ```
