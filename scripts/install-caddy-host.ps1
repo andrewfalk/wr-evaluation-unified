@@ -1567,7 +1567,11 @@ function Invoke-Reconfigure {
     # response compression) while the app port stays the same (FX-7).
     $config = New-HostCaddyConfig ([int]$state.httpsPort) ([int]$state.httpPort) $appPort ([string]$state.domain)
     $portChanged = $appPort -ne [int]$state.upstreamPort
-    if (Test-SameConfigText $live $config) {
+    $sameAsNew = Test-SameConfigText $live $config
+    # Nothing to change only when the recorded upstream is also the app's port: a run interrupted after the new file
+    # was moved in place (before the restart and the state update) leaves the same file but the old port recorded and
+    # still served, so that case goes on to validate, restart and record (Codex PR review round 1).
+    if ($sameAsNew -and -not $portChanged) {
         Write-Ok "Upstream is already 127.0.0.1:$appPort and $ConfigDest matches the template. Nothing to change."
         if ($whatIf) { Write-Host '   -WhatIf: configuration: same.' -ForegroundColor Green }
         exit 0
@@ -1580,12 +1584,13 @@ function Invoke-Reconfigure {
     # The live file differs even from what this template gives for the configured upstream: the template changed
     # in this version, or the file was edited by hand. Hand edits are not kept.
     $configuredNow = New-HostCaddyConfig ([int]$state.httpsPort) ([int]$state.httpPort) ([int]$state.upstreamPort) ([string]$state.domain)
-    if (-not (Test-SameConfigText $live $configuredNow)) {
+    if (-not $sameAsNew -and -not (Test-SameConfigText $live $configuredNow)) {
         Write-Warn "$ConfigDest differs from the template beyond the upstream port (template changed in this version, or edited by hand). It will be replaced; hand edits are not kept."
     }
     if ($whatIf) {
         Write-Host ''
-        Write-Host "   -WhatIf: configuration: changed (upstream port changed: $(if ($portChanged) { 'yes' } else { 'no' })). Checks passed, nothing was changed." -ForegroundColor Green
+        $whatIfState = if ($sameAsNew) { 'same, but the recorded upstream port differs (restart needed)' } else { "changed (upstream port changed: $(if ($portChanged) { 'yes' } else { 'no' }))" }
+        Write-Host "   -WhatIf: configuration: $whatIfState. Checks passed, nothing was changed." -ForegroundColor Green
         exit 0
     }
     Write-ValidatedConfig $ConfigNext $config ([string]$state.rootSha256)

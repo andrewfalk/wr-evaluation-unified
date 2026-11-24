@@ -449,12 +449,16 @@ describe('install-caddy-host.ps1 -Cutover / -Rollback / -Reconfigure (PR-3b)', (
     const rc = fnBody('Invoke-Reconfigure');
     // 옛 판정(포트 + 업스트림 줄 포함 여부)은 없어졌다 — 앱 포트가 같아도 템플릿 변경을 반영한다.
     expect(rc).not.toContain('$live.Contains(');
-    before(rc, '$config = New-HostCaddyConfig ([int]$state.httpsPort) ([int]$state.httpPort) $appPort', 'if (Test-SameConfigText $live $config) {');
-    expect(rc).toMatch(/if \(Test-SameConfigText \$live \$config\) \{[^}]*Nothing to change\.[^}]*\n[^\n]*configuration: same\.[^\n]*\n\s*exit 0/);
+    before(rc, '$config = New-HostCaddyConfig ([int]$state.httpsPort) ([int]$state.httpPort) $appPort', '$sameAsNew = Test-SameConfigText $live $config');
+    // 바꿀 것 없음은 기록된 업스트림도 앱 포트와 같을 때만 — 새 파일을 옮긴 뒤(재시작·상태 기록 전) 중단된 실행을 다시 돌리면
+    // 파일은 같아도 검증·재시작·기록으로 간다(Codex PR 리뷰 1회차).
+    expect(rc).toMatch(/if \(\$sameAsNew -and -not \$portChanged\) \{[^}]*Nothing to change\.[^}]*\n[^\n]*configuration: same\.[^\n]*\n\s*exit 0/);
     // -WhatIf는 바뀜/같음을 말하고, 손으로 고친 설정을 덮어쓰게 되면 경고한다 — 둘 다 검증·적용(Write-ValidatedConfig)보다 먼저.
-    before(rc, 'if (Test-SameConfigText $live $config) {', "configuration: changed (upstream port changed: ");
-    before(rc, 'if (-not (Test-SameConfigText $live $configuredNow)) {', 'Write-ValidatedConfig');
-    before(rc, "configuration: changed (upstream port changed: ", 'Write-ValidatedConfig');
+    // 그 중단 사례(파일 = 새 설정)에는 손편집 경고를 내지 않는다.
+    expect(rc).toContain("$whatIfState = if ($sameAsNew) { 'same, but the recorded upstream port differs (restart needed)' }");
+    before(rc, 'if ($sameAsNew -and -not $portChanged) {', '-WhatIf: configuration: $whatIfState');
+    before(rc, 'if (-not $sameAsNew -and -not (Test-SameConfigText $live $configuredNow)) {', 'Write-ValidatedConfig');
+    before(rc, '-WhatIf: configuration: $whatIfState', 'Write-ValidatedConfig');
     expect(rc).toContain('$configuredNow = New-HostCaddyConfig ([int]$state.httpsPort) ([int]$state.httpPort) ([int]$state.upstreamPort) ([string]$state.domain)');
     expect(rc).toContain('hand edits are not kept');
   });
