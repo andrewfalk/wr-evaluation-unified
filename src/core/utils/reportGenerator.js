@@ -1,6 +1,5 @@
 import { getModule } from '../moduleRegistry';
 import { getSideText } from '../i18n/sideLabels';
-import { buildSpineSectionText } from '../../modules/spine/utils/sectionText';
 import { buildAssessmentBlocks, formatGroupedAssessment } from './assessmentGroups';
 import { calculateAge, calculateBMI } from './common';
 import { buildJobHistoryLines, NO_EVALUABLE_JOBS_NOTE } from './jobHistory';
@@ -9,10 +8,6 @@ import { groupSummariesByBkType as groupElbowSummaries, mergeBkGroupSummaries as
 import { BK_TYPE_LABELS as ELBOW_BK_LABELS } from '../../modules/elbow/utils/data';
 import { groupSummariesByBkType as groupWristSummaries, mergeBkGroupSummaries as mergeWristGroups } from '../../modules/wrist/utils/calculations';
 import { BK_TYPE_LABELS as WRIST_BK_LABELS } from '../../modules/wrist/utils/data';
-
-function genSpineBurdenSection(calc) {
-  return buildSpineSectionText(calc);
-}
 
 function genElbowBurdenSection(calc) {
   let text = `\n< 팔꿈치(주관절) >\n`;
@@ -104,32 +99,6 @@ function genWristBurdenSection(calc) {
   return `${wristLines.join('\n')}\n`;
 }
 
-function genCervicalBurdenSection(calc) {
-  let text = `\n< 경추(목) >\n`;
-  if (calc.noEvaluableJobs) return `${text}${NO_EVALUABLE_JOBS_NOTE}\n`;
-
-  (calc.jobSummaries || []).forEach((jobSummary, index) => {
-    text += `- 직력${index + 1}: ${jobSummary.jobName || '-'}\n`;
-    const burdenIndicatorText = jobSummary.flagItems?.length > 0
-      ? jobSummary.flagItems.map(flag => flag.label).join(', ')
-      : '확인된 부담 지표 없음';
-
-    if (jobSummary.missingFields.length > 0) {
-      text += `    입력 누락: ${jobSummary.missingFields.join(', ')}\n`;
-    }
-    text += '    분석 정리:\n';
-    text += `      ${jobSummary.narrative.split('\n').join('\n      ')}\n`;
-    text += `      확인된 목 부위 부담 지표: ${burdenIndicatorText}\n`;
-    text += `      ** 종합평가 : ${jobSummary.conclusionText}\n`;
-  });
-
-  if ((calc.jobSummaries || []).length > 1 && calc.overallConclusionText) {
-    text += `\n  ** 최종 종합평가 (전체 직업 노출 합산 기준): ${calc.overallConclusionText}\n`;
-  }
-
-  return text;
-}
-
 export function generateUnifiedReport(patient) {
   const shared = patient.data.shared || {};
   const modules = patient.data.modules || {};
@@ -169,13 +138,11 @@ export function generateUnifiedReport(patient) {
     });
 
     // P2-60 ~ P2-63: 옮긴 모듈은 매니페스트 narrative가 블록을 만든다(서술 없는 모듈은 건너뛴다).
-    if ((moduleId === 'knee' || moduleId === 'shoulder') && moduleManifest.narrative) {
+    if (['knee', 'shoulder', 'spine', 'cervical'].includes(moduleId) && moduleManifest.narrative) {
       text += moduleManifest.narrative.render('report', calc, { jobNumberingByJobId: jobHistory.numberingByJobId });
     }
     if (moduleId === 'wrist') text += genWristBurdenSection(calc);
-    if (moduleId === 'spine') text += genSpineBurdenSection(calc);
     if (moduleId === 'elbow') text += genElbowBurdenSection(calc);
-    if (moduleId === 'cervical') text += genCervicalBurdenSection(calc);
   }
 
   text += `\n[업무관련성 평가 결과]\n`;

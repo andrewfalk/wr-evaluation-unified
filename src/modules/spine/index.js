@@ -1,4 +1,5 @@
 import { registerModule } from '../../core/moduleRegistry';
+import { spineNarrative } from './narrative';
 import { SpineEvaluation } from './SpineEvaluation';
 import { createSpineModuleData, createTask } from './utils/data';
 import { computeSpineCalc, isSpineAssessmentComplete } from './utils/calculations';
@@ -59,6 +60,7 @@ registerModule({
     },
   },
   batchExport: spineBatchExport,
+  narrative: spineNarrative,
   batchImportConfig: {
     columns: {
       taskName: ['작업명', 'task'],
