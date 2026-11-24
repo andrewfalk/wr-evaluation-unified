@@ -1,4 +1,5 @@
 import { registerModule } from '../../core/moduleRegistry';
+import { wristNarrative } from './narrative';
 import { WristEvaluation } from './WristEvaluation';
 import { createWristModuleData, createWristJobEvaluation, createWristDiagnosisEntry } from './utils/data';
 import { computeWristCalc, isWristAssessmentComplete } from './utils/calculations';
@@ -84,6 +85,7 @@ registerModule({
     },
   },
   batchExport: wristBatchExport,
+  narrative: wristNarrative,
   batchImportConfig: {
     columns: {
       wristRecentTaskChange: ['손목_시간적선후관계_최근작업변화', 'wrist_recent_task_change'],

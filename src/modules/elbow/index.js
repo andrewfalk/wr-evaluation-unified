@@ -1,4 +1,5 @@
 import { registerModule } from '../../core/moduleRegistry';
+import { elbowNarrative } from './narrative';
 import { ElbowEvaluation } from './ElbowEvaluation';
 import { createElbowModuleData, createElbowJobEvaluation, createElbowDiagnosisEntry } from './utils/data';
 import { computeElbowCalc, isElbowAssessmentComplete } from './utils/calculations';
@@ -81,6 +82,7 @@ registerModule({
     },
   },
   batchExport: elbowBatchExport,
+  narrative: elbowNarrative,
   batchImportConfig: {
     columns: {
       elbowRecentTaskChange: ['팔꿈치_시간적선후관계_최근작업변화', 'elbow_recent_task_change'],

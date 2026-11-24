@@ -2,17 +2,21 @@
 // 옮겨온 것으로, xlsx/jszip 의존성이 없어 미리보기 화면(AssessmentStep)이 byte 계산을
 // 위해 가볍게 import할 수 있다.
 
-import { getModule } from '../moduleRegistry';
-import { getSideText } from '../i18n/sideLabels';
-import { groupSummariesByBkType as groupElbowSummaries, mergeBkGroupSummaries as mergeElbowGroups } from '../../modules/elbow/utils/calculations';
-import { BK_TYPE_LABELS as ELBOW_BK_LABELS } from '../../modules/elbow/utils/data';
-import { groupSummariesByBkType as groupWristSummaries, mergeBkGroupSummaries as mergeWristGroups } from '../../modules/wrist/utils/calculations';
-import { BK_TYPE_LABELS as WRIST_BK_LABELS } from '../../modules/wrist/utils/data';
+import { getEmrNarrativeModules } from '../narrative/emrOrder';
 import { calculateAge, calculateBMI } from './common';
 import { selectModuleNote } from './moduleNotes';
-import { buildJobHistoryLines, NO_EVALUABLE_JOBS_NOTE } from './jobHistory';
+import { buildJobHistoryLines } from './jobHistory';
 import { EMR_TEXT_LIMIT_BYTES, cp949ByteLength, truncateCp949Bytes } from './emrText';
 import { buildAssessmentBlocks, buildConfirmedDiagnosisLines, formatGroupedAssessment } from './assessmentGroups';
+
+// 모듈 블록 — 서술(narrative)이 있는 등록 모듈을 emrOrder 순서로(무릎 → 어깨 → 손목 → 팔꿈치 → 경추 → 척추, 등록 순서·
+// activeModules 순서와 무관 — core/narrative/emrOrder.ts). 계산은 소견서와 같이 computeCalc({ shared, module })로 부른다.
+function buildModuleBlocks(variant, shared, modules, activeModules) {
+  return getEmrNarrativeModules()
+    .filter(manifest => activeModules.includes(manifest.id))
+    .map(manifest => manifest.narrative.render(variant, manifest.computeCalc({ shared, module: modules[manifest.id] || {} }), {}))
+    .join('');
+}
 
 function buildExposureSection(shared, modules, activeModules) {
   let text = '[직업력]\n';
@@ -22,116 +26,7 @@ function buildExposureSection(shared, modules, activeModules) {
     text += '\n[부위별 신체부담 평가]\n';
   }
 
-  if (activeModules.includes('knee')) {
-    const kneeManifest = getModule('knee');
-    const calc = kneeManifest?.computeCalc?.({ shared, module: modules.knee || {} });
-    text += kneeManifest?.narrative?.render('emrSection', calc, {}) ?? '';
-  }
-
-  if (activeModules.includes('shoulder')) {
-    const shoulderManifest = getModule('shoulder');
-    const calc = shoulderManifest?.computeCalc?.({ shared, module: modules.shoulder || {} });
-    text += shoulderManifest?.narrative?.render('emrSection', calc, {}) ?? '';
-  }
-
-  if (activeModules.includes('wrist')) {
-    const calc = getModule('wrist')?.computeCalc?.({ shared, module: modules.wrist || {} });
-    text += '\n<손목/손가락>\n';
-    if (calc?.noEvaluableJobs) {
-      text += `${NO_EVALUABLE_JOBS_NOTE}\n`;
-    } else {
-      if (calc?.missingCommonFields?.length) {
-        text += `- 공통 시간적 선후관계 누락: ${calc.missingCommonFields.join(', ')}\n`;
-      }
-      if (calc?.temporalFlagItems?.length > 0) {
-        text += `- 공통 시간적 선후관계: ${calc.temporalFlagItems.map(flag => flag.label).join(', ')}\n`;
-      }
-      (calc?.jobSummaries || []).forEach(jobSummary => {
-        text += `- ${jobSummary.jobName || '-'}\n`;
-        const wristGroups = groupWristSummaries(jobSummary.diagnosisSummaries || []);
-        wristGroups.forEach(group => {
-          const merged = mergeWristGroups(group.summaries);
-          const diagList = group.summaries
-            .map(s => {
-              const d = s.diagnosis || {};
-              return `${d.code || ''} ${d.name || ''}${d.side ? ` (${getSideText(d.side)})` : ''}`.trim();
-            })
-            .join(' / ');
-          const bkLabel = group.bkType ? WRIST_BK_LABELS[group.bkType] || group.bkType : null;
-          const header = bkLabel ? `[${bkLabel}] ${diagList}` : diagList;
-          text += `  - ${header}\n`;
-          if (merged.missingFields?.length > 0) {
-            text += `    입력 누락: ${merged.missingFields.join(', ')}\n`;
-          }
-          const riskFactorText = merged.riskFactorItems?.length > 0
-            ? merged.riskFactorItems.map(flag => flag.label).join(', ')
-            : '확인된 위험 요인 없음';
-          text += `    분석 정리:\n`;
-          text += `      ${(merged.narrative || '-').split('\n').join('\n      ')}\n`;
-          text += `      업무에 포함된 위험 요인: ${riskFactorText}\n`;
-          if (merged.riskFactorSentence) {
-            text += `\n      **종합평가** ${merged.riskFactorSentence}\n`;
-          }
-        });
-      });
-    }
-  }
-
-  if (activeModules.includes('elbow')) {
-    const calc = getModule('elbow')?.computeCalc?.({ shared, module: modules.elbow || {} });
-    text += '\n<팔꿈치(주관절)>\n';
-    if (calc?.noEvaluableJobs) {
-      text += `${NO_EVALUABLE_JOBS_NOTE}\n`;
-    } else {
-      if (calc?.missingCommonFields?.length) {
-        text += `- 공통 시간적 선후관계 누락: ${calc.missingCommonFields.join(', ')}\n`;
-      }
-      if (calc?.temporalFlagItems?.length > 0) {
-        text += `- 공통 시간적 선후관계: ${calc.temporalFlagItems.map(flag => flag.label).join(', ')}\n`;
-      }
-      (calc?.jobSummaries || []).forEach(jobSummary => {
-        text += `- ${jobSummary.jobName || '-'}\n`;
-        const elbowGroups = groupElbowSummaries(jobSummary.diagnosisSummaries || []);
-        elbowGroups.forEach(group => {
-          const merged = mergeElbowGroups(group.summaries);
-          const diagList = group.summaries
-            .map(s => {
-              const d = s.diagnosis || {};
-              return `${d.code || ''} ${d.name || ''}${d.side ? ` (${getSideText(d.side)})` : ''}`.trim();
-            })
-            .join(' / ');
-          const bkLabel = group.bkType ? ELBOW_BK_LABELS[group.bkType] || group.bkType : null;
-          const header = bkLabel ? `[${bkLabel}] ${diagList}` : diagList;
-          text += `  - ${header}\n`;
-          if (merged.missingFields?.length > 0) {
-            text += `    입력 누락: ${merged.missingFields.join(', ')}\n`;
-          }
-          const riskFactorText = merged.riskFactorItems?.length > 0
-            ? merged.riskFactorItems.map(flag => flag.label).join(', ')
-            : '확인된 위험 요인 없음';
-          text += `    분석 정리:\n`;
-          text += `      ${(merged.narrative || '-').split('\n').join('\n      ')}\n`;
-          text += `      업무에 포함된 위험 요인: ${riskFactorText}\n`;
-          if (merged.riskFactorSentence) {
-            text += `\n      **종합평가** ${merged.riskFactorSentence}\n`;
-          }
-        });
-      });
-    }
-  }
-
-  if (activeModules.includes('cervical')) {
-    const cervicalManifest = getModule('cervical');
-    const calc = cervicalManifest?.computeCalc?.({ shared, module: modules.cervical || {} });
-    text += cervicalManifest?.narrative?.render('emrSection', calc, {}) ?? '';
-  }
-
-  if (activeModules.includes('spine')) {
-    const spineManifest = getModule('spine');
-    const calc = spineManifest?.computeCalc?.({ shared, module: modules.spine || {} });
-    text += spineManifest?.narrative?.render('emrSection', calc, {}) ?? '';
-  }
-
+  text += buildModuleBlocks('emrSection', shared, modules, activeModules);
   return text;
 }
 
@@ -146,94 +41,7 @@ function buildExposureSummary(shared, modules, activeModules) {
     text += '\n[부위별 신체부담 평가]\n';
   }
 
-  if (activeModules.includes('knee')) {
-    const kneeManifest = getModule('knee');
-    const calc = kneeManifest?.computeCalc?.({ shared, module: modules.knee || {} });
-    text += kneeManifest?.narrative?.render('emrSummary', calc, {}) ?? '';
-  }
-
-  if (activeModules.includes('shoulder')) {
-    const shoulderManifest = getModule('shoulder');
-    const calc = shoulderManifest?.computeCalc?.({ shared, module: modules.shoulder || {} });
-    text += shoulderManifest?.narrative?.render('emrSummary', calc, {}) ?? '';
-  }
-
-  if (activeModules.includes('wrist')) {
-    const calc = getModule('wrist')?.computeCalc?.({ shared, module: modules.wrist || {} });
-    text += '\n<손목/손가락>\n';
-    if (calc?.noEvaluableJobs) {
-      text += `${NO_EVALUABLE_JOBS_NOTE}\n`;
-    } else {
-      (calc?.jobSummaries || []).forEach(jobSummary => {
-        const wristGroups = groupWristSummaries(jobSummary.diagnosisSummaries || []);
-        if (wristGroups.length === 0) return;
-        text += `\n[${jobSummary.jobName || '직업 미입력'}]\n`;
-        wristGroups.forEach(group => {
-          const merged = mergeWristGroups(group.summaries);
-          const diagList = group.summaries
-            .map(s => {
-              const d = s.diagnosis || {};
-              return `${d.code || ''} ${d.name || ''}${d.side ? ` (${getSideText(d.side)})` : ''}`.trim();
-            })
-            .join(' / ');
-          const bkLabel = group.bkType ? WRIST_BK_LABELS[group.bkType] || group.bkType : null;
-          const header = bkLabel ? `[${bkLabel}] ${diagList}` : diagList;
-          text += `  - ${header}\n`;
-          if (merged.missingFields?.length > 0) {
-            text += `    입력 누락: ${merged.missingFields.join(', ')}\n`;
-          }
-          if (merged.riskFactorSentence) {
-            text += `    **종합평가** ${merged.riskFactorSentence}\n`;
-          }
-        });
-      });
-    }
-  }
-
-  if (activeModules.includes('elbow')) {
-    const calc = getModule('elbow')?.computeCalc?.({ shared, module: modules.elbow || {} });
-    text += '\n<팔꿈치(주관절)>\n';
-    if (calc?.noEvaluableJobs) {
-      text += `${NO_EVALUABLE_JOBS_NOTE}\n`;
-    } else {
-      (calc?.jobSummaries || []).forEach(jobSummary => {
-        const elbowGroups = groupElbowSummaries(jobSummary.diagnosisSummaries || []);
-        if (elbowGroups.length === 0) return;
-        text += `\n[${jobSummary.jobName || '직업 미입력'}]\n`;
-        elbowGroups.forEach(group => {
-          const merged = mergeElbowGroups(group.summaries);
-          const diagList = group.summaries
-            .map(s => {
-              const d = s.diagnosis || {};
-              return `${d.code || ''} ${d.name || ''}${d.side ? ` (${getSideText(d.side)})` : ''}`.trim();
-            })
-            .join(' / ');
-          const bkLabel = group.bkType ? ELBOW_BK_LABELS[group.bkType] || group.bkType : null;
-          const header = bkLabel ? `[${bkLabel}] ${diagList}` : diagList;
-          text += `  - ${header}\n`;
-          if (merged.missingFields?.length > 0) {
-            text += `    입력 누락: ${merged.missingFields.join(', ')}\n`;
-          }
-          if (merged.riskFactorSentence) {
-            text += `    **종합평가** ${merged.riskFactorSentence}\n`;
-          }
-        });
-      });
-    }
-  }
-
-  if (activeModules.includes('cervical')) {
-    const cervicalManifest = getModule('cervical');
-    const calc = cervicalManifest?.computeCalc?.({ shared, module: modules.cervical || {} });
-    text += cervicalManifest?.narrative?.render('emrSummary', calc, {}) ?? '';
-  }
-
-  if (activeModules.includes('spine')) {
-    const spineManifest = getModule('spine');
-    const calc = spineManifest?.computeCalc?.({ shared, module: modules.spine || {} });
-    text += spineManifest?.narrative?.render('emrSummary', calc, {}) ?? '';
-  }
-
+  text += buildModuleBlocks('emrSummary', shared, modules, activeModules);
   return text;
 }
 
