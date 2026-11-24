@@ -278,19 +278,26 @@ export function PresetManageModal({ jobId, patient, presets, editingPreset = nul
             <div key={index} className="preset-task-card">
               <div className="preset-task-title">{task.name}</div>
               <div className="preset-task-meta">
-                {task.posture && <span className="preset-task-chip">{task.posture}</span>}
-                {task.weight !== undefined && task.weight !== null && (
-                  <span className="preset-task-chip">{`${task.weight}kg`}</span>
+                {/* \uCE69 \uBB38\uAD6C\uB294 \uBAA8\uB4C8\uC774 \uC8FC\uACE0(presetConfig taskList \uD544\uB4DC\uC758 chips \u2014 \uACBD\uCD94, FX-3), \uC5C6\uC73C\uBA74 \uCC99\uCD94 \uC791\uC5C5 \uCE69\uC744 \uADF8\uB9B0\uB2E4. */}
+                {taskListField.chips ? taskListField.chips(task).map((chip, chipIndex) => (
+                  <span key={chipIndex} className="preset-task-chip">{chip}</span>
+                )) : (
+                  <>
+                    {task.posture && <span className="preset-task-chip">{task.posture}</span>}
+                    {task.weight !== undefined && task.weight !== null && (
+                      <span className="preset-task-chip">{`${task.weight}kg`}</span>
+                    )}
+                    {task.frequency !== undefined && task.frequency !== null && (
+                      <span className="preset-task-chip">{`${task.frequency}\uD68C`}</span>
+                    )}
+                    {task.timeValue ? (
+                      <span className="preset-task-chip">{`${task.timeValue}${task.timeUnit || ''}`}</span>
+                    ) : null}
+                    {task.correctionFactor ? (
+                      <span className="preset-task-chip">{`\uBCF4\uC815 ${task.correctionFactor}`}</span>
+                    ) : null}
+                  </>
                 )}
-                {task.frequency !== undefined && task.frequency !== null && (
-                  <span className="preset-task-chip">{`${task.frequency}\uD68C`}</span>
-                )}
-                {task.timeValue ? (
-                  <span className="preset-task-chip">{`${task.timeValue}${task.timeUnit || ''}`}</span>
-                ) : null}
-                {task.correctionFactor ? (
-                  <span className="preset-task-chip">{`\uBCF4\uC815 ${task.correctionFactor}`}</span>
-                ) : null}
               </div>
             </div>
           ))}

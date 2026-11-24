@@ -3,7 +3,8 @@
 // 특성화 테스트(P2-48, Phase 2 C5·C6) — 프리셋 저장 창이 지금 그리는 미리보기와 저장 값을 고정한다.
 // 뒤 PR(P2-50)이 `presetConfig.fields: 'tasks'`를 `taskList` 필드로 바꾸고 죽은 미리보기 함수를
 // 지울 때 화면이 그대로인지 이 테스트로 확인한다. 이 테스트는 "지금 어떻게 보이는가"를 적을 뿐
-// 그것이 옳은지는 판단하지 않는다 — 경추 프리셋이 작업 이름만 보이는 것은 결함 후보(계획 결함 후보 1).
+// 그것이 옳은지는 판단하지 않는다. 경추 프리셋이 작업 이름만 보이던 결함 후보 1은 FX-3(Phase 2 C7-a)에서 고쳤다 —
+// 경추 매니페스트가 taskList 필드의 chips로 노출 유형·하중·시간 칩을 준다(그 테스트의 기대값을 의도적으로 갱신).
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 
@@ -79,7 +80,7 @@ const SPINE_TASKS = [
 
 const CERVICAL_TASKS = [
   {
-    id: 'c1', sharedJobId: JOB_ID, name: '모니터 작업', exposure_types: ['forced_neck_posture'],
+    id: 'c1', sharedJobId: JOB_ID, name: '모니터 작업', exposure_types: ['awkward_static_neck_load'],
     load_weight_kg: '10', carry_hours_per_shift: '1', forced_neck_posture: 'yes',
     neck_nonneutral_hours_per_day: '3', combined_flexion_rotation_posture: 'no', precision_work: 'yes', notes: '메모',
   },
@@ -148,7 +149,7 @@ describe('PresetManageModal — 미리보기(특성화)', () => {
     ]);
   });
 
-  it('tasks형(cervical): 지금은 작업 이름만 보이고 칩이 없다(spine 필드만 그리기 때문)', () => {
+  it('tasks형(cervical): 작업 이름과 노출 유형·하중·운반·비중립 시간 칩(FX-3 — 모듈의 chips)', () => {
     const { container } = renderModal({
       patient: makePatient(['cervical'], { cervical: { tasks: CERVICAL_TASKS } }),
     });
@@ -158,7 +159,7 @@ describe('PresetManageModal — 미리보기(특성화)', () => {
         hasPreview: true,
         source: null,
         rows: [],
-        tasks: [{ title: '모니터 작업', chips: [] }],
+        tasks: [{ title: '모니터 작업', chips: ['장시간 비중립·정적 목 부하', '10kg', '운반 1h', '비중립 3h'] }],
       },
     ]);
   });
@@ -245,7 +246,7 @@ describe('PresetManageModal — 저장 값(특성화)', () => {
           cervical: {
             tasks: [
               {
-                name: '모니터 작업', exposure_types: ['forced_neck_posture'], load_weight_kg: '10',
+                name: '모니터 작업', exposure_types: ['awkward_static_neck_load'], load_weight_kg: '10',
                 carry_hours_per_shift: '1', forced_neck_posture: 'yes', neck_nonneutral_hours_per_day: '3',
                 combined_flexion_rotation_posture: 'no', precision_work: 'yes', notes: '메모',
               },
