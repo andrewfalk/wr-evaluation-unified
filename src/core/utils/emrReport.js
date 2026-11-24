@@ -2,6 +2,7 @@
 // 옮겨온 것으로, xlsx/jszip 의존성이 없어 미리보기 화면(AssessmentStep)이 byte 계산을
 // 위해 가볍게 import할 수 있다.
 
+import { classifyBk2117Interpretation } from '@wr/analytics-core/modules/shoulder/index';
 import { getModule } from '../moduleRegistry';
 import { getSideText } from '../i18n/sideLabels';
 import { groupSummariesByBkType as groupElbowSummaries, mergeBkGroupSummaries as mergeElbowGroups } from '../../modules/elbow/utils/calculations';
@@ -60,17 +61,13 @@ function buildExposureSection(shared, modules, activeModules) {
         const pct = total.totalHours > 0 ? ` / ${(total.ratio * 100).toFixed(0)}%` : '';
         text += `- ${total.label}: ${total.totalHours > 0 ? `${total.totalHours.toFixed(1)}시간` : '-'} (기준 ${total.limit.toLocaleString()}시간${pct}${total.exceeded ? ' [초과]' : ''})\n`;
       });
-      const exceeded = shoulderTotals.filter(t => t.exceeded);
-      if (exceeded.length > 0) {
-        text += `\n** ${exceeded.map(t => t.label).join(', ')} 기준을 초과하여 누적 신체부담은 충분함.\n`;
+      const { kind, exceededLabels } = classifyBk2117Interpretation(shoulderTotals);
+      if (kind === 'exceeded') {
+        text += `\n** ${exceededLabels.join(', ')} 기준을 초과하여 누적 신체부담은 충분함.\n`;
+      } else if (kind === 'combinedSufficient') {
+        text += `\n** 개별 기준 초과 항목은 없으나, 복합 노출을 고려하여 누적 신체부담은 충분함.\n`;
       } else {
-        const over75 = shoulderTotals.filter(t => t.ratio >= 0.75);
-        const over50 = shoulderTotals.filter(t => t.ratio >= 0.50);
-        if (over50.length >= 3 || over75.length >= 2) {
-          text += `\n** 개별 기준 초과 항목은 없으나, 복합 노출을 고려하여 누적 신체부담은 충분함.\n`;
-        } else {
-          text += `\n** 노출 기준치에 미달하여 누적 신체부담 불충분함.\n`;
-        }
+        text += `\n** 노출 기준치에 미달하여 누적 신체부담 불충분함.\n`;
       }
     }
   }
@@ -202,17 +199,13 @@ function buildExposureSummary(shared, modules, activeModules) {
         const pct = total.totalHours > 0 ? ` / ${(total.ratio * 100).toFixed(0)}%` : '';
         text += `- ${total.label}: ${total.totalHours > 0 ? `${total.totalHours.toFixed(1)}시간` : '-'} (기준 ${total.limit.toLocaleString()}시간${pct}${total.exceeded ? ' [초과]' : ''})\n`;
       });
-      const exceeded = shoulderTotals.filter(t => t.exceeded);
-      if (exceeded.length > 0) {
-        text += `** ${exceeded.map(t => t.label).join(', ')} 기준을 초과하여 누적 신체부담은 충분함.\n`;
+      const { kind, exceededLabels } = classifyBk2117Interpretation(shoulderTotals);
+      if (kind === 'exceeded') {
+        text += `** ${exceededLabels.join(', ')} 기준을 초과하여 누적 신체부담은 충분함.\n`;
+      } else if (kind === 'combinedSufficient') {
+        text += `** 개별 기준 초과 항목은 없으나, 복합 노출을 고려하여 누적 신체부담은 충분함.\n`;
       } else {
-        const over75 = shoulderTotals.filter(t => t.ratio >= 0.75);
-        const over50 = shoulderTotals.filter(t => t.ratio >= 0.50);
-        if (over50.length >= 3 || over75.length >= 2) {
-          text += `** 개별 기준 초과 항목은 없으나, 복합 노출을 고려하여 누적 신체부담은 충분함.\n`;
-        } else {
-          text += `** 노출 기준치에 미달하여 누적 신체부담 불충분함.\n`;
-        }
+        text += `** 노출 기준치에 미달하여 누적 신체부담 불충분함.\n`;
       }
     }
   }
