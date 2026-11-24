@@ -15,6 +15,12 @@ import tseslint from 'typescript-eslint';
 //   - Fix frozen violations when you touch the file anyway; no mass-fix PRs.
 const LINTED_FILES = ['**/*.{js,jsx,mjs,cjs}'];
 
+// Phase 2 C7-a(P2-64): src/core/**에서 평가 모듈 폴더(src/modules/<id>/…)를 가리키는 import — 아래 no-restricted-imports 블록 두 곳이 쓴다.
+const CORE_TO_MODULES_PATTERN = {
+  group: ['**/modules/*/**', '!@wr/**'],
+  message: '공용 코드(src/core)는 평가 모듈 폴더를 import하지 않는다 — 레지스트리(getModule)와 매니페스트(narrative·batchExport 등)를 쓴다(P2-64).',
+};
+
 // Client TypeScript (REFACTORING_ROADMAP Phase 2 P2-00): new client code is written in .ts/.tsx, and
 // files moved from .js/.jsx must not drop out of the react-hooks rules or the no-restricted-* rules that
 // later Phase 2 PRs add. Scope is src/ only — shared/ and packages/ TS are type-checked by tsc but not
@@ -139,6 +145,35 @@ export default [
           message: '환자 레코드 touch는 환자 상태 전이에서만 — setPatients(patientTx.…)를 쓴다(P2-39).',
         }],
       }],
+    },
+  },
+  // REFACTORING_ROADMAP Phase 2 C7-a(P2-64): 공용 코드(src/core/**)는 평가 모듈 폴더(src/modules/<id>/…)를 import하지 않는다 —
+  // 모듈이 가진 것은 레지스트리(getModule·getAllModules)와 매니페스트(narrative·batchExport 등)로 쓴다. 편집 중 경고용이고,
+  // 정확한 검사는 구조 래칫(scripts/arch-metrics.mjs coreToModulesImports — 경로를 해석해 센다)이다.
+  // 같은 no-restricted-imports를 위 블록과 겹치는 파일에 두면 뒤 블록의 옵션이 앞 것을 대체하므로, src/core/**에는
+  // touch 금지 패턴을 함께 넣고(아래 첫 블록), 위 블록이 예외로 둔 환자 상태 계층에는 모듈 금지만 건다(둘째 블록).
+  // './modules/registry'·'../modules/manifest'(src/core/modules)와 '@wr/analytics-core/modules/…'는 걸리지 않는다.
+  {
+    files: ['src/core/**/*.{js,jsx,ts,tsx}'],
+    ignores: [
+      'src/core/state/**', 'src/core/services/patientRecords.js',
+      'src/**/__tests__/**', 'src/**/*.test.{js,jsx,ts,tsx}', 'src/**/*.d.ts',
+    ],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [{
+          group: ['**/patientRecords', '**/patientRecords.js'],
+          importNames: ['touchPatientRecord'],
+          message: '환자 레코드 touch는 환자 상태 전이에서만 — setPatients(patientTx.…)를 쓴다(P2-39).',
+        }, CORE_TO_MODULES_PATTERN],
+      }],
+    },
+  },
+  {
+    files: ['src/core/state/**/*.{js,jsx,ts,tsx}', 'src/core/services/patientRecords.js'],
+    ignores: ['src/**/__tests__/**', 'src/**/*.test.{js,jsx,ts,tsx}', 'src/**/*.d.ts'],
+    rules: {
+      'no-restricted-imports': ['error', { patterns: [CORE_TO_MODULES_PATTERN] }],
     },
   },
   {

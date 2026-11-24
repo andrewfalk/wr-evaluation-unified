@@ -52,7 +52,7 @@ export const SHARED_INVENTORY: CoverageInventory = {
   // side==='both'를 우/좌로 explode하는 데 직접 쓴다.
   'shared.diagnoses[].side': { included: true },
 
-  // --- knee/shoulder 전용 진단 확장(createKneeDiagnosis/createShoulderDiagnosis) ---
+  // --- knee/shoulder 전용 진단 필드 — 종합소견 화면(AssessmentTab.jsx·AssessmentIndividualFields.jsx)이 상병에 채운다 ---
   // knee.diagnosisSide.klGrade dependsOn.
   'shared.diagnoses[].klgRight': { included: true },
   'shared.diagnoses[].klgLeft': { included: true },

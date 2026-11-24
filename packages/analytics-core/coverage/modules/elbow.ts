@@ -6,9 +6,10 @@ import type { CoverageInventory } from '../types';
 const DEFERRED = 'PR0-B3 전체 카탈로그 확장 대상 — 현재 대표 변수(elbow.assessment.burdenGradeMax)의 dependsOn에는 없음';
 const TECHNICAL = '기술 ID/UI 상태 — 계산값이 아니라 참조·라우팅·워크플로용';
 const FREE_TEXT = '자유 서술 텍스트 — 계산에 관여하지 않음';
-// FIELD_LABELS(derived.ts)에 라벨은 있지만 실제 flag 계산 로직(computeDiagnosisFlags)
-// 어디에서도 값을 읽지 않는 것을 grep으로 확인(2026-09-06) — burdenGrade에 영향 없음.
-const LABEL_ONLY_UNUSED = '입력 폼과 라벨 맵(FIELD_LABELS)에는 있지만 실제 계산 로직에서 값을 읽지 않음 — PR0-B3에서 재검토 필요';
+// 옛 필드 — 평가 화면(src/modules/elbow/components)에서 더 입력하지 않고, FIELD_LABELS(derived.ts)에 라벨만 남아
+// 실제 flag 계산 로직(computeDiagnosisFlags) 어디에서도 값을 읽지 않는다(grep 확인 2026-09-06, 화면 재확인 2026-11-24)
+// — burdenGrade에 영향 없음. 일괄 가져오기는 옛 파일을 읽을 수 있게 키만 남긴다(Phase 2 C7-a 사용자 결정).
+const LABEL_ONLY_UNUSED = '옛 필드 — 화면에서 더 입력하지 않고 라벨 맵(FIELD_LABELS)에만 남음, 계산 로직에서 값을 읽지 않음';
 // grain 단순화 개정(PR0-B4) — job_diagnosis grain 자체가 소스코드까지 완전 삭제되면서
 // 이 필드를 읽던 유일한 소비처(inferredLinkFlags)도 함께 사라졌다. burdenGradeMax(case
 // grain, 살아남음) dependsOn에는 원래도 없었다.

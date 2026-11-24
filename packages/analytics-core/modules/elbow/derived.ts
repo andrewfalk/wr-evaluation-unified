@@ -1,6 +1,6 @@
 // src/modules/elbow/utils/calculations.js에서 계산 함수를 이동(로직 무변경). narrative
 // 생성(generateNarrative 등)도 계산 결과의 일부라 함께 이관한다(§1-3 사용자 확정 범위).
-// UI 라벨 매핑 함수(getSideText/getStatusText/getReasonText)는 이동하지 않음 — 옛 파일에 잔류.
+// UI 표시 문구(측 표시·상병 상태·사유)는 core에 있다(src/core/i18n/sideLabels.ts·src/core/assessment/vocabulary.ts, Phase 2 C6).
 
 import { calculateAge, calculateBMI } from '../../common';
 import { hasNoEvaluableJobs, isJobIdExcluded } from '../../jobScope';
