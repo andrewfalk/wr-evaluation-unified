@@ -103,6 +103,26 @@ export interface BatchExportConfig {
   rowTasks?: (moduleData: unknown) => unknown[];
 }
 
+/** 서술 변형 — 소견서(reportGenerator) · EMR 4번 칸 b6(전문) · EMR 6번 칸 b8(요약). */
+export const NARRATIVE_VARIANTS = ['report', 'emrSection', 'emrSummary'] as const;
+export type NarrativeVariant = (typeof NARRATIVE_VARIANTS)[number];
+
+/** 서술에 넘기는 공용 값. jobNumberingByJobId = 미포함 직력이 있을 때만 있는 jobId → 직업력 번호 맵(없으면 null). */
+export interface NarrativeContext {
+  jobNumberingByJobId?: Record<string, number> | null;
+}
+
+/**
+ * 모듈 서술(선택, P2-60 — Phase 2 C7-a). 소견서·EMR 문구의 모듈 블록을 만든다. calc는 computeCalc({ shared, module })의 결과다.
+ * emrOrder = EMR b6·b8의 모듈 순서(등록 순서와 무관, 작을수록 앞). phrases = 항목 → 변형별 문구(문구 차이 표의 원본).
+ * 서술 코드는 레지스트리·reportGenerator·emrReport·exportService·xlsx를 import하지 않는다.
+ */
+export interface ModuleNarrative {
+  emrOrder: number;
+  render(variant: NarrativeVariant, calc: unknown, context: NarrativeContext): string;
+  phrases?: Readonly<Record<string, Readonly<Partial<Record<NarrativeVariant, string>>>>>;
+}
+
 export interface ModuleManifest {
   id: string;
   name: string;
@@ -118,12 +138,15 @@ export interface ModuleManifest {
   videoMappingConfig?: VideoMappingConfig;
   devFixtures?: ModuleDevFixtures;
   batchExport?: BatchExportConfig;
+  narrative?: ModuleNarrative;
 }
 
 export const REQUIRED_MANIFEST_KEYS = [
   'id', 'name', 'icon', 'description', 'EvaluationComponent', 'createModuleData', 'computeCalc', 'isComplete', 'tabs',
 ] as const;
-export const OPTIONAL_MANIFEST_KEYS = ['presetConfig', 'batchImportConfig', 'videoMappingConfig', 'devFixtures', 'batchExport'] as const;
+export const OPTIONAL_MANIFEST_KEYS = [
+  'presetConfig', 'batchImportConfig', 'videoMappingConfig', 'devFixtures', 'batchExport', 'narrative',
+] as const;
 export const MANIFEST_KEYS: readonly string[] = [...REQUIRED_MANIFEST_KEYS, ...OPTIONAL_MANIFEST_KEYS];
 
 const PRESET_CONFIG_KEYS: readonly string[] = ['label', 'fields', 'extractFromModule', 'applyToModule'];
@@ -133,6 +156,7 @@ const VIDEO_MAPPING_CONFIG_KEYS: readonly string[] = ['scope', 'featureKeys', 'c
 const DEV_FIXTURE_KEYS: readonly string[] = ['createJobEvaluation', 'createDiagnosisEntry'];
 const BATCH_EXPORT_KEYS: readonly string[] = ['order', 'columns', 'rowTasks'];
 const BATCH_COLUMN_KEYS: readonly string[] = ['header', 'cell'];
+const NARRATIVE_KEYS: readonly string[] = ['emrOrder', 'render', 'phrases'];
 
 type Fields = Record<string, unknown>;
 
@@ -269,6 +293,34 @@ function checkBatchExport(config: unknown, problems: string[]): void {
   if (config.rowTasks !== undefined && typeof config.rowTasks !== 'function') problems.push('batchExport.rowTasks는 함수여야 합니다');
 }
 
+function checkNarrative(narrative: unknown, problems: string[]): void {
+  if (!isRecord(narrative)) {
+    problems.push('narrative는 객체여야 합니다');
+    return;
+  }
+  for (const key of unknownKeys(narrative, NARRATIVE_KEYS)) problems.push(`narrative에 모르는 키 '${key}'`);
+  if (typeof narrative.emrOrder !== 'number' || !Number.isFinite(narrative.emrOrder)) {
+    problems.push('narrative.emrOrder는 유한한 숫자여야 합니다');
+  }
+  if (typeof narrative.render !== 'function') problems.push('narrative.render는 함수여야 합니다');
+  if (narrative.phrases === undefined) return;
+  if (!isRecord(narrative.phrases)) {
+    problems.push('narrative.phrases는 객체여야 합니다');
+    return;
+  }
+  for (const [item, byVariant] of Object.entries(narrative.phrases)) {
+    const where = `narrative.phrases.${item}`;
+    if (!isRecord(byVariant)) {
+      problems.push(`${where}는 객체여야 합니다`);
+      continue;
+    }
+    for (const key of unknownKeys(byVariant, NARRATIVE_VARIANTS)) problems.push(`${where}에 모르는 변형 '${key}'`);
+    for (const [variant, phrase] of Object.entries(byVariant)) {
+      if (typeof phrase !== 'string') problems.push(`${where}.${variant}는 문자열이어야 합니다`);
+    }
+  }
+}
+
 /**
  * 매니페스트의 문제 목록(없으면 빈 배열). 순수 함수 — 등록 여부는 레지스트리(registry.ts)가 정한다.
  * 문장 앞에 모듈 id를 붙이지 않는다(레지스트리가 붙인다).
@@ -308,5 +360,6 @@ export function validateManifest(manifest: unknown): string[] {
   if (manifest.videoMappingConfig !== undefined) checkVideoMappingConfig(manifest.videoMappingConfig, problems);
   if (manifest.devFixtures !== undefined) checkDevFixtures(manifest.devFixtures, problems);
   if (manifest.batchExport !== undefined) checkBatchExport(manifest.batchExport, problems);
+  if (manifest.narrative !== undefined) checkNarrative(manifest.narrative, problems);
   return problems;
 }

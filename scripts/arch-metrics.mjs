@@ -18,7 +18,7 @@
  *   windowElectronLines / windowElectronFiles — `window.electron` outside the bridge adapter
  *       (src/platform/bridge.ts, P2-10). Target 0 at P2-15.
  *   coreToModulesImports — import/export-from/import() lines in src/core/** whose specifier
- *       resolves into src/modules/. Target 0 at P2-64.
+ *       resolves into src/modules/. Target 0 at P2-63 (C7-a: the report/EMR narrative moves into the modules).
  *   rawFetch — `fetch(` calls outside the request layer (src/core/services/httpClient.js,
  *       src/core/api/**). Target 0 at P2-17.
  *   webStorageFiles — product files touching localStorage/sessionStorage outside the storage

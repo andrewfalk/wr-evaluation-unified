@@ -9,7 +9,6 @@ import { BK_TYPE_LABELS as ELBOW_BK_LABELS } from '../../modules/elbow/utils/dat
 import { groupSummariesByBkType as groupWristSummaries, mergeBkGroupSummaries as mergeWristGroups } from '../../modules/wrist/utils/calculations';
 import { BK_TYPE_LABELS as WRIST_BK_LABELS } from '../../modules/wrist/utils/data';
 import { buildSpineSectionText, buildSpineSectionSummary } from '../../modules/spine/utils/sectionText';
-import { AUX_LABELS } from '../../modules/knee/utils/data';
 import { calculateAge, calculateBMI } from './common';
 import { selectModuleNote } from './moduleNotes';
 import { buildJobHistoryLines, NO_EVALUABLE_JOBS_NOTE } from './jobHistory';
@@ -44,39 +43,9 @@ function buildExposureSection(shared, modules, activeModules) {
   }
 
   if (activeModules.includes('knee')) {
-    const calc = getModule('knee')?.computeCalc?.({ shared, module: modules.knee || {} });
-    const avgRelatedness = calc?.relatedness
-      ? ((Number(calc.relatedness.min) + Number(calc.relatedness.max)) / 2).toFixed(1)
-      : null;
-
-    text += '\n<무릎(슬관절)>\n';
-    if (calc?.noEvaluableJobs) {
-      text += `${NO_EVALUABLE_JOBS_NOTE}\n`;
-    } else {
-      (calc?.jobBurdens || []).filter(job => job.jobName).forEach(job => {
-        const checked = Object.entries(AUX_LABELS).filter(([key]) => job[key]).map(([, label]) => label);
-        text += `직종: ${job.jobName || '-'}\n`;
-        text += `일 중량물 취급량: ${job.weight || '-'}kg\n`;
-        text += `일 쪼그려 앉기 시간: ${job.squatting || '-'}분\n`;
-        if (checked.length > 0) text += `보조변수: ${checked.join(', ')}\n`;
-        text += `무릎 부담 정도: ${job.burden?.level || '-'}\n\n`;
-      });
-      if (calc?.relatedness) {
-        text += `참고) 신체부담 정도는 다음의 4단계로 구분함.\n`;
-        text += `1) 고도: 퇴행성 변화를 유발 또는 가속하는 것이 확실함(definite)\n`;
-        text += `2) 중등도상: 퇴행성 변화를 유발 또는 가속하기에 충분함(probable)\n`;
-        text += `3) 중등도하: 퇴행성 변화를 유발 또는 가속할 가능성이 있음(possible)\n`;
-        text += `4) 경도: 퇴행성 변화를 유발 또는 가속하기 어려움(no related)\n`;
-        text += `\n[신체부담기여도] ${calc.relatedness.min}% ~ ${calc.relatedness.max}% (평균 ${avgRelatedness}%)\n`;
-      }
-      if (calc?.cumulativeBurden) {
-        text += `[누적신체부담] ${calc.cumulativeBurden}\n`;
-      }
-      text += `\n**신체부담정도, 신체부담 기여도, 누적 신체부담에 관한 자세한 사항은\n`;
-      text += `<근골격계 질환의 업무관련성 특별진찰 표준화를 위한 모델 개발\n`;
-      text += `- 무릎 관절염을 대상으로 -, 대한직업환경의학회, 2025>\n`;
-      text += `보고서를 참조하기 바람.\n`;
-    }
+    const kneeManifest = getModule('knee');
+    const calc = kneeManifest?.computeCalc?.({ shared, module: modules.knee || {} });
+    text += kneeManifest?.narrative?.render('emrSection', calc, {}) ?? '';
   }
 
   if (activeModules.includes('shoulder')) {
@@ -217,25 +186,9 @@ function buildExposureSummary(shared, modules, activeModules) {
   }
 
   if (activeModules.includes('knee')) {
-    const calc = getModule('knee')?.computeCalc?.({ shared, module: modules.knee || {} });
-    const avgRelatedness = calc?.relatedness
-      ? ((Number(calc.relatedness.min) + Number(calc.relatedness.max)) / 2).toFixed(1)
-      : null;
-
-    text += '\n<무릎(슬관절)>\n';
-    if (calc?.noEvaluableJobs) {
-      text += `${NO_EVALUABLE_JOBS_NOTE}\n`;
-    } else {
-      (calc?.jobBurdens || []).filter(job => job.jobName).forEach(job => {
-        text += `- ${job.jobName || '-'}: 중량물 ${job.weight || '-'}kg / 쪼그려앉기 ${job.squatting || '-'}분 / 부담 정도 ${job.burden?.level || '-'}\n`;
-      });
-      if (calc?.relatedness) {
-        text += `[신체부담기여도] ${calc.relatedness.min}% ~ ${calc.relatedness.max}% (평균 ${avgRelatedness}%)\n`;
-      }
-      if (calc?.cumulativeBurden) {
-        text += `[누적신체부담] ${calc.cumulativeBurden}\n`;
-      }
-    }
+    const kneeManifest = getModule('knee');
+    const calc = kneeManifest?.computeCalc?.({ shared, module: modules.knee || {} });
+    text += kneeManifest?.narrative?.render('emrSummary', calc, {}) ?? '';
   }
 
   if (activeModules.includes('shoulder')) {
