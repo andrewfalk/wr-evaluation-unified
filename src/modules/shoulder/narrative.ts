@@ -1,8 +1,10 @@
 // 어깨 서술 — 소견서 블록과 [직력별 기여] · EMR b6 블록 · EMR b8 요약(P2-61b, Phase 2 C7-a).
 // src/core/utils/reportGenerator.js·emrReport.js에서 문구를 바꾸지 않고 그대로 옮겼다(반올림하지 않은 하루 시간,
 // 값이 없을 때의 `?.` 유무까지). 해석 판정은 analytics-core의 classifyBk2117Interpretation(P2-61a)이다.
+// 변형마다 달라지는 문구는 SHOULDER_PHRASES(narrative.phrases — 문구 차이 표의 원본, P2-65a)에서 꺼내 쓴다.
 import { classifyBk2117Interpretation } from '@wr/analytics-core/modules/shoulder/index';
-import type { ModuleNarrative, NarrativeContext, NarrativeVariant } from '../../core/modules/manifest';
+import type { ModuleNarrative, NarrativeContext, NarrativePhrases, NarrativeVariant } from '../../core/modules/manifest';
+import { fillPhrase } from '../../core/narrative/phrases';
 import { NO_EVALUABLE_JOBS_NOTE, resolveJobNumber } from '../../core/utils/jobHistory';
 
 /** 노출 항목별 합계(computeShoulderCalc의 totals 원소 중 쓰는 것만). */
@@ -31,17 +33,41 @@ interface ShoulderNarrativeCalc {
 
 type JobNumbering = NarrativeContext['jobNumberingByJobId'];
 
+/** 변형별 문구. 해석 문장 세 가지는 지금 세 변형이 같다({labels} = 기준을 넘은 항목). */
+const SHOULDER_PHRASES = {
+  heading: { report: '\n< 어깨(견관절) >\n', emrSection: '\n<어깨(견관절)>\n', emrSummary: '\n<어깨(견관절)>\n' },
+  /** 해석 문장 앞 */
+  interpretationLead: { report: '\n', emrSection: '\n', emrSummary: '' },
+  interpretationExceeded: {
+    report: '** {labels} 기준을 초과하여 누적 신체부담은 충분함.',
+    emrSection: '** {labels} 기준을 초과하여 누적 신체부담은 충분함.',
+    emrSummary: '** {labels} 기준을 초과하여 누적 신체부담은 충분함.',
+  },
+  interpretationCombined: {
+    report: '** 개별 기준 초과 항목은 없으나, 복합 노출을 고려하여 누적 신체부담은 충분함.',
+    emrSection: '** 개별 기준 초과 항목은 없으나, 복합 노출을 고려하여 누적 신체부담은 충분함.',
+    emrSummary: '** 개별 기준 초과 항목은 없으나, 복합 노출을 고려하여 누적 신체부담은 충분함.',
+  },
+  interpretationInsufficient: {
+    report: '** 노출 기준치에 미달하여 누적 신체부담 불충분함.',
+    emrSection: '** 노출 기준치에 미달하여 누적 신체부담 불충분함.',
+    emrSummary: '** 노출 기준치에 미달하여 누적 신체부담 불충분함.',
+  },
+} as const satisfies NarrativePhrases;
+
+const P = SHOULDER_PHRASES;
+
 // reportGenerator.js getShoulderInterpretation — 소견서의 해석 문장.
 function getShoulderInterpretation(totals: ShoulderTotal[] | undefined): string {
   const { kind, exceededLabels } = classifyBk2117Interpretation(totals);
   if (kind === 'exceeded') {
     const names = exceededLabels.join(', ');
-    return `** ${names} 기준을 초과하여 누적 신체부담은 충분함.`;
+    return fillPhrase(P.interpretationExceeded.report, { labels: names });
   }
   if (kind === 'combinedSufficient') {
-    return `** 개별 기준 초과 항목은 없으나, 복합 노출을 고려하여 누적 신체부담은 충분함.`;
+    return P.interpretationCombined.report;
   }
-  return `** 노출 기준치에 미달하여 누적 신체부담 불충분함.`;
+  return P.interpretationInsufficient.report;
 }
 
 // reportGenerator.js genShoulderBurdenSection — 소견서 블록.
@@ -49,7 +75,7 @@ function getShoulderInterpretation(totals: ShoulderTotal[] | undefined): string 
 // 직력을 뺀 뒤 번호를 다시 매기므로, 맵이 있으면 [직업력] 목록과 같은 번호를 쓴다.
 function genShoulderBurdenSection(calc: ShoulderNarrativeCalc, jobNumbering: JobNumbering = null): string {
   const { totals, jobBurdens } = calc;
-  let text = `\n< 어깨(견관절) >\n`;
+  let text: string = P.heading.report;
   if (calc.noEvaluableJobs) return `${text}${NO_EVALUABLE_JOBS_NOTE}\n`;
   text += `독일의 산재보험 번호 BK2117 장기간의 집중적인 기계적 부하로 인한 어깨 회전근개 병변에 사용하는 어깨 부담 평가 지침을 이용하여 평가하였음.\n\n`;
 
@@ -59,7 +85,7 @@ function genShoulderBurdenSection(calc: ShoulderNarrativeCalc, jobNumbering: Job
     text += `- ${total.label}: ${total.totalHours > 0 ? `${total.totalHours.toFixed(1)}시간` : '-'} (기준 ${total.limit.toLocaleString()}시간${pct ? ` / ${pct}` : ''}${exceeded})\n`;
   });
 
-  text += `\n${getShoulderInterpretation(totals)}\n`;
+  text += `${P.interpretationLead.report}${getShoulderInterpretation(totals)}\n`;
 
   const jobsWithData = (jobBurdens || []).filter(job => job.jobName);
   if (jobsWithData.length > 1) {
@@ -80,7 +106,7 @@ function genShoulderBurdenSection(calc: ShoulderNarrativeCalc, jobNumbering: Job
 // emrReport.js buildExposureSection의 어깨 블록 — EMR 4번 칸(b6).
 function buildShoulderExposureSection(calc: ShoulderNarrativeCalc | undefined): string {
   let text = '';
-  text += '\n<어깨(견관절)>\n';
+  text += P.heading.emrSection;
   if (calc?.noEvaluableJobs) {
     text += `${NO_EVALUABLE_JOBS_NOTE}\n`;
   } else {
@@ -92,11 +118,11 @@ function buildShoulderExposureSection(calc: ShoulderNarrativeCalc | undefined): 
     });
     const { kind, exceededLabels } = classifyBk2117Interpretation(shoulderTotals);
     if (kind === 'exceeded') {
-      text += `\n** ${exceededLabels.join(', ')} 기준을 초과하여 누적 신체부담은 충분함.\n`;
+      text += `${P.interpretationLead.emrSection}${fillPhrase(P.interpretationExceeded.emrSection, { labels: exceededLabels.join(', ') })}\n`;
     } else if (kind === 'combinedSufficient') {
-      text += `\n** 개별 기준 초과 항목은 없으나, 복합 노출을 고려하여 누적 신체부담은 충분함.\n`;
+      text += `${P.interpretationLead.emrSection}${P.interpretationCombined.emrSection}\n`;
     } else {
-      text += `\n** 노출 기준치에 미달하여 누적 신체부담 불충분함.\n`;
+      text += `${P.interpretationLead.emrSection}${P.interpretationInsufficient.emrSection}\n`;
     }
   }
   return text;
@@ -105,7 +131,7 @@ function buildShoulderExposureSection(calc: ShoulderNarrativeCalc | undefined): 
 // emrReport.js buildExposureSummary의 어깨 블록 — EMR 6번 칸(b8) 요약. 50% 이상이거나 초과한 항목만 적는다.
 function buildShoulderExposureSummary(calc: ShoulderNarrativeCalc | undefined): string {
   let text = '';
-  text += '\n<어깨(견관절)>\n';
+  text += P.heading.emrSummary;
   if (calc?.noEvaluableJobs) {
     text += `${NO_EVALUABLE_JOBS_NOTE}\n`;
   } else {
@@ -116,11 +142,11 @@ function buildShoulderExposureSummary(calc: ShoulderNarrativeCalc | undefined): 
     });
     const { kind, exceededLabels } = classifyBk2117Interpretation(shoulderTotals);
     if (kind === 'exceeded') {
-      text += `** ${exceededLabels.join(', ')} 기준을 초과하여 누적 신체부담은 충분함.\n`;
+      text += `${P.interpretationLead.emrSummary}${fillPhrase(P.interpretationExceeded.emrSummary, { labels: exceededLabels.join(', ') })}\n`;
     } else if (kind === 'combinedSufficient') {
-      text += `** 개별 기준 초과 항목은 없으나, 복합 노출을 고려하여 누적 신체부담은 충분함.\n`;
+      text += `${P.interpretationLead.emrSummary}${P.interpretationCombined.emrSummary}\n`;
     } else {
-      text += `** 노출 기준치에 미달하여 누적 신체부담 불충분함.\n`;
+      text += `${P.interpretationLead.emrSummary}${P.interpretationInsufficient.emrSummary}\n`;
     }
   }
   return text;
@@ -134,4 +160,5 @@ export const shoulderNarrative: ModuleNarrative = {
     if (variant === 'emrSection') return buildShoulderExposureSection(shoulderCalc);
     return buildShoulderExposureSummary(shoulderCalc);
   },
+  phrases: SHOULDER_PHRASES,
 };
