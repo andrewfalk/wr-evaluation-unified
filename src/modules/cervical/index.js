@@ -1,4 +1,5 @@
 import { registerModule } from '../../core/moduleRegistry';
+import { cervicalPresetChips } from './presetPreview';
 import { cervicalNarrative } from './narrative';
 import { CervicalEvaluation } from './CervicalEvaluation';
 import { createCervicalModuleData, createCervicalTask, EXPOSURE_TYPE_OPTIONS } from './utils/data';
@@ -42,7 +43,7 @@ registerModule({
   },
   presetConfig: {
     label: '경추 작업목록',
-    fields: [{ key: 'tasks', type: 'taskList' }],
+    fields: [{ key: 'tasks', type: 'taskList', chips: cervicalPresetChips }],
     extractFromModule(moduleData, sharedJobId) {
       const tasks = (moduleData.tasks || []).filter(task => task.sharedJobId === sharedJobId);
       if (!tasks.length) return null;

@@ -40,6 +40,8 @@ export interface PresetTaskListFieldDef {
   key: string;
   type: 'taskList';
   label?: string;
+  /** 작업 카드의 칩 문구(FX-3). 없으면 프리셋 관리 창이 척추 작업 칩(자세·중량·횟수·시간·보정)을 그린다. */
+  chips?: (task: Readonly<Record<string, unknown>>) => string[];
 }
 
 export type PresetFieldDef = PresetValueFieldDef | PresetTaskListFieldDef;
@@ -153,7 +155,7 @@ export const OPTIONAL_MANIFEST_KEYS = [
 export const MANIFEST_KEYS: readonly string[] = [...REQUIRED_MANIFEST_KEYS, ...OPTIONAL_MANIFEST_KEYS];
 
 const PRESET_CONFIG_KEYS: readonly string[] = ['label', 'fields', 'extractFromModule', 'applyToModule'];
-const PRESET_FIELD_KEYS: readonly string[] = ['key', 'label', 'type'];
+const PRESET_FIELD_KEYS: readonly string[] = ['key', 'label', 'type', 'chips'];
 const BATCH_IMPORT_CONFIG_KEYS: readonly string[] = ['columns', 'applyRow'];
 const VIDEO_MAPPING_CONFIG_KEYS: readonly string[] = ['scope', 'featureKeys', 'coerce', 'writeField', 'taskFallbackUnlinked'];
 const DEV_FIXTURE_KEYS: readonly string[] = ['createJobEvaluation', 'createDiagnosisEntry'];
@@ -214,8 +216,10 @@ function checkPresetConfig(config: unknown, problems: string[]): void {
       if (field.type === 'taskList') {
         taskLists += 1;
         if (field.label !== undefined && typeof field.label !== 'string') problems.push(`${where}.label은 문자열이어야 합니다`);
-      } else if (!isNonEmptyString(field.label)) {
-        problems.push(`${where}.label은 빈 문자열이 아닌 문자열이어야 합니다`);
+        if (field.chips !== undefined && typeof field.chips !== 'function') problems.push(`${where}.chips는 함수여야 합니다`);
+      } else {
+        if (!isNonEmptyString(field.label)) problems.push(`${where}.label은 빈 문자열이 아닌 문자열이어야 합니다`);
+        if (field.chips !== undefined) problems.push(`${where}.chips는 taskList 필드에만 둘 수 있습니다`);
       }
     });
     if (taskLists > 1) problems.push('presetConfig.fields의 taskList 필드는 하나만 둘 수 있습니다');

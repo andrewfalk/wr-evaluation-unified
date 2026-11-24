@@ -83,6 +83,14 @@ describe('validateManifest', () => {
     const ok = { label: 'L', fields: [{ key: 'k', label: 'K', type: 'number' }], extractFromModule: () => null, applyToModule: () => ({}) };
     expect(validateManifest(validManifest({ presetConfig: ok }))).toEqual([]);
     expect(validateManifest(validManifest({ presetConfig: { ...ok, fields: [{ key: 'tasks', type: 'taskList' }] } }))).toEqual([]);
+    // FX-3: taskList 필드의 chips(함수)만 허용
+    expect(validateManifest(validManifest({ presetConfig: { ...ok, fields: [{ key: 'tasks', type: 'taskList', chips: () => [] }] } }))).toEqual([]);
+    expect(validateManifest(validManifest({ presetConfig: { ...ok, fields: [{ key: 'tasks', type: 'taskList', chips: 'x' }] } }))).toEqual([
+      'presetConfig.fields[0].chips는 함수여야 합니다',
+    ]);
+    expect(validateManifest(validManifest({ presetConfig: { ...ok, fields: [{ key: 'w', label: 'W', type: 'number', chips: () => [] }] } }))).toEqual([
+      'presetConfig.fields[0].chips는 taskList 필드에만 둘 수 있습니다',
+    ]);
     expect(validateManifest(validManifest({
       presetConfig: { label: '', fields: [{ key: 'k', label: 'K', type: 'date', extra: 1 }], extractFromModule: 1, more: true },
     }))).toEqual([
