@@ -386,6 +386,14 @@ describe('install-caddy-host.ps1 -Uninstall / -Status', () => {
     expect(b).toMatch(/if \(\$appPort -eq \[int\]\$state\.upstreamPort\)/);
   });
 
+  it('Status는 설치된 Caddyfile이 이 버전의 템플릿(설정된 업스트림 기준)과 다르면 경고한다 — FX-7', () => {
+    const b = fnBody('Invoke-Status');
+    expect(b).toMatch(/if \(\$mode -ne 'docker' -and \(Test-Path -LiteralPath \$ConfigDest -PathType Leaf\)\)/);
+    expect(b).toContain('$expected = New-HostCaddyConfig ([int]$state.httpsPort) ([int]$state.httpPort) ([int]$state.upstreamPort) ([string]$state.domain)');
+    expect(b).toMatch(/if \(Test-SameConfigText \(\[System\.IO\.File\]::ReadAllText\(\$ConfigDest\)\) \$expected\) \{ Write-Ok [^}]*\} else \{\s*Write-Warn "\$ConfigDest differs from the template of this version/);
+    expect(b).toContain('Run -Reconfigure to apply the template');
+  });
+
   it('Status는 앱 게시 규칙 위반(비루프백·없음·복수)을 문제로, Docker 조회 불가만 경고로 본다', () => {
     // Codex PR 리뷰 1회차: 비루프백 게시를 감지해도 경고만 내고 Status: OK였다.
     const b = fnBody('Invoke-Status');
@@ -429,6 +437,26 @@ describe('install-caddy-host.ps1 -Cutover / -Rollback / -Reconfigure (PR-3b)', (
     for (const s of ['$svc.PathName -notlike "$ExeDest *"', 'Get-ExistingRootProblem -MustExist', 'Get-ReparsePoints $d', '[string]$state.caddyExeSha512', '[string]$state.rootSha256']) {
       expect(g).toContain(s);
     }
+  });
+
+  it('Reconfigure는 업스트림 줄이 아니라 설정 전체를 템플릿 결과와 비교하고, 같을 때만 바꿀 것 없음으로 끝난다 — FX-7', () => {
+    // 비교 함수: 줄바꿈 정규화(CRLF·CR → LF) 뒤 서수(대소문자 구분) 비교. 실제 동작은 5.1·7에서 함수를 꺼내 실행해 확인했다
+    // (같음 · CRLF/CR만 다름 = 같음 · 옛 템플릿(응답 압축 없음, 업스트림 줄은 같음) = 다름 · 대소문자 · 포트 · 파일 없음).
+    const same = fnAny('Test-SameConfigText');
+    expect(same).toContain('-replace "`r`n", "`n"');
+    expect(same).toContain('-replace "`r", "`n"');
+    expect(same).toContain('[string]::Equals($na, $nb, [System.StringComparison]::Ordinal)');
+    const rc = fnBody('Invoke-Reconfigure');
+    // 옛 판정(포트 + 업스트림 줄 포함 여부)은 없어졌다 — 앱 포트가 같아도 템플릿 변경을 반영한다.
+    expect(rc).not.toContain('$live.Contains(');
+    before(rc, '$config = New-HostCaddyConfig ([int]$state.httpsPort) ([int]$state.httpPort) $appPort', 'if (Test-SameConfigText $live $config) {');
+    expect(rc).toMatch(/if \(Test-SameConfigText \$live \$config\) \{[^}]*Nothing to change\.[^}]*\n[^\n]*configuration: same\.[^\n]*\n\s*exit 0/);
+    // -WhatIf는 바뀜/같음을 말하고, 손으로 고친 설정을 덮어쓰게 되면 경고한다 — 둘 다 검증·적용(Write-ValidatedConfig)보다 먼저.
+    before(rc, 'if (Test-SameConfigText $live $config) {', "configuration: changed (upstream port changed: ");
+    before(rc, 'if (-not (Test-SameConfigText $live $configuredNow)) {', 'Write-ValidatedConfig');
+    before(rc, "configuration: changed (upstream port changed: ", 'Write-ValidatedConfig');
+    expect(rc).toContain('$configuredNow = New-HostCaddyConfig ([int]$state.httpsPort) ([int]$state.httpPort) ([int]$state.upstreamPort) ([string]$state.domain)');
+    expect(rc).toContain('hand edits are not kept');
   });
 
   it('미리 보기에 쓰는 compose 기본값이 docker-compose.yml의 기본값과 같다(5.1에서 빈 값은 변수 삭제 — Codex 계획 리뷰 1회차)', () => {

@@ -43,8 +43,10 @@
                   BEFORE stopping anything, then stops and disables the service, restores only the two
                   env lines recorded in host-mode.json (WR_APP_PORT stays), recreates the caddy container
                   and checks that 8443 answers with the same CA.
-      -Reconfigure (Administrator, mode pilot or host) regenerates the configuration when the app's
-                  published port changed, validates it and restarts the service.
+      -Reconfigure (Administrator, mode pilot or host) regenerates the configuration from the template and,
+                  when it differs from the live Caddyfile.host (the app's published port changed, or an update
+                  changed the template), validates it and restarts the service. Hand edits to the live file are
+                  replaced (it says so). When they are the same it changes nothing. -WhatIf says changed/same.
       -Status     (any user) read-only report. Exit code 0 = OK, 1 = something needs attention.
       -Uninstall  (Administrator, mode pilot or docker) stops and deletes the service, removes the
                   firewall rule and the bin/state files. The CA copy (data) and the logs are KEPT.
@@ -887,6 +889,14 @@ function New-HostCaddyConfig([int]$Https, [int]$Http, [int]$AppPort, [string]$Do
     return $config
 }
 
+# Two configuration texts are the same when they are equal after normalising line endings (CRLF and CR -> LF),
+# compared ordinally (case-sensitive). Used by -Reconfigure (change nothing when the same) and -Status (FX-7).
+function Test-SameConfigText([string]$A, [string]$B) {
+    $na = ($A -replace "`r`n", "`n") -replace "`r", "`n"
+    $nb = ($B -replace "`r`n", "`n") -replace "`r", "`n"
+    return [string]::Equals($na, $nb, [System.StringComparison]::Ordinal)
+}
+
 # Writes a configuration next to the live one and validates it with the installed CA (root must be unchanged).
 function Write-ValidatedConfig([string]$Path, [string]$Config, [string]$Fp) {
     Write-TextFile $Path $Config
@@ -1553,15 +1563,29 @@ function Invoke-Reconfigure {
     $appPort = Get-AppPublishedPort
     $live = ''
     if (Test-Path -LiteralPath $ConfigDest -PathType Leaf) { $live = [System.IO.File]::ReadAllText($ConfigDest) }
-    if ($appPort -eq [int]$state.upstreamPort -and $live.Contains("reverse_proxy 127.0.0.1:$appPort")) {
-        Write-Ok "Upstream is already 127.0.0.1:$appPort. Nothing to change."
+    # The whole configuration is compared, not only the upstream line: an update may change the template (e.g.
+    # response compression) while the app port stays the same (FX-7).
+    $config = New-HostCaddyConfig ([int]$state.httpsPort) ([int]$state.httpPort) $appPort ([string]$state.domain)
+    $portChanged = $appPort -ne [int]$state.upstreamPort
+    if (Test-SameConfigText $live $config) {
+        Write-Ok "Upstream is already 127.0.0.1:$appPort and $ConfigDest matches the template. Nothing to change."
+        if ($whatIf) { Write-Host '   -WhatIf: configuration: same.' -ForegroundColor Green }
         exit 0
     }
-    Write-Ok "App publishes 127.0.0.1:$appPort (configured: 127.0.0.1:$($state.upstreamPort))"
-    $config = New-HostCaddyConfig ([int]$state.httpsPort) ([int]$state.httpPort) $appPort ([string]$state.domain)
+    if ($portChanged) {
+        Write-Ok "App publishes 127.0.0.1:$appPort (configured: 127.0.0.1:$($state.upstreamPort))"
+    } else {
+        Write-Ok "Upstream 127.0.0.1:$appPort is unchanged; $ConfigDest differs from the template of this version"
+    }
+    # The live file differs even from what this template gives for the configured upstream: the template changed
+    # in this version, or the file was edited by hand. Hand edits are not kept.
+    $configuredNow = New-HostCaddyConfig ([int]$state.httpsPort) ([int]$state.httpPort) ([int]$state.upstreamPort) ([string]$state.domain)
+    if (-not (Test-SameConfigText $live $configuredNow)) {
+        Write-Warn "$ConfigDest differs from the template beyond the upstream port (template changed in this version, or edited by hand). It will be replaced; hand edits are not kept."
+    }
     if ($whatIf) {
         Write-Host ''
-        Write-Host '   -WhatIf: checks passed, nothing was changed.' -ForegroundColor Green
+        Write-Host "   -WhatIf: configuration: changed (upstream port changed: $(if ($portChanged) { 'yes' } else { 'no' })). Checks passed, nothing was changed." -ForegroundColor Green
         exit 0
     }
     Write-ValidatedConfig $ConfigNext $config ([string]$state.rootSha256)
@@ -1705,6 +1729,16 @@ function Invoke-Status {
                 Write-Fail "Caddy proxies to 127.0.0.1:$($state.upstreamPort) but the app now publishes 127.0.0.1:$appPort. Run -Reconfigure to regenerate the configuration."; $problems++
             }
         } catch { Write-Fail $_.Exception.Message; $problems++ }
+    }
+    # The live configuration against this version's template for the configured upstream (FX-7): after an update
+    # that changed the template it differs until -Reconfigure; a hand-edited file differs too (it would be replaced).
+    if ($mode -ne 'docker' -and (Test-Path -LiteralPath $ConfigDest -PathType Leaf)) {
+        try {
+            $expected = New-HostCaddyConfig ([int]$state.httpsPort) ([int]$state.httpPort) ([int]$state.upstreamPort) ([string]$state.domain)
+            if (Test-SameConfigText ([System.IO.File]::ReadAllText($ConfigDest)) $expected) { Write-Ok "$ConfigDest matches the template of this version" } else {
+                Write-Warn "$ConfigDest differs from the template of this version (an update changed the template, or the file was edited by hand). Run -Reconfigure to apply the template; hand edits would be replaced."
+            }
+        } catch { Write-Warn "Could not compare $ConfigDest with the template: $($_.Exception.Message)" }
     }
 
     Write-Step 'Docker Caddy and env file'
