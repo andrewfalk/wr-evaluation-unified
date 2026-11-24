@@ -11,7 +11,8 @@
 //   (enqueue)도 동기라 같은 프로세스 안에서는 끼어들 수 없고, 다른 프로세스(같은 프로필의 다른 셸)와는 잠금 파일로 나눈다.
 //   그래서 전송 중에 추가된 줄은 지워지지 않는다. 대기열 파일은 잠금을 잡았을 때만 바꾼다 — 잠금을 못 잡은 추가는 항목마다
 //   보조 파일(audit-emr-pending.spool-*.enc, 완성된 뒤 게시)로 남기고, 다음 회차가 잠금 아래에서 대기열 파일로 옮긴다. 잠금을
-//   못 잡은 교체는 다음 회차로 미룬다.
+//   못 잡은 교체는 다음 회차로 미룬다. 잠금을 잡았어도 대기열 파일에 쓰지 못한 추가는 보조 파일로 남긴다. 회차 끝의 교체는
+//   그때 실제로 읽은 줄에 근거해서만 하고, 읽지 못하면(파일 없음이 아닌 읽기 오류) 다음 회차로 미룬다.
 // - 원본을 잘라 쓰지 않는다. 이름 바꾸기가 실패하면 원본을 그대로 두고, 이미 처리한 줄은 기억해 다음 회차에 다시 보내지 않는다
 //   (프로세스가 다시 시작되면 한 번 더 나갈 수 있다 — 이 설치본의 항목은 eventId로 알아볼 수 있다). 시작할 때 남은 임시 파일은 버린다.
 // - 대기열을 크기 때문에 버리지 않는다(임계를 넘으면 로그만).
@@ -241,9 +242,17 @@ function createAuditQueueStore(options) {
     throw new Error('unknown line format — expected enc: prefix');
   }
 
+  // 대기열 파일의 줄. 파일이 없으면(ENOENT) 빈 목록, 그 밖의 읽기 오류(접근 거부·사용 중 등)는 던진다 — 호출한 쪽이
+  // 이번 회차를 미룬다. 존재 확인(existsSync)은 접근 오류도 "없음"으로 돌려주므로 쓰지 않는다.
   function readLines() {
-    if (!fs.existsSync(file)) return [];
-    return fs.readFileSync(file, 'utf-8').split('\n').filter(l => l.trim());
+    let content;
+    try {
+      content = fs.readFileSync(file, 'utf-8');
+    } catch (err) {
+      if (err.code === 'ENOENT') return [];
+      throw err;
+    }
+    return content.split('\n').filter(l => l.trim());
   }
 
   function enqueue(entry) {
@@ -258,20 +267,23 @@ function createAuditQueueStore(options) {
       log.error('[auditQueue] enqueue failed:', err.message);
       return;
     }
-    const append = (target) => {
-      try {
-        appendLines(target, line);
-      } catch (err) {
-        log.error('[auditQueue] enqueue failed:', err.message);
-      }
-    };
-    withLock(() => append(file), () => {
+    const toSpool = () => {
       try {
         spool(line);
       } catch (err) {
         log.error('[auditQueue] enqueue (spool) failed:', err.message);
       }
-    });
+    };
+    // 잠금을 잡았든 못 잡았든, 대기열 파일에 쓰지 못한 기록은 보조 파일로 남는다(다음 회차가 옮긴다). 덧붙이기가 도중에
+    // 끊겨 대기열 파일에 조각이 남아도 그 조각은 따로 읽혀 그 줄만 격리된다(appendLines).
+    withLock(() => {
+      try {
+        appendLines(file, line);
+      } catch (err) {
+        log.warn('[auditQueue] enqueue: queue file not writable, keeping the entry in a spool file:', err.message);
+        toSpool();
+      }
+    }, toSpool);
   }
 
   function pendingCount() {
@@ -291,6 +303,8 @@ function createAuditQueueStore(options) {
         log.error('[auditQueue] flush: re-read failed:', err.message);
         return false;
       }
+      // 이번에 실제로 읽은 줄에 근거해서만 파일을 바꾼다 — 한 줄도 없으면(파일이 없거나 비어 있음) 건드리지 않는다.
+      if (lines.length === 0) return true;
       const toRemove = new Map();
       for (const l of processed) toRemove.set(l, (toRemove.get(l) ?? 0) + 1);
       const keep = [];
@@ -301,7 +315,7 @@ function createAuditQueueStore(options) {
       }
       try {
         if (keep.length === 0) {
-          if (fs.existsSync(file)) fs.unlinkSync(file);
+          fs.unlinkSync(file);
         } else {
           fs.writeFileSync(tempFile, keep.join('\n') + '\n', 'utf-8');
           fs.renameSync(tempFile, file);
