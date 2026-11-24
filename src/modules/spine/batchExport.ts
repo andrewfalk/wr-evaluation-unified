@@ -1,9 +1,11 @@
 // 일괄 내보내기(엑셀 일괄 입력 형식) 척추 구간 — Phase 2 C6 P2-55a. 옛 core 열 표의 spine 7열 그대로.
 // ctx = BatchRowContext(src/core/export/batchColumns.ts) — task는 core의 행 짝짓기가 고른 spine 작업.
 // rowTasks: 행 짝짓기에 쓸 작업 목록 — MDDM이 '평가함'(present)일 때만 작업 행을 만든다. unknown(WBV-only)·none(해당없음)은 빈 배열.
+import type { BatchExportConfig } from '../../core/modules/manifest';
+import type { SpineModuleShape } from '@wr/analytics-core/modules/spine/index';
 import { resolveMddmStatus } from './utils/calculations';
 
-export const spineBatchExport = {
+export const spineBatchExport: BatchExportConfig = {
   order: 60,
   columns: [
     { header: '작업명', cell: ({ task }) => task?.name || '' },
@@ -14,5 +16,8 @@ export const spineBatchExport = {
     { header: '시간단위', cell: ({ task }) => task?.timeUnit || '' },
     { header: '보정계수', cell: ({ task }) => task?.correctionFactor ?? '' },
   ],
-  rowTasks: (spineModule) => (resolveMddmStatus(spineModule) === 'present' ? (spineModule.tasks || []) : []),
+  rowTasks: (moduleData) => {
+    const spineModule = moduleData as SpineModuleShape;
+    return resolveMddmStatus(spineModule) === 'present' ? (spineModule.tasks || []) : [];
+  },
 };

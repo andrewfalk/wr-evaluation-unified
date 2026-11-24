@@ -4,7 +4,7 @@
 // 한 항목으로 1:1 옮겼다. 열은 구간 7개(core · knee · shoulder · cervical · elbow · wrist · spine)로 나누고, 구간마다 같은 번호 공간의 order를
 // 준다 — 열 순서는 order가 정하고 모듈 등록 순서와는 무관하다(지금 순서 그대로: core 32열 → knee → shoulder → cervical → elbow → wrist → spine).
 // 행 짝짓기(상병·직업·작업·팔꿈치/손목 항목을 한 행에 묶는 일)는 exportService가 그대로 하고, 한 행의 재료를 BatchRowContext로 넘긴다.
-// P2-55a·55b: 모듈 구간 6개는 각 모듈 매니페스트의 batchExport(src/modules/*/batchExport.js)가 낸다 — core는 core 구간(32열)만 들고,
+// P2-55a·55b: 모듈 구간 6개는 각 모듈 매니페스트의 batchExport(src/modules/*/batchExport.ts)가 낸다 — core는 core 구간(32열)만 들고,
 // 등록된 모듈의 구간만 붙으며 순서는 order가 정한다(등록 순서와 무관). 등록되지 않은 모듈의 구간·선택 함수는 없는 것으로 처리한다.
 import { getReasonText, getStatusText } from '../assessment/vocabulary';
 import { getWorkPeriodYearMonth } from '../utils/workPeriod';

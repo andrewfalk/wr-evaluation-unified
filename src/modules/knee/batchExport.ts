@@ -1,6 +1,8 @@
 // 일괄 내보내기(엑셀 일괄 입력 형식) 무릎 구간 — Phase 2 C6 P2-55a. 옛 core 열 표의 knee 8열 그대로.
 // ctx = BatchRowContext(src/core/export/batchColumns.ts) — kneeExtra는 core의 행 짝짓기가 고른 그 행 직업의 jobExtras.
-export const kneeBatchExport = {
+import type { BatchExportConfig } from '../../core/modules/manifest';
+
+export const kneeBatchExport: BatchExportConfig = {
   order: 10,
   columns: [
     { header: '중량물(kg)', cell: ({ kneeExtra }) => kneeExtra?.weight || '' },

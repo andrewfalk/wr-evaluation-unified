@@ -1,5 +1,5 @@
 // 팔꿈치·손목 일괄 내보내기 구간의 공통 앞부분 20열(시간적 선후관계 4 + 진단 항목 16) — 머리글 접두사만 다르다
-// (REFACTORING_ROADMAP Phase 2 C6, P2-55b). 두 모듈의 batchExport.js가 같이 쓴다. 값 식은 옛 core 열 표 그대로.
+// (REFACTORING_ROADMAP Phase 2 C6, P2-55b). 두 모듈의 batchExport.ts가 같이 쓴다. 값 식은 옛 core 열 표 그대로.
 // 모듈 매니페스트(첫 화면 청크)가 import하므로 타입 말고는 아무것도 import하지 않는다.
 import type { BatchBkEntry, BatchColumn, BatchRowContext } from './batchColumns';
 

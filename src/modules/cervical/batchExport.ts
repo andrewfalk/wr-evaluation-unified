@@ -1,18 +1,19 @@
 // 일괄 내보내기(엑셀 일괄 입력 형식) 경추 구간 — Phase 2 C6 P2-55b. 옛 core 열 표의 cervical 9열 그대로.
 // ctx = BatchRowContext(src/core/export/batchColumns.ts) — cervicalTask는 core의 행 짝짓기가 고른 경추 작업.
+import type { BatchExportConfig } from '../../core/modules/manifest';
 import { EXPOSURE_TYPE_LABELS } from './utils/data';
 
-function formatExposureTypes(exposureTypes = []) {
+function formatExposureTypes(exposureTypes: readonly string[] = []): string {
   return (exposureTypes || [])
     .map(type => EXPOSURE_TYPE_LABELS[type] || type)
     .join('|');
 }
 
-function yesNoText(value) {
+function yesNoText(value: unknown): string {
   return value === 'yes' ? '예' : value === 'no' ? '아니오' : '';
 }
 
-export const cervicalBatchExport = {
+export const cervicalBatchExport: BatchExportConfig = {
   order: 30,
   columns: [
     { header: '경추_작업명', cell: ({ cervicalTask }) => cervicalTask?.name || '' },

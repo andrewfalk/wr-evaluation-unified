@@ -2,9 +2,10 @@
 // ctx = BatchRowContext(src/core/export/batchColumns.ts) — wristEntry는 core의 행 짝짓기가 고른 진단 항목, wristTemporal은 시간적 선후관계.
 // 시간당 반복 횟수는 손목 자체 함수를 쓴다(옛 core는 팔꿈치 것을 빌려 썼다 — analytics-core에서 두 구현은 글자까지 같다).
 import { bkLeadColumns } from '../../core/export/bkLeadColumns';
+import type { BatchExportConfig } from '../../core/modules/manifest';
 import { getBk2101RepetitionPerHour } from './utils/calculations';
 
-export const wristBatchExport = {
+export const wristBatchExport: BatchExportConfig = {
   order: 50,
   columns: [
     ...bkLeadColumns('손목', ctx => ({ temporal: ctx.wristTemporal, entry: ctx.wristEntry })),

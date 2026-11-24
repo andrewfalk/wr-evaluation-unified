@@ -6,7 +6,8 @@
  * src/**\/*.{js,jsx,ts,tsx} minus tests, src/testing/ and *.d.ts) is TypeScript, by lines.
  *
  * Always enforced (part of `npm run check`): the new Phase 2 layers are TypeScript only — no .js/.jsx
- * under src/platform, src/core/api, src/core/state, src/core/sync, src/core/storage, src/core/modules
+ * under src/platform, src/core/api, src/core/state, src/core/sync, src/core/storage, src/core/modules, src/core/narrative,
+ * and none for the batchExport and narrative files of each src/modules/<id> folder (Phase 2 C7-a FX-1)
  * (user decision 6, 2026-11-14: "새 계층 100% TS").
  *
  * Optional floor: `--min-lines-pct N` fails when the TS share of product lines is below N. Phase 2
@@ -30,7 +31,16 @@ export const TS_ONLY_LAYERS = [
   'src/core/sync/',
   'src/core/storage/',
   'src/core/modules/',
+  'src/core/narrative/',
 ];
+
+// 모듈 폴더 안에서 TS로만 쓰는 파일(Phase 2 C7-a FX-1): 일괄 내보내기 열(batchExport)과 서술(narrative).
+export const TS_ONLY_FILE_PATTERNS = [
+  /^src\/modules\/[^/]+\/batchExport\.[cm]?[jt]sx?$/,
+  /^src\/modules\/[^/]+\/narrative\.[cm]?[jt]sx?$/,
+];
+
+export const isTsOnlyPath = (rel) => TS_ONLY_LAYERS.some((dir) => rel.startsWith(dir)) || TS_ONLY_FILE_PATTERNS.some((pattern) => pattern.test(rel));
 
 function walk(dir) {
   const out = [];
@@ -54,7 +64,7 @@ export function summarize(files) {
     if (!isProductCode(rel)) continue;
     const isTs = /\.tsx?$/.test(rel);
     if (isTs) { summary.tsFiles += 1; summary.tsLines += lines; } else { summary.jsFiles += 1; summary.jsLines += lines; }
-    if (!isTs && TS_ONLY_LAYERS.some((dir) => rel.startsWith(dir))) summary.jsInTsOnlyLayers.push(rel);
+    if (!isTs && isTsOnlyPath(rel)) summary.jsInTsOnlyLayers.push(rel);
   }
   const total = summary.tsLines + summary.jsLines;
   // linesRatio is exact (the floor compares this); linesPct is rounded for display only (Codex review of #285).
@@ -79,7 +89,7 @@ function main() {
   console.log(`ts-progress: TS ${s.tsFiles} files / ${s.tsLines} lines, JS ${s.jsFiles} files / ${s.jsLines} lines — TS ${s.linesPct}% of product lines.`);
   let failed = false;
   if (s.jsInTsOnlyLayers.length > 0) {
-    console.error(`ts-progress: JavaScript in a TS-only layer (${TS_ONLY_LAYERS.join(', ')}):`);
+    console.error(`ts-progress: JavaScript in a TS-only layer (${TS_ONLY_LAYERS.join(', ')}) or TS-only module file (src/modules/*/batchExport, src/modules/*/narrative):`);
     for (const rel of s.jsInTsOnlyLayers) console.error(`  ${rel}`);
     failed = true;
   }
