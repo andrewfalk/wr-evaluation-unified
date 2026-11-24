@@ -112,6 +112,9 @@ export interface NarrativeContext {
   jobNumberingByJobId?: Record<string, number> | null;
 }
 
+/** 서술 문구 표 — 항목 → 변형별 문구. 변형마다 다른 문구를 모듈 서술이 여기서 꺼내 쓴다(문구 차이 표의 원본, P2-65a). */
+export type NarrativePhrases = Readonly<Record<string, Readonly<Partial<Record<NarrativeVariant, string>>>>>;
+
 /**
  * 모듈 서술(선택, P2-60 — Phase 2 C7-a). 소견서·EMR 문구의 모듈 블록을 만든다. calc는 computeCalc({ shared, module })의 결과다.
  * emrOrder = EMR b6·b8의 모듈 순서(등록 순서와 무관, 작을수록 앞). phrases = 항목 → 변형별 문구(문구 차이 표의 원본).
@@ -120,7 +123,7 @@ export interface NarrativeContext {
 export interface ModuleNarrative {
   emrOrder: number;
   render(variant: NarrativeVariant, calc: unknown, context: NarrativeContext): string;
-  phrases?: Readonly<Record<string, Readonly<Partial<Record<NarrativeVariant, string>>>>>;
+  phrases?: NarrativePhrases;
 }
 
 export interface ModuleManifest {
