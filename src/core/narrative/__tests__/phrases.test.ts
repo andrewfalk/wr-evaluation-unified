@@ -8,6 +8,7 @@ describe('fillPhrase', () => {
   });
 
   it('채운 값 안의 {…}는 다시 바꾸지 않고, 값이 없는 자리는 그대로 둔다', () => {
+    expect(fillPhrase('[{name}] {n}', { name: '{n}', n: 2 })).toBe('[{n}] 2');
     expect(fillPhrase('[{name}] {n}', { name: '{n}' })).toBe('[{n}] {n}');
     expect(fillPhrase('{a}{b}', { a: '' })).toBe('{b}');
   });

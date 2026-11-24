@@ -1,0 +1,355 @@
+{
+  "variants": [
+    "report",
+    "emrSection",
+    "emrSummary"
+  ],
+  "modules": [
+    {
+      "id": "knee",
+      "name": "무릎 (슬관절)",
+      "emrOrder": 10,
+      "items": 6
+    },
+    {
+      "id": "shoulder",
+      "name": "어깨",
+      "emrOrder": 20,
+      "items": 5
+    },
+    {
+      "id": "wrist",
+      "name": "손목/손가락",
+      "emrOrder": 30,
+      "items": 7
+    },
+    {
+      "id": "elbow",
+      "name": "팔꿈치",
+      "emrOrder": 40,
+      "items": 7
+    },
+    {
+      "id": "cervical",
+      "name": "경추(목)",
+      "emrOrder": 50,
+      "items": 4
+    }
+  ],
+  "modulesWithoutPhrases": [
+    "spine"
+  ],
+  "rows": [
+    {
+      "moduleId": "knee",
+      "moduleName": "무릎 (슬관절)",
+      "item": "heading",
+      "values": {
+        "report": "\n  < 무릎(슬관절) >\n",
+        "emrSection": "\n<무릎(슬관절)>\n",
+        "emrSummary": "\n<무릎(슬관절)>\n"
+      },
+      "differs": true
+    },
+    {
+      "moduleId": "knee",
+      "moduleName": "무릎 (슬관절)",
+      "item": "indent",
+      "values": {
+        "report": "  ",
+        "emrSection": ""
+      },
+      "differs": true
+    },
+    {
+      "moduleId": "knee",
+      "moduleName": "무릎 (슬관절)",
+      "item": "weightLabel",
+      "values": {
+        "report": "일 중량물 취급량: ",
+        "emrSection": "일 중량물 취급량: ",
+        "emrSummary": "중량물 "
+      },
+      "differs": true
+    },
+    {
+      "moduleId": "knee",
+      "moduleName": "무릎 (슬관절)",
+      "item": "squattingLabel",
+      "values": {
+        "report": "일 쪼그려 앉기 시간: ",
+        "emrSection": "일 쪼그려 앉기 시간: ",
+        "emrSummary": "쪼그려앉기 "
+      },
+      "differs": true
+    },
+    {
+      "moduleId": "knee",
+      "moduleName": "무릎 (슬관절)",
+      "item": "burdenLabel",
+      "values": {
+        "report": "무릎 부담 정도: ",
+        "emrSection": "무릎 부담 정도: ",
+        "emrSummary": "부담 정도 "
+      },
+      "differs": true
+    },
+    {
+      "moduleId": "knee",
+      "moduleName": "무릎 (슬관절)",
+      "item": "jobGap",
+      "values": {
+        "report": "",
+        "emrSection": "\n"
+      },
+      "differs": true
+    },
+    {
+      "moduleId": "shoulder",
+      "moduleName": "어깨",
+      "item": "heading",
+      "values": {
+        "report": "\n< 어깨(견관절) >\n",
+        "emrSection": "\n<어깨(견관절)>\n",
+        "emrSummary": "\n<어깨(견관절)>\n"
+      },
+      "differs": true
+    },
+    {
+      "moduleId": "shoulder",
+      "moduleName": "어깨",
+      "item": "interpretationLead",
+      "values": {
+        "report": "\n",
+        "emrSection": "\n",
+        "emrSummary": ""
+      },
+      "differs": true
+    },
+    {
+      "moduleId": "shoulder",
+      "moduleName": "어깨",
+      "item": "interpretationExceeded",
+      "values": {
+        "report": "** {labels} 기준을 초과하여 누적 신체부담은 충분함.",
+        "emrSection": "** {labels} 기준을 초과하여 누적 신체부담은 충분함.",
+        "emrSummary": "** {labels} 기준을 초과하여 누적 신체부담은 충분함."
+      },
+      "differs": false
+    },
+    {
+      "moduleId": "shoulder",
+      "moduleName": "어깨",
+      "item": "interpretationCombined",
+      "values": {
+        "report": "** 개별 기준 초과 항목은 없으나, 복합 노출을 고려하여 누적 신체부담은 충분함.",
+        "emrSection": "** 개별 기준 초과 항목은 없으나, 복합 노출을 고려하여 누적 신체부담은 충분함.",
+        "emrSummary": "** 개별 기준 초과 항목은 없으나, 복합 노출을 고려하여 누적 신체부담은 충분함."
+      },
+      "differs": false
+    },
+    {
+      "moduleId": "shoulder",
+      "moduleName": "어깨",
+      "item": "interpretationInsufficient",
+      "values": {
+        "report": "** 노출 기준치에 미달하여 누적 신체부담 불충분함.",
+        "emrSection": "** 노출 기준치에 미달하여 누적 신체부담 불충분함.",
+        "emrSummary": "** 노출 기준치에 미달하여 누적 신체부담 불충분함."
+      },
+      "differs": false
+    },
+    {
+      "moduleId": "wrist",
+      "moduleName": "손목/손가락",
+      "item": "heading",
+      "values": {
+        "report": "\n< 손목/손가락 >",
+        "emrSection": "\n<손목/손가락>\n",
+        "emrSummary": "\n<손목/손가락>\n"
+      },
+      "differs": true
+    },
+    {
+      "moduleId": "wrist",
+      "moduleName": "손목/손가락",
+      "item": "temporalFlagsLead",
+      "values": {
+        "report": "- 공통 시간적 선후관계 ",
+        "emrSection": "- 공통 시간적 선후관계: "
+      },
+      "differs": true
+    },
+    {
+      "moduleId": "wrist",
+      "moduleName": "손목/손가락",
+      "item": "jobLine",
+      "values": {
+        "report": "- 직력{n}: {name}",
+        "emrSection": "- {name}\n",
+        "emrSummary": "\n[{name}]\n"
+      },
+      "differs": true
+    },
+    {
+      "moduleId": "wrist",
+      "moduleName": "손목/손가락",
+      "item": "jobNameEmpty",
+      "values": {
+        "report": "-",
+        "emrSection": "-",
+        "emrSummary": "직업 미입력"
+      },
+      "differs": true
+    },
+    {
+      "moduleId": "wrist",
+      "moduleName": "손목/손가락",
+      "item": "narrativeEmpty",
+      "values": {
+        "report": "",
+        "emrSection": "-"
+      },
+      "differs": true
+    },
+    {
+      "moduleId": "wrist",
+      "moduleName": "손목/손가락",
+      "item": "riskFactorLabel",
+      "values": {
+        "report": "      업무관련성 위험 요인: ",
+        "emrSection": "      업무에 포함된 위험 요인: "
+      },
+      "differs": true
+    },
+    {
+      "moduleId": "wrist",
+      "moduleName": "손목/손가락",
+      "item": "conclusionLead",
+      "values": {
+        "report": "\n      **종합평가** ",
+        "emrSection": "\n      **종합평가** ",
+        "emrSummary": "    **종합평가** "
+      },
+      "differs": true
+    },
+    {
+      "moduleId": "elbow",
+      "moduleName": "팔꿈치",
+      "item": "heading",
+      "values": {
+        "report": "\n< 팔꿈치(주관절) >\n",
+        "emrSection": "\n<팔꿈치(주관절)>\n",
+        "emrSummary": "\n<팔꿈치(주관절)>\n"
+      },
+      "differs": true
+    },
+    {
+      "moduleId": "elbow",
+      "moduleName": "팔꿈치",
+      "item": "temporalFlagsLead",
+      "values": {
+        "report": "- 공통 시간적 선후관계: ",
+        "emrSection": "- 공통 시간적 선후관계: "
+      },
+      "differs": false
+    },
+    {
+      "moduleId": "elbow",
+      "moduleName": "팔꿈치",
+      "item": "jobLine",
+      "values": {
+        "report": "- 직력{n}: {name}\n",
+        "emrSection": "- {name}\n",
+        "emrSummary": "\n[{name}]\n"
+      },
+      "differs": true
+    },
+    {
+      "moduleId": "elbow",
+      "moduleName": "팔꿈치",
+      "item": "jobNameEmpty",
+      "values": {
+        "report": "-",
+        "emrSection": "-",
+        "emrSummary": "직업 미입력"
+      },
+      "differs": true
+    },
+    {
+      "moduleId": "elbow",
+      "moduleName": "팔꿈치",
+      "item": "narrativeEmpty",
+      "values": {
+        "report": "",
+        "emrSection": "-"
+      },
+      "differs": true
+    },
+    {
+      "moduleId": "elbow",
+      "moduleName": "팔꿈치",
+      "item": "riskFactorLabel",
+      "values": {
+        "report": "      업무에 포함된 위험 요인: ",
+        "emrSection": "      업무에 포함된 위험 요인: "
+      },
+      "differs": false
+    },
+    {
+      "moduleId": "elbow",
+      "moduleName": "팔꿈치",
+      "item": "conclusionLead",
+      "values": {
+        "report": "\n      **종합평가** ",
+        "emrSection": "\n      **종합평가** ",
+        "emrSummary": "    **종합평가** "
+      },
+      "differs": true
+    },
+    {
+      "moduleId": "cervical",
+      "moduleName": "경추(목)",
+      "item": "heading",
+      "values": {
+        "report": "\n< 경추(목) >\n",
+        "emrSection": "\n<경추(목)>\n",
+        "emrSummary": "\n<경추(목)>\n"
+      },
+      "differs": true
+    },
+    {
+      "moduleId": "cervical",
+      "moduleName": "경추(목)",
+      "item": "jobLine",
+      "values": {
+        "report": "- 직력{n}: {name}\n",
+        "emrSection": "- {name}\n",
+        "emrSummary": "- {name}\n"
+      },
+      "differs": true
+    },
+    {
+      "moduleId": "cervical",
+      "moduleName": "경추(목)",
+      "item": "flagsLabel",
+      "values": {
+        "report": "      확인된 목 부위 부담 지표: ",
+        "emrSection": "  부담 요인: ",
+        "emrSummary": "  부담 요인: "
+      },
+      "differs": true
+    },
+    {
+      "moduleId": "cervical",
+      "moduleName": "경추(목)",
+      "item": "noFlags",
+      "values": {
+        "report": "확인된 부담 지표 없음",
+        "emrSection": "확인된 부담 요인 없음",
+        "emrSummary": "확인된 부담 요인 없음"
+      },
+      "differs": true
+    }
+  ]
+}
