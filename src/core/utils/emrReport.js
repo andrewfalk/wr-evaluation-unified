@@ -8,31 +8,11 @@ import { groupSummariesByBkType as groupElbowSummaries, mergeBkGroupSummaries as
 import { BK_TYPE_LABELS as ELBOW_BK_LABELS } from '../../modules/elbow/utils/data';
 import { groupSummariesByBkType as groupWristSummaries, mergeBkGroupSummaries as mergeWristGroups } from '../../modules/wrist/utils/calculations';
 import { BK_TYPE_LABELS as WRIST_BK_LABELS } from '../../modules/wrist/utils/data';
-import { buildSpineSectionText, buildSpineSectionSummary } from '../../modules/spine/utils/sectionText';
 import { calculateAge, calculateBMI } from './common';
 import { selectModuleNote } from './moduleNotes';
 import { buildJobHistoryLines, NO_EVALUABLE_JOBS_NOTE } from './jobHistory';
 import { EMR_TEXT_LIMIT_BYTES, cp949ByteLength, truncateCp949Bytes } from './emrText';
 import { buildAssessmentBlocks, buildConfirmedDiagnosisLines, formatGroupedAssessment } from './assessmentGroups';
-
-function buildSpineExposureText(calc) {
-  return buildSpineSectionText(calc);
-}
-
-function buildCervicalExposureText(calc) {
-  let text = '\n<경추(목)>\n';
-  if (calc?.noEvaluableJobs) return `${text}${NO_EVALUABLE_JOBS_NOTE}\n`;
-
-  (calc?.jobSummaries || []).forEach(jobSummary => {
-    text += `- ${jobSummary.jobName || '-'}\n`;
-    const burdenIndicatorText = jobSummary.flagItems?.length > 0
-      ? jobSummary.flagItems.map(flag => flag.label || flag.key).join(', ')
-      : '확인된 부담 요인 없음';
-    text += `  부담 요인: ${burdenIndicatorText}\n`;
-  });
-
-  return text;
-}
 
 function buildExposureSection(shared, modules, activeModules) {
   let text = '[직업력]\n';
@@ -141,13 +121,15 @@ function buildExposureSection(shared, modules, activeModules) {
   }
 
   if (activeModules.includes('cervical')) {
-    const calc = getModule('cervical')?.computeCalc?.({ shared, module: modules.cervical || {} });
-    text += buildCervicalExposureText(calc);
+    const cervicalManifest = getModule('cervical');
+    const calc = cervicalManifest?.computeCalc?.({ shared, module: modules.cervical || {} });
+    text += cervicalManifest?.narrative?.render('emrSection', calc, {}) ?? '';
   }
 
   if (activeModules.includes('spine')) {
-    const calc = getModule('spine')?.computeCalc?.({ shared, module: modules.spine || {} });
-    text += buildSpineExposureText(calc);
+    const spineManifest = getModule('spine');
+    const calc = spineManifest?.computeCalc?.({ shared, module: modules.spine || {} });
+    text += spineManifest?.narrative?.render('emrSection', calc, {}) ?? '';
   }
 
   return text;
@@ -241,13 +223,15 @@ function buildExposureSummary(shared, modules, activeModules) {
   }
 
   if (activeModules.includes('cervical')) {
-    const calc = getModule('cervical')?.computeCalc?.({ shared, module: modules.cervical || {} });
-    text += buildCervicalExposureText(calc); // 이미 요약 형태(작업당 1줄)라 그대로 재사용
+    const cervicalManifest = getModule('cervical');
+    const calc = cervicalManifest?.computeCalc?.({ shared, module: modules.cervical || {} });
+    text += cervicalManifest?.narrative?.render('emrSummary', calc, {}) ?? '';
   }
 
   if (activeModules.includes('spine')) {
-    const calc = getModule('spine')?.computeCalc?.({ shared, module: modules.spine || {} });
-    text += buildSpineSectionSummary(calc);
+    const spineManifest = getModule('spine');
+    const calc = spineManifest?.computeCalc?.({ shared, module: modules.spine || {} });
+    text += spineManifest?.narrative?.render('emrSummary', calc, {}) ?? '';
   }
 
   return text;

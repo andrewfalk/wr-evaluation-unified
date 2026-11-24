@@ -1,4 +1,5 @@
 import { registerModule } from '../../core/moduleRegistry';
+import { cervicalNarrative } from './narrative';
 import { CervicalEvaluation } from './CervicalEvaluation';
 import { createCervicalModuleData, createCervicalTask, EXPOSURE_TYPE_OPTIONS } from './utils/data';
 import { computeCervicalCalc, isCervicalAssessmentComplete } from './utils/calculations';
@@ -77,6 +78,7 @@ registerModule({
     },
   },
   batchExport: cervicalBatchExport,
+  narrative: cervicalNarrative,
   batchImportConfig: {
     columns: {
       cervicalTaskName: ['경추_작업명', 'cervical_task_name'],
