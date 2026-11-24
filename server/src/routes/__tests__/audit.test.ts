@@ -76,11 +76,12 @@ function userToken(userId = 'user-1', orgId: string | null = 'org-1'): string {
   return makeAccessToken({ userId, sessionId: 'sess-1', orgId, role: 'doctor', name: 'Dr. Kim' });
 }
 
-// emr_audit_nonces as the handler uses it (SEC-A L11): a claimed nonce is kept on COMMIT and dropped on
-// ROLLBACK; the pre-check and the next claim see only kept ones. One store per fake (per test).
+// emr_audit_nonces as the handler uses it (SEC-A L11): keys claimed in a transaction (the request nonce and, for a
+// current-shell event, its event marker) are kept on COMMIT and dropped on ROLLBACK; the pre-check and later claims
+// see only kept ones. One store per fake (per test).
 function nonceHandlers(): QueryHandler[] {
   const committed = new Set<string>();
-  let pending: string | null = null;
+  let pending: string[] = [];
   return [
     {
       name: 'nonce.seen', via: 'pool', match: /SELECT 1 FROM emr_audit_nonces/,
@@ -90,13 +91,13 @@ function nonceHandlers(): QueryHandler[] {
       name: 'nonce.claim', via: 'client', match: /INSERT INTO emr_audit_nonces/,
       reply: (_sql, params) => {
         const key = `${String(params[0])}:${String(params[1])}`;
-        if (committed.has(key)) return { rows: [], rowCount: 0 };
-        pending = key;
+        if (committed.has(key) || pending.includes(key)) return { rows: [], rowCount: 0 };
+        pending.push(key);
         return { rows: [{ '?column?': 1 }], rowCount: 1 };
       },
     },
-    { name: 'tx.commit', via: 'client', match: /^\s*COMMIT\b/, reply: () => { if (pending) committed.add(pending); pending = null; return { rows: [] }; } },
-    { name: 'tx.rollback', via: 'client', match: /^\s*ROLLBACK\b/, reply: () => { pending = null; return { rows: [] }; } },
+    { name: 'tx.commit', via: 'client', match: /^\s*COMMIT\b/, reply: () => { for (const key of pending) committed.add(key); pending = []; return { rows: [] }; } },
+    { name: 'tx.rollback', via: 'client', match: /^\s*ROLLBACK\b/, reply: () => { pending = []; return { rows: [] }; } },
   ];
 }
 
@@ -651,6 +652,99 @@ describe('POST /api/audit/emr', () => {
     expect(fake.callsTo('devices.scan')).toHaveLength(0);
   }, 30_000);
   // ── Current shell: actor claim and event time (extra.shellAudit: 2) ──────
+
+  // ── The same event sent again (FX-6) ──────────────────────────────────────
+
+  describe('the same current-shell event sent again under a new nonce', () => {
+    const EVENT_ID = '0b7e3c55-4d1a-4e8f-9a2b-6c7d8e9f0a1b';
+    const event = (eventId: unknown = EVENT_ID, extra: Record<string, unknown> = {}) => ({
+      ...VALID_BODY, extra: { shellAudit: 2, eventId, ...extra },
+    });
+
+    it('both answer 200 with the same body, one audit row; the second still uses the PC\'s allowance', async () => {
+      const pc = makePc();
+      const fake = makeFake([row(pc)]);
+      const app = auditApp(fake, { pcBurst: 2, pcRatePerSec: 0.001, pcMaxWaiting: 0 });
+      const first = await send(app, pc, { body: event() });
+      const second = await send(app, pc, { body: event(), token: null });
+      expect([first.status, second.status]).toEqual([200, 200]);
+      expect(second.body).toEqual(first.body);
+      expect(first.body).toEqual({ ok: true });
+      expect(writeAuditLogStrict).toHaveBeenCalledTimes(1);
+      expect(fake.callsTo('devices.touch')).toHaveLength(2); // last seen is updated for both
+      // The allowance of 2 was used by both requests.
+      expect((await send(app, pc, { body: event('0b7e3c55-4d1a-4e8f-9a2b-6c7d8e9f0a1c') })).status).toBe(429);
+      fake.assertAllReleased();
+    });
+
+    it('the event id is compared without regard to letter case', async () => {
+      const pc = makePc();
+      const fake = makeFake([row(pc)]);
+      const app = auditApp(fake);
+      expect((await send(app, pc, { body: event(EVENT_ID) })).status).toBe(200);
+      expect((await send(app, pc, { body: event(EVENT_ID.toUpperCase()) })).status).toBe(200);
+      expect(writeAuditLogStrict).toHaveBeenCalledTimes(1);
+    });
+
+    it('the same event id from another PC is recorded for each PC', async () => {
+      const pcA = makePc();
+      const pcB = makePc();
+      const fake = makeFake([row(pcA), row(pcB)]);
+      const app = auditApp(fake);
+      expect((await send(app, pcA, { body: event() })).status).toBe(200);
+      expect((await send(app, pcB, { body: event() })).status).toBe(200);
+      expect(writeAuditLogStrict).toHaveBeenCalledTimes(2);
+    });
+
+    it('older shells\' events and event ids that are not UUIDs are recorded each time, as before', async () => {
+      const pc = makePc();
+      const fake = makeFake([row(pc)]);
+      const app = auditApp(fake);
+      const legacy = { ...VALID_BODY, extra: { eventId: EVENT_ID } }; // no current-shell marker
+      expect((await send(app, pc, { body: legacy })).status).toBe(200);
+      expect((await send(app, pc, { body: legacy })).status).toBe(200);
+      expect((await send(app, pc, { body: event('e-1') })).status).toBe(200);
+      expect((await send(app, pc, { body: event('e-1') })).status).toBe(200);
+      expect((await send(app, pc, { body: event(42) })).status).toBe(200);
+      expect((await send(app, pc, { body: event(42) })).status).toBe(200);
+      expect(writeAuditLogStrict).toHaveBeenCalledTimes(6);
+    });
+
+    it('when writing the first audit row fails, the marker is rolled back too and the event is recorded when resent', async () => {
+      const pc = makePc();
+      const fake = makeFake([row(pc)]);
+      const app = auditApp(fake);
+      vi.mocked(writeAuditLogStrict).mockRejectedValueOnce(new Error('DB connection lost'));
+      expect((await send(app, pc, { body: event() })).status).toBe(500);
+      expect((await send(app, pc, { body: event() })).status).toBe(200);
+      expect(writeAuditLogStrict).toHaveBeenCalledTimes(2); // the failed attempt and the recorded one
+      fake.assertAllReleased();
+    });
+
+    it('the nonce of a request answered without a second row cannot be used again', async () => {
+      const pc = makePc();
+      const fake = makeFake([row(pc)]);
+      const app = auditApp(fake);
+      expect((await send(app, pc, { body: event() })).status).toBe(200);
+      const ts = new Date().toISOString();
+      const devNonce = nonce();
+      expect((await send(app, pc, { body: event(), ts, devNonce })).status).toBe(200);
+      const replay = await send(app, pc, { body: event(), ts, devNonce });
+      expect(replay.status).toBe(401);
+      expect(replay.body.error).toMatch(/nonce/i);
+      expect(writeAuditLogStrict).toHaveBeenCalledTimes(1);
+    });
+
+    it('a request nonce in the event-marker form is refused before any lookup', async () => {
+      const pc = makePc();
+      const fake = makeFake([row(pc)]);
+      const res = await send(auditApp(fake), pc, { body: event(), devNonce: `event:${EVENT_ID}` });
+      expect(res.status).toBe(401);
+      expect(res.body.code).toBe('UNAUTHORIZED');
+      expect(fake.callsTo('devices.scan')).toHaveLength(0);
+      expect(writeAuditLogStrict).not.toHaveBeenCalled();
+    });
+  });
 
   describe('current shell values', () => {
     const SAME_ORG = '3f0c2b1a-1111-4222-8333-444455556666';

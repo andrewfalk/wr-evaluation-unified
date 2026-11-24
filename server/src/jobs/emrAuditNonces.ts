@@ -2,6 +2,10 @@
 // replay protection: a signed request is rejected by its timestamp (±5 minutes) before the nonce is
 // looked at. Returned as an object with stop() so the S9 graceful shutdown can stop it (it replaces
 // the module-level setInterval that routes/audit.ts used to start on import).
+//
+// The same rows include the markers of recorded current-shell events (routes/audit.ts step 11): this retention is
+// also the window in which the same event sent again is answered without a second audit row. An event resent after
+// the retention is recorded once more.
 import type { Pool } from 'pg';
 
 export const EMR_AUDIT_NONCE_RETENTION_HOURS = 24;

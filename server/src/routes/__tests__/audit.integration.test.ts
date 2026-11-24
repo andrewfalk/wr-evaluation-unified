@@ -123,6 +123,40 @@ describe.skipIf(!TEST_DB_URL)('EMR audit nonce (real PostgreSQL, SEC-A L11)', ()
     expect(row.rows[0].extra).toMatchObject({ deviceId, source: 'electron-main', session_missing: true });
   });
 
+  // FX-6: the same current-shell event sent again under a new nonce is answered without a second audit row.
+  function sendEvent(target: Express, eventId: string) {
+    const nonce = crypto.randomBytes(16).toString('hex');
+    const body = { ...BODY, extra: { shellAudit: 2, eventId } };
+    const ts = new Date().toISOString();
+    return request(target)
+      .post('/api/audit/emr')
+      .set('x-wr-source', 'electron-main').set('x-wr-device-id', deviceId)
+      .set('x-wr-device-sig', sign(privateKey, deviceId, ts, nonce, body)).set('x-wr-device-ts', ts).set('x-wr-device-nonce', nonce)
+      .send(body);
+  }
+  const eventRows = async (eventId: string) => (await auditReader.query<{ n: string }>(
+    `SELECT count(*)::text AS n FROM audit_logs WHERE actor_org_id = $1 AND action = 'emr_inject' AND extra->>'eventId' = $2`,
+    [orgId, eventId],
+  )).rows[0].n;
+
+  it('the same event sent twice under different nonces: both 200 with the same body, one audit row, both nonces kept', async () => {
+    const eventId = crypto.randomUUID();
+    const first = await sendEvent(app(), eventId);
+    const second = await sendEvent(app(), eventId);
+    expect([first.status, second.status]).toEqual([200, 200]);
+    expect(second.body).toEqual(first.body);
+    expect(await eventRows(eventId)).toBe('1');
+    const markers = await pool.query(`SELECT 1 FROM emr_audit_nonces WHERE device_id = $1 AND nonce = $2`, [deviceId, `event:${eventId}`]);
+    expect(markers.rowCount).toBe(1);
+  });
+
+  it('the same event sent concurrently by two processes: both 200, one audit row (serialised on the marker row)', async () => {
+    const eventId = crypto.randomUUID();
+    const results = await Promise.all([sendEvent(app(), eventId), sendEvent(app(), eventId), sendEvent(app(), eventId)]);
+    expect(results.map((r) => r.status)).toEqual([200, 200, 200]);
+    expect(await eventRows(eventId)).toBe('1');
+  });
+
   it('the sweep removes nonces older than 24 hours and keeps recent ones', async () => {
     const { sweepEmrAuditNonces } = await import('../../jobs/emrAuditNonces.js');
     const old = crypto.randomBytes(8).toString('hex');
