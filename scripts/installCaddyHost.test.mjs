@@ -367,7 +367,7 @@ describe('install-caddy-host.ps1 -Uninstall / -Status', () => {
     const b = fnBody('Invoke-Uninstall');
     expect(b).toMatch(/if \(\$state -and @\('pilot', 'docker'\) -notcontains \[string\]\$state\.mode\) \{\s*throw "[^"]*-Rollback first/);
     expect(b).toMatch(/if \(\$svc -and \$svc\.PathName -notlike "\$ExeDest \*"\) \{\s*throw/);
-    expect(b).toContain('foreach ($f in @($ExeDest, $ConfigDest, $ConfigNext, $ConfigPrev, $StateFile, $SnapshotFile, $HostModeFile, $RootCrtPublic)) {');
+    expect(b).toContain('foreach ($f in @($ExeDest, $ConfigDest, $ConfigNext, $ConfigPrev, $ConfigBackup, $ConfigBackupTmp, $StateFile, $SnapshotFile, $HostModeFile, $RootCrtPublic)) {');
     expect(b).not.toMatch(/Remove-Item[^\n]*(\$DataDir|\$CaDir|\$LogDir|\$Root\b|-Recurse)/);
     // 중단된 전환(기록 'applied')이 남아 있으면 모드와 상관없이 변경 전에 거부(Codex PR 리뷰 1회차).
     expect(b).toMatch(/if \(\$journal -and \[string\]\$journal\.status -eq 'applied'\) \{\s*throw/);
@@ -384,6 +384,16 @@ describe('install-caddy-host.ps1 -Uninstall / -Status', () => {
   it('Status는 Caddyfile 업스트림이 앱의 실제 게시 포트와 다르면 문제로 보고한다', () => {
     const b = fnBody('Invoke-Status');
     expect(b).toMatch(/if \(\$appPort -eq \[int\]\$state\.upstreamPort\)/);
+  });
+
+  it('Status는 설치된 Caddyfile이 이 버전의 템플릿(설정된 업스트림 기준)과 다르면 경고한다 — FX-7', () => {
+    const b = fnBody('Invoke-Status');
+    expect(b).toMatch(/if \(\$mode -ne 'docker' -and \(Test-Path -LiteralPath \$ConfigDest -PathType Leaf\)\)/);
+    expect(b).toContain('$expected = New-HostCaddyConfig ([int]$state.httpsPort) ([int]$state.httpPort) ([int]$state.upstreamPort) ([string]$state.domain)');
+    expect(b).toMatch(/if \(Test-SameConfigText \(\[System\.IO\.File\]::ReadAllText\(\$ConfigDest\)\) \$expected\) \{ Write-Ok [^}]*\} else \{\s*Write-Warn "\$ConfigDest differs from the template of this version/);
+    expect(b).toContain('Run -Reconfigure to apply the template');
+    // 중단된 -Reconfigure가 남긴 .prev는 문제로 보고한다(서비스가 이전 설정으로 돌고 있을 수 있음).
+    expect(b).toMatch(/if \(\$mode -ne 'docker' -and \(Test-Path -LiteralPath \$ConfigBackup -PathType Leaf\)\) \{\s*Write-Fail "\$ConfigBackup is left from an interrupted -Reconfigure[^"]*"; \$problems\+\+/);
   });
 
   it('Status는 앱 게시 규칙 위반(비루프백·없음·복수)을 문제로, Docker 조회 불가만 경고로 본다', () => {
@@ -429,6 +439,43 @@ describe('install-caddy-host.ps1 -Cutover / -Rollback / -Reconfigure (PR-3b)', (
     for (const s of ['$svc.PathName -notlike "$ExeDest *"', 'Get-ExistingRootProblem -MustExist', 'Get-ReparsePoints $d', '[string]$state.caddyExeSha512', '[string]$state.rootSha256']) {
       expect(g).toContain(s);
     }
+  });
+
+  it('Reconfigure는 업스트림 줄이 아니라 설정 전체를 템플릿 결과와 비교하고, 같을 때만 바꿀 것 없음으로 끝난다 — FX-7', () => {
+    // 비교 함수: 줄바꿈 정규화(CRLF·CR → LF) 뒤 서수(대소문자 구분) 비교. 실제 동작은 5.1·7에서 함수를 꺼내 실행해 확인했다
+    // (같음 · CRLF/CR만 다름 = 같음 · 옛 템플릿(응답 압축 없음, 업스트림 줄은 같음) = 다름 · 대소문자 · 포트 · 파일 없음).
+    const same = fnAny('Test-SameConfigText');
+    expect(same).toContain('-replace "`r`n", "`n"');
+    expect(same).toContain('-replace "`r", "`n"');
+    expect(same).toContain('[string]::Equals($na, $nb, [System.StringComparison]::Ordinal)');
+    const rc = fnBody('Invoke-Reconfigure');
+    // 옛 판정(포트 + 업스트림 줄 포함 여부)은 없어졌다 — 앱 포트가 같아도 템플릿 변경을 반영한다.
+    expect(rc).not.toContain('$live.Contains(');
+    before(rc, '$config = New-HostCaddyConfig ([int]$state.httpsPort) ([int]$state.httpPort) $appPort', '$sameAsNew = Test-SameConfigText $live $config');
+    // 바꿀 것 없음은 기록된 업스트림도 앱 포트와 같을 때만 — 새 파일을 옮긴 뒤(재시작·상태 기록 전) 중단된 실행을 다시 돌리면
+    // 파일은 같아도 검증·재시작·기록으로 간다(Codex PR 리뷰 1회차).
+    // 포트가 같아도 템플릿만 바꾸던 적용이 파일 교체 뒤·재시작 전에 끊겼으면(적용 중에만 있는 .prev가 남음) 역시 재적용(2회차).
+    expect(rc).toContain('$interruptedApply = Test-Path -LiteralPath $ConfigBackup -PathType Leaf');
+    // 이전 버전이 남긴 .prev(덜 복사됐을 수 있음)는 되돌리기에 쓰지 않는다 — 아무것도 바꾸기 전에 멈추고 확인 방법을 안내(4회차).
+    before(rc, 'if (Test-Path -LiteralPath $ConfigPrev -PathType Leaf) {', '$interruptedApply = Test-Path -LiteralPath $ConfigBackup');
+    expect(rc).toMatch(/if \(Test-Path -LiteralPath \$ConfigPrev -PathType Leaf\) \{\s*throw "\$ConfigPrev was left by an interrupted -Reconfigure of an earlier version[^"]*Nothing was changed\."/);
+    expect(rc).not.toMatch(/(Move|Copy)-Item -LiteralPath \$ConfigPrev\b/);
+    expect(fnBody('Invoke-Status')).toContain("if ($mode -ne 'docker' -and (Test-Path -LiteralPath $ConfigPrev -PathType Leaf)) {");
+    expect(rc).toMatch(/if \(\$sameAsNew -and -not \$portChanged -and -not \$interruptedApply\) \{[^}]*Nothing to change\.[^}]*\n[^\n]*configuration: same\.[^\n]*\n\s*exit 0/);
+    // 중단 뒤 재적용에서는 남아 있는 .prev(서비스가 돌던 설정)를 덮어쓰지 않는다 — 실패하면 그것으로 되돌린다.
+    // 백업은 임시 이름에 끝까지 복사한 뒤 같은 폴더에서 이름만 바꾼다 — 남아 있는 .prev는 늘 온전한 복사본(3회차).
+    expect(rc).toMatch(/if \(-not \$interruptedApply\) \{\s*Copy-Item -LiteralPath \$ConfigDest -Destination \$ConfigBackupTmp -Force\s*Move-Item -LiteralPath \$ConfigBackupTmp -Destination \$ConfigBackup -Force\s*\}/);
+    expect(SCRIPT).toContain("$ConfigBackupTmp = Join-Path $BinDir 'Caddyfile.host.backup.tmp'");
+    expect(fnBody('Invoke-Uninstall')).toContain('$ConfigPrev, $ConfigBackup, $ConfigBackupTmp,');
+    before(rc, 'if ($interruptedApply) {', 'Write-ValidatedConfig');
+    // -WhatIf는 바뀜/같음을 말하고, 손으로 고친 설정을 덮어쓰게 되면 경고한다 — 둘 다 검증·적용(Write-ValidatedConfig)보다 먼저.
+    // 그 중단 사례(파일 = 새 설정)에는 손편집 경고를 내지 않는다.
+    expect(rc).toContain("$whatIfState = if ($sameAsNew) { 'same, but not applied yet (recorded upstream port differs or an apply was interrupted; restart needed)' }");
+    before(rc, 'if ($sameAsNew -and -not $portChanged -and -not $interruptedApply) {', '-WhatIf: configuration: $whatIfState');
+    before(rc, 'if (-not $sameAsNew -and -not (Test-SameConfigText $live $configuredNow)) {', 'Write-ValidatedConfig');
+    before(rc, '-WhatIf: configuration: $whatIfState', 'Write-ValidatedConfig');
+    expect(rc).toContain('$configuredNow = New-HostCaddyConfig ([int]$state.httpsPort) ([int]$state.httpPort) ([int]$state.upstreamPort) ([string]$state.domain)');
+    expect(rc).toContain('hand edits are not kept');
   });
 
   it('미리 보기에 쓰는 compose 기본값이 docker-compose.yml의 기본값과 같다(5.1에서 빈 값은 변수 삭제 — Codex 계획 리뷰 1회차)', () => {

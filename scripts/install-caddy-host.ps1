@@ -43,8 +43,10 @@
                   BEFORE stopping anything, then stops and disables the service, restores only the two
                   env lines recorded in host-mode.json (WR_APP_PORT stays), recreates the caddy container
                   and checks that 8443 answers with the same CA.
-      -Reconfigure (Administrator, mode pilot or host) regenerates the configuration when the app's
-                  published port changed, validates it and restarts the service.
+      -Reconfigure (Administrator, mode pilot or host) regenerates the configuration from the template and,
+                  when it differs from the live Caddyfile.host (the app's published port changed, or an update
+                  changed the template), validates it and restarts the service. Hand edits to the live file are
+                  replaced (it says so). When they are the same it changes nothing. -WhatIf says changed/same.
       -Status     (any user) read-only report. Exit code 0 = OK, 1 = something needs attention.
       -Uninstall  (Administrator, mode pilot or docker) stops and deletes the service, removes the
                   firewall rule and the bin/state files. The CA copy (data) and the logs are KEPT.
@@ -147,7 +149,9 @@ $RootCrtPublic  = Join-Path $StateDir 'root.crt'
 $SnapshotFile   = Join-Path $StateDir 'listeners-before.json'
 $HostModeFile   = Join-Path $StateDir 'host-mode.json'   # what -Cutover changed in the env file (no secrets)
 $ConfigNext     = Join-Path $BinDir 'Caddyfile.host.next'
-$ConfigPrev     = Join-Path $BinDir 'Caddyfile.host.prev'
+$ConfigPrev     = Join-Path $BinDir 'Caddyfile.host.prev'          # backup name of earlier versions: only detected
+$ConfigBackup   = Join-Path $BinDir 'Caddyfile.host.backup'        # -Reconfigure backup and interrupted-apply marker
+$ConfigBackupTmp = Join-Path $BinDir 'Caddyfile.host.backup.tmp'
 $FirewallGroup  = 'WR Evaluation Caddy'
 $ReservedPorts  = @(8443, 8080)   # -Install never takes these; only -Cutover moves the service onto them
 $ProdHttpsPort  = 8443
@@ -887,6 +891,14 @@ function New-HostCaddyConfig([int]$Https, [int]$Http, [int]$AppPort, [string]$Do
     return $config
 }
 
+# Two configuration texts are the same when they are equal after normalising line endings (CRLF and CR -> LF),
+# compared ordinally (case-sensitive). Used by -Reconfigure (change nothing when the same) and -Status (FX-7).
+function Test-SameConfigText([string]$A, [string]$B) {
+    $na = ($A -replace "`r`n", "`n") -replace "`r", "`n"
+    $nb = ($B -replace "`r`n", "`n") -replace "`r", "`n"
+    return [string]::Equals($na, $nb, [System.StringComparison]::Ordinal)
+}
+
 # Writes a configuration next to the live one and validates it with the installed CA (root must be unchanged).
 function Write-ValidatedConfig([string]$Path, [string]$Config, [string]$Fp) {
     Write-TextFile $Path $Config
@@ -1553,15 +1565,45 @@ function Invoke-Reconfigure {
     $appPort = Get-AppPublishedPort
     $live = ''
     if (Test-Path -LiteralPath $ConfigDest -PathType Leaf) { $live = [System.IO.File]::ReadAllText($ConfigDest) }
-    if ($appPort -eq [int]$state.upstreamPort -and $live.Contains("reverse_proxy 127.0.0.1:$appPort")) {
-        Write-Ok "Upstream is already 127.0.0.1:$appPort. Nothing to change."
+    # The whole configuration is compared, not only the upstream line: an update may change the template (e.g.
+    # response compression) while the app port stays the same (FX-7).
+    $config = New-HostCaddyConfig ([int]$state.httpsPort) ([int]$state.httpPort) $appPort ([string]$state.domain)
+    $portChanged = $appPort -ne [int]$state.upstreamPort
+    $sameAsNew = Test-SameConfigText $live $config
+    # An earlier version wrote its backup straight to Caddyfile.host.prev; one left behind may be incomplete, so it is
+    # never used to restore from: stop and let the operator check (Codex PR review round 4).
+    if (Test-Path -LiteralPath $ConfigPrev -PathType Leaf) {
+        throw "$ConfigPrev was left by an interrupted -Reconfigure of an earlier version and may be incomplete. Check that $ConfigDest is complete (caddy validate), restart the service so it runs that file (Restart-Service $ServiceName) and check -Status, then delete $ConfigPrev and run -Reconfigure again. Nothing was changed."
+    }
+    # Caddyfile.host.backup exists only while an apply below is in progress (made complete under a temporary name, then
+    # renamed; removed after the restart was verified, or moved back on failure). Found at the start, it means an
+    # earlier -Reconfigure stopped after the new file was moved in place but before the service ran it (rounds 1-3).
+    $interruptedApply = Test-Path -LiteralPath $ConfigBackup -PathType Leaf
+    # Nothing to change only when the file is the new one, the recorded upstream is the app's port and no apply was
+    # interrupted: otherwise the service may still run the previous configuration, so validate, restart and record.
+    if ($sameAsNew -and -not $portChanged -and -not $interruptedApply) {
+        Write-Ok "Upstream is already 127.0.0.1:$appPort and $ConfigDest matches the template. Nothing to change."
+        if ($whatIf) { Write-Host '   -WhatIf: configuration: same.' -ForegroundColor Green }
         exit 0
     }
-    Write-Ok "App publishes 127.0.0.1:$appPort (configured: 127.0.0.1:$($state.upstreamPort))"
-    $config = New-HostCaddyConfig ([int]$state.httpsPort) ([int]$state.httpPort) $appPort ([string]$state.domain)
+    if ($portChanged) {
+        Write-Ok "App publishes 127.0.0.1:$appPort (configured: 127.0.0.1:$($state.upstreamPort))"
+    } elseif (-not $sameAsNew) {
+        Write-Ok "Upstream 127.0.0.1:$appPort is unchanged; $ConfigDest differs from the template of this version"
+    }
+    if ($interruptedApply) {
+        Write-Warn "$ConfigBackup is left from an interrupted -Reconfigure: the service may still run the previous configuration. It will be applied and the service restarted; $ConfigBackup stays the configuration to go back to."
+    }
+    # The live file differs even from what this template gives for the configured upstream: the template changed
+    # in this version, or the file was edited by hand. Hand edits are not kept.
+    $configuredNow = New-HostCaddyConfig ([int]$state.httpsPort) ([int]$state.httpPort) ([int]$state.upstreamPort) ([string]$state.domain)
+    if (-not $sameAsNew -and -not (Test-SameConfigText $live $configuredNow)) {
+        Write-Warn "$ConfigDest differs from the template beyond the upstream port (template changed in this version, or edited by hand). It will be replaced; hand edits are not kept."
+    }
     if ($whatIf) {
         Write-Host ''
-        Write-Host '   -WhatIf: checks passed, nothing was changed.' -ForegroundColor Green
+        $whatIfState = if ($sameAsNew) { 'same, but not applied yet (recorded upstream port differs or an apply was interrupted; restart needed)' } else { "changed (upstream port changed: $(if ($portChanged) { 'yes' } else { 'no' }))" }
+        Write-Host "   -WhatIf: configuration: $whatIfState. Checks passed, nothing was changed." -ForegroundColor Green
         exit 0
     }
     Write-ValidatedConfig $ConfigNext $config ([string]$state.rootSha256)
@@ -1569,16 +1611,22 @@ function Invoke-Reconfigure {
     if (-not $ScriptCmdlet.ShouldProcess($ServiceName, "Restart with upstream 127.0.0.1:$appPort")) { exit 0 }
 
     Write-Step 'Apply'
-    Copy-Item -LiteralPath $ConfigDest -Destination $ConfigPrev -Force
+    # After an interrupted apply the existing backup is the configuration the service ran before it: keep it.
+    # The backup is copied in full to a temporary name first and then renamed in the same folder, so a backup that
+    # exists is always a complete copy (it is also the interrupted-apply marker above) (Codex PR review round 3).
+    if (-not $interruptedApply) {
+        Copy-Item -LiteralPath $ConfigDest -Destination $ConfigBackupTmp -Force
+        Move-Item -LiteralPath $ConfigBackupTmp -Destination $ConfigBackup -Force
+    }
     Move-Item -LiteralPath $ConfigNext -Destination $ConfigDest -Force
     try {
         Restart-Service -Name $ServiceName -Force
         Assert-HostServing ([string]$state.domain) ([string]$state.rootSha256) $appPort ([int]$state.httpsPort) ([int]$state.httpPort)
         Update-JsonFile $StateFile @{ upstreamPort = $appPort }
-        Remove-Item -LiteralPath $ConfigPrev -Force
+        Remove-Item -LiteralPath $ConfigBackup -Force
     } catch {
         Write-Fail $_.Exception.Message
-        Move-Item -LiteralPath $ConfigPrev -Destination $ConfigDest -Force
+        Move-Item -LiteralPath $ConfigBackup -Destination $ConfigDest -Force
         Restart-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
         Write-Host '   The previous configuration was put back and the service restarted.' -ForegroundColor Yellow
         exit 1
@@ -1706,6 +1754,22 @@ function Invoke-Status {
             }
         } catch { Write-Fail $_.Exception.Message; $problems++ }
     }
+    # The live configuration against this version's template for the configured upstream (FX-7): after an update
+    # that changed the template it differs until -Reconfigure; a hand-edited file differs too (it would be replaced).
+    if ($mode -ne 'docker' -and (Test-Path -LiteralPath $ConfigBackup -PathType Leaf)) {
+        Write-Fail "$ConfigBackup is left from an interrupted -Reconfigure: the service may still run the previous configuration. Run -Reconfigure again."; $problems++
+    }
+    if ($mode -ne 'docker' -and (Test-Path -LiteralPath $ConfigPrev -PathType Leaf)) {
+        Write-Fail "$ConfigPrev is left from an interrupted -Reconfigure of an earlier version and may be incomplete. Check that $ConfigDest is complete, restart the service so it runs that file, check -Status, then delete $ConfigPrev and run -Reconfigure again."; $problems++
+    }
+    if ($mode -ne 'docker' -and (Test-Path -LiteralPath $ConfigDest -PathType Leaf)) {
+        try {
+            $expected = New-HostCaddyConfig ([int]$state.httpsPort) ([int]$state.httpPort) ([int]$state.upstreamPort) ([string]$state.domain)
+            if (Test-SameConfigText ([System.IO.File]::ReadAllText($ConfigDest)) $expected) { Write-Ok "$ConfigDest matches the template of this version" } else {
+                Write-Warn "$ConfigDest differs from the template of this version (an update changed the template, or the file was edited by hand). Run -Reconfigure to apply the template; hand edits would be replaced."
+            }
+        } catch { Write-Warn "Could not compare $ConfigDest with the template: $($_.Exception.Message)" }
+    }
 
     Write-Step 'Docker Caddy and env file'
     $shellVars = @(Get-ShellOverrides)
@@ -1793,7 +1857,7 @@ function Invoke-Uninstall {
         Remove-NetFirewallRule -Group $FirewallGroup
         Write-Ok 'Firewall rules removed'
     }
-    foreach ($f in @($ExeDest, $ConfigDest, $ConfigNext, $ConfigPrev, $StateFile, $SnapshotFile, $HostModeFile, $RootCrtPublic)) {
+    foreach ($f in @($ExeDest, $ConfigDest, $ConfigNext, $ConfigPrev, $ConfigBackup, $ConfigBackupTmp, $StateFile, $SnapshotFile, $HostModeFile, $RootCrtPublic)) {
         if ((Test-Path -LiteralPath $f) -and $ScriptCmdlet.ShouldProcess($f, 'Delete file')) {
             Remove-Item -LiteralPath $f -Force
             Write-Ok "Deleted $f"
