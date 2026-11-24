@@ -11,7 +11,7 @@ import { buildPrompt } from '@wr/contracts/aiPrompt';
 import { getModule } from '../../moduleRegistry';
 import { createTestPatients } from '../../fixtures/createTestPatients';
 import { createPatient } from '../data';
-import { getShoulderInterpretation, generateUnifiedReport } from '../reportGenerator';
+import { generateUnifiedReport } from '../reportGenerator';
 import { buildAiInput, buildAiInputResult, buildRawAiInput } from '../aiInput';
 import { classifyBk2117Interpretation } from '@wr/analytics-core/modules/shoulder/index';
 import {
@@ -268,7 +268,7 @@ describe('buildAiInput — 모듈이 바뀌거나 평가가 바뀐 상병에 남
 });
 
 describe('buildAiInput — 모듈 값', () => {
-  it('어깨: 해석 키가 보고서 문구(getShoulderInterpretation)와 같은 판정이다', () => {
+  it('어깨: 해석 키가 보고서 문구(어깨 서술의 소견서 블록)와 같은 판정이다', () => {
     const shoulderPatients = patients.filter((p) => (p.data.activeModules || []).includes('shoulder'));
     expect(shoulderPatients.length).toBeGreaterThan(3);
     const phrase = { exceeded: '초과하여', combinedSufficient: '복합 노출을 고려하여', insufficient: '미달하여' };
@@ -277,7 +277,7 @@ describe('buildAiInput — 모듈 값', () => {
       const calc = getModule('shoulder').computeCalc({ shared: patient.data.shared, module: patient.data.modules.shoulder });
       if (calc.noEvaluableJobs) continue;
       const key = buildAiInput(patient).modules.shoulder.interpretation;
-      expect(getShoulderInterpretation(calc.totals), patient.data.shared.name).toContain(phrase[key]);
+      expect(getModule('shoulder').narrative.render('report', calc, {}), patient.data.shared.name).toContain(phrase[key]);
       seen.add(key);
     }
     expect(seen.size).toBeGreaterThanOrEqual(1);

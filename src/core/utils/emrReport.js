@@ -2,7 +2,6 @@
 // 옮겨온 것으로, xlsx/jszip 의존성이 없어 미리보기 화면(AssessmentStep)이 byte 계산을
 // 위해 가볍게 import할 수 있다.
 
-import { classifyBk2117Interpretation } from '@wr/analytics-core/modules/shoulder/index';
 import { getModule } from '../moduleRegistry';
 import { getSideText } from '../i18n/sideLabels';
 import { groupSummariesByBkType as groupElbowSummaries, mergeBkGroupSummaries as mergeElbowGroups } from '../../modules/elbow/utils/calculations';
@@ -50,26 +49,9 @@ function buildExposureSection(shared, modules, activeModules) {
   }
 
   if (activeModules.includes('shoulder')) {
-    const calc = getModule('shoulder')?.computeCalc?.({ shared, module: modules.shoulder || {} });
-    text += '\n<어깨(견관절)>\n';
-    if (calc?.noEvaluableJobs) {
-      text += `${NO_EVALUABLE_JOBS_NOTE}\n`;
-    } else {
-      text += '독일의 산재보험 번호 BK2117 장기간의 집중적인 기계적 부하로 인한 어깨 회전근개 병변에 사용하는 어깨 부담 평가 지침을 이용하여 평가하였음.\n\n';
-      const shoulderTotals = calc?.totals || [];
-      shoulderTotals.forEach(total => {
-        const pct = total.totalHours > 0 ? ` / ${(total.ratio * 100).toFixed(0)}%` : '';
-        text += `- ${total.label}: ${total.totalHours > 0 ? `${total.totalHours.toFixed(1)}시간` : '-'} (기준 ${total.limit.toLocaleString()}시간${pct}${total.exceeded ? ' [초과]' : ''})\n`;
-      });
-      const { kind, exceededLabels } = classifyBk2117Interpretation(shoulderTotals);
-      if (kind === 'exceeded') {
-        text += `\n** ${exceededLabels.join(', ')} 기준을 초과하여 누적 신체부담은 충분함.\n`;
-      } else if (kind === 'combinedSufficient') {
-        text += `\n** 개별 기준 초과 항목은 없으나, 복합 노출을 고려하여 누적 신체부담은 충분함.\n`;
-      } else {
-        text += `\n** 노출 기준치에 미달하여 누적 신체부담 불충분함.\n`;
-      }
-    }
+    const shoulderManifest = getModule('shoulder');
+    const calc = shoulderManifest?.computeCalc?.({ shared, module: modules.shoulder || {} });
+    text += shoulderManifest?.narrative?.render('emrSection', calc, {}) ?? '';
   }
 
   if (activeModules.includes('wrist')) {
@@ -189,25 +171,9 @@ function buildExposureSummary(shared, modules, activeModules) {
   }
 
   if (activeModules.includes('shoulder')) {
-    const calc = getModule('shoulder')?.computeCalc?.({ shared, module: modules.shoulder || {} });
-    text += '\n<어깨(견관절)>\n';
-    if (calc?.noEvaluableJobs) {
-      text += `${NO_EVALUABLE_JOBS_NOTE}\n`;
-    } else {
-      const shoulderTotals = calc?.totals || [];
-      shoulderTotals.filter(total => total.exceeded || total.ratio >= 0.5).forEach(total => {
-        const pct = total.totalHours > 0 ? ` / ${(total.ratio * 100).toFixed(0)}%` : '';
-        text += `- ${total.label}: ${total.totalHours > 0 ? `${total.totalHours.toFixed(1)}시간` : '-'} (기준 ${total.limit.toLocaleString()}시간${pct}${total.exceeded ? ' [초과]' : ''})\n`;
-      });
-      const { kind, exceededLabels } = classifyBk2117Interpretation(shoulderTotals);
-      if (kind === 'exceeded') {
-        text += `** ${exceededLabels.join(', ')} 기준을 초과하여 누적 신체부담은 충분함.\n`;
-      } else if (kind === 'combinedSufficient') {
-        text += `** 개별 기준 초과 항목은 없으나, 복합 노출을 고려하여 누적 신체부담은 충분함.\n`;
-      } else {
-        text += `** 노출 기준치에 미달하여 누적 신체부담 불충분함.\n`;
-      }
-    }
+    const shoulderManifest = getModule('shoulder');
+    const calc = shoulderManifest?.computeCalc?.({ shared, module: modules.shoulder || {} });
+    text += shoulderManifest?.narrative?.render('emrSummary', calc, {}) ?? '';
   }
 
   if (activeModules.includes('wrist')) {
