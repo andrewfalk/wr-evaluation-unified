@@ -439,6 +439,15 @@ async function currentScenario() {
   record('현재: 동작 도중 계정이 바뀌어도 시작한 사용자로 기록', sw.length === 1 && sw[0].actor_user_id === accounts.b.id
     && sw[0].extra.sent_by_user_id === accounts.a.id);
 
+  // 5-1) 같은 기록을 두 번 보냄(같은 기록 시점 정보 = 같은 eventId, 요청마다 새 nonce — 응답을 받지 못해 대기열 줄을 다시
+  //      보낸 경우와 같음) → 둘 다 받아들여지고(대기열에 남지 않음) 감사 행은 하나(FX-6).
+  const ctxDup = shell.audit.captureAuditContext();
+  await shell.audit.recordAudit(entry('cur-dup'), ctxDup);
+  await shell.audit.recordAudit(entry('cur-dup'), ctxDup);
+  const dup = seqRows('cur-dup');
+  record('현재: 같은 기록을 두 번 보내면 감사 행은 하나, 대기열 0', dup.length === 1 && dup[0].extra.eventId === ctxDup.eventId
+    && queueLines(pc) === 0, `행 ${dup.length}, 대기열 ${queueLines(pc)}`);
+
   // 6) 429에서 회차를 멈춘다(이 주소의 실패 한도를 채운 뒤) → Retry-After 동안 다음 회차 없음 → 지난 뒤 전부 전송.
   for (let i = 0; i < 5; i += 1) shell.queue.enqueue(entry(`cur-429-${i}`));
   await exhaustAddressLimit();

@@ -54,6 +54,10 @@ const TIMESTAMP_TOLERANCE_MS = 5 * 60 * 1000;
 
 // Nonces are recorded in emr_audit_nonces (migration 0038) in the same transaction as the audit row
 // — see step 11 (SEC-A L11). jobs/emrAuditNonces.ts removes old rows.
+//
+// The same table also keeps one marker per recorded event of the current shell: key '${EVENT_MARKER_PREFIX}<eventId>'
+// under the PC's fixed row (step 11). A request nonce may not start with that prefix (step 2).
+const EVENT_MARKER_PREFIX = 'event:';
 
 const EMR_AUDIT_ACTIONS = new Set([
   'emr_inject',
@@ -117,6 +121,10 @@ async function handleEmrAudit(pool: Pool, deps: AuditDeps, req: Request, res: Re
 
   if (!headerId || !deviceSig || !deviceTs || !deviceNonce) {
     res.status(401).json({ code: 'UNAUTHORIZED', error: 'Missing device headers' });
+    return;
+  }
+  if (deviceNonce.startsWith(EVENT_MARKER_PREFIX)) {
+    res.status(401).json({ code: 'UNAUTHORIZED', error: 'Invalid device headers' });
     return;
   }
 
@@ -262,13 +270,22 @@ async function handleEmrAudit(pool: Pool, deps: AuditDeps, req: Request, res: Re
     });
   }
 
-  // --- 11. Nonce + audit row, in one transaction (SEC-A L11) ---
+  // --- 11. Nonce + event marker + audit row, in one transaction (SEC-A L11) ---
   // A nonce already recorded (a duplicate in flight that committed first) → 0 rows → 401; concurrent
   // duplicates are serialised by the primary-key row lock. If the audit INSERT fails, ROLLBACK removes the
-  // nonce row too, so the PC can resend the same signed request (never 200 without the audit row).
+  // nonce row (and the event marker) too, so the PC can resend the same signed request.
+  // An event of the current shell carries a random eventId; the same event sent again under a new nonce (a queue
+  // line resent after its answer was lost) finds its marker and is answered 200 { ok: true } without a second audit
+  // row, so the shell drops it from its queue. The request nonce is still recorded (a replay of that request → 401),
+  // its pacing slot is kept, and the burst time is not updated. Older shells' events and ids that are not UUIDs are
+  // recorded as before. The marker lives as long as nonce rows do (jobs/emrAuditNonces.ts).
+  const eventMarker = isCurrentShellEvent(body.extra) && typeof body.extra?.eventId === 'string' && isUuid(body.extra.eventId)
+    ? `${EVENT_MARKER_PREFIX}${body.extra.eventId.toLowerCase()}`
+    : null;
   // Server-set fields come after the client's `extra` (from which every server-reserved key was removed).
   const client = await pool.connect();
   let recorded = false;
+  let alreadyRecorded = false;
   try {
     await client.query('BEGIN');
     const claimed = await client.query(
@@ -282,7 +299,16 @@ async function handleEmrAudit(pool: Pool, deps: AuditDeps, req: Request, res: Re
       res.status(401).json({ code: 'UNAUTHORIZED', error: 'Duplicate request (nonce reuse)' });
       return;
     }
-    await writeAuditLogStrict(client, {
+    if (eventMarker) {
+      const marked = await client.query(
+        `INSERT INTO emr_audit_nonces (device_id, nonce) VALUES ($1, $2)
+         ON CONFLICT (device_id, nonce) DO NOTHING
+         RETURNING 1`,
+        [pc.anchorId, eventMarker],
+      );
+      alreadyRecorded = (marked.rowCount ?? 0) === 0;
+    }
+    if (!alreadyRecorded) await writeAuditLogStrict(client, {
       actorUserId: actor.actorUserId,
       actorOrgId:  actor.actorOrgId,
       action:    body.action,
@@ -308,7 +334,7 @@ async function handleEmrAudit(pool: Pool, deps: AuditDeps, req: Request, res: Re
     client.release();
     if (!recorded) slot.refund();
   }
-  deps.burst.accepted(pc.anchorId);
+  if (!alreadyRecorded) deps.burst.accepted(pc.anchorId);
 
   // Last seen on every row of the PC.
   pool.query(
