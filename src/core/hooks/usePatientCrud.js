@@ -11,6 +11,7 @@ import { isValidDiagnosisModuleId, resolveDiagnosisModule } from '../utils/diagn
 
 import { hasIntranetSession } from '../../platform/dataMode';
 import { useGuardedDialogs } from '../../app/useWorkspaceLifetime';
+import { loadChunk } from '../utils/loadChunk';
 export function usePatientCrud({
   activeId, activeModuleId, session, settings,
   patients, setPatients,
@@ -265,7 +266,14 @@ export function usePatientCrud({
       const ok = await confirmAlive('테스트 데이터가 로드되면 현재 환자 목록이 교체되고, 서버 모드에서는 서버로 동기화될 수 있습니다. 진행하시겠습니까?');
       if (!ok) return;
     }
-    const { createTestPatients } = await import('../fixtures/createTestPatients');
+    // 테스트 데이터 코드는 별도 조각이다 — 내려받지 못하면 새로고침 안내를 띄우고 멈춘다(FX-5, 전에는 처리되지 않은 거부).
+    let createTestPatients;
+    try {
+      ({ createTestPatients } = await loadChunk(() => import('../fixtures/createTestPatients')));
+    } catch (err) {
+      if (isAlive()) await alertAlive(err.message);
+      return;
+    }
     if (!isAlive()) return;
     const testPatients = migratePatientRecords(createTestPatients(), { session });
     setPatients(patientTx.replacedAll({ patients: testPatients }));

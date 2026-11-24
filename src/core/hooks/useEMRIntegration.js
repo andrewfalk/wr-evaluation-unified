@@ -6,6 +6,7 @@ import { useGuardedDialogs } from '../../app/useWorkspaceLifetime';
 import {
   EXTRACT_FAILURE_EXCEPTION, EXTRACT_FAILURE_PATIENT_MISMATCH, addExtractFailure, extractFailureReason, formatExtractFailures,
 } from './extractFailureReasons';
+import { ChunkLoadError, loadChunk } from '../utils/loadChunk';
 
 export function useEMRIntegration({ activePatient, patients, selectedIds, session, setPatients, dirtyAssessmentPatientId }) {
   // 적용 여부(receipt) — 전이 patient/sharedPatched는 적용 시점 목록으로 판정해 receipt에 적는다(P2-39b). 환자 스토어가
@@ -113,7 +114,7 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
     const ok = await confirmAlive('다학제 회신 내용을 EMR 종합소견 2,3번 칸에 입력합니다.\nEMR 업무관련성 특별진찰소견서가 열려있는지 확인하세요.\n\n계속하시겠습니까?');
     if (!ok) return;
     try {
-      const { generateConsultReplyFieldData } = await import('../utils/exportService');
+      const { generateConsultReplyFieldData } = await loadChunk(() => import('../utils/exportService'));
       const fieldData = generateConsultReplyFieldData(activePatient);
       if (!isAlive()) return;
       const result = await getEmrBridge().injectEMR(fieldData);
@@ -129,7 +130,10 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
       } else {
         await alertAlive(`다학제 회신 입력 실패: ${result.message}`);
       }
-    } catch (err) { await alertAlive('다학제 회신 입력 오류: ' + err.message); }
+    } catch (err) {
+      // 코드 조각을 내려받지 못했으면 새로고침 안내만(FX-5), 그 밖의 오류는 전과 같다.
+      await alertAlive(err instanceof ChunkLoadError ? err.message : '다학제 회신 입력 오류: ' + err.message);
+    }
   };
 
   // EMR 데이터 일괄 추출 (선택된 환자들의 patientNo 기반)
