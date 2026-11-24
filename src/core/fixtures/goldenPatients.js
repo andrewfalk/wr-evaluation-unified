@@ -9,6 +9,7 @@
 // append a patient to the JSON (then update the affected goldens in that PR, with the reason).
 import goldenPatients from './goldenPatients.json';
 import goldenPatientsBatch from './goldenPatientsBatch.json';
+import goldenPatientsNarrative from './goldenPatientsNarrative.json';
 
 // A fresh deep copy each call — some functions under test (batch import applyRow) mutate input.
 export function loadGoldenPatients() {
@@ -22,4 +23,15 @@ export function loadGoldenPatients() {
 // scripts, and appending to it would change their existing values. Same rule: plain data, never regenerated.
 export function loadGoldenBatchPatients() {
   return JSON.parse(JSON.stringify(goldenPatientsBatch));
+}
+
+// Extra narrative cases (P2-59, Phase 2 C7-a) — hand-built patients for branches of the report text / EMR b6·b8 / AI
+// input that goldenPatients.json does not reach: all six modules in an order that is neither the registration order nor
+// the EMR order, every job excluded from analysis, blank values (job name, knee inputs, diagnosis code/name/side, BK
+// type), shoulder combined exposure with the job numbering map, spine whole-body vibration / court-only / weighted daily
+// dose / no tasks, and elbow+wrist switched on without a diagnosis. The narrative goldens run these together with
+// goldenPatientsBatch.json. Same rule: plain data, never regenerated; separate from goldenPatients.json for the same
+// reason as the batch file.
+export function loadGoldenNarrativePatients() {
+  return JSON.parse(JSON.stringify(goldenPatientsNarrative));
 }

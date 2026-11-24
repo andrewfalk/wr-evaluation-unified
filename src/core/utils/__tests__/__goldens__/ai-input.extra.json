@@ -1,0 +1,2561 @@
+{
+  "golden-batch-elbow-wrist": {
+    "input": {
+      "schemaVersion": 1,
+      "demographics": {
+        "ageYears": 55,
+        "gender": "male",
+        "heightCm": 170,
+        "weightKg": 70,
+        "bmi": 24.2,
+        "hypertension": false,
+        "diabetes": false
+      },
+      "diagnoses": [
+        {
+          "code": "M77.1",
+          "moduleId": "elbow",
+          "side": "right",
+          "units": [
+            {
+              "side": "right",
+              "confirmed": "confirmed",
+              "assessment": "high",
+              "reasons": [],
+              "klg": null,
+              "ellman": null
+            }
+          ],
+          "verticalDistribution": null,
+          "concomitantSpondylosis": null
+        },
+        {
+          "code": "G56.0",
+          "moduleId": "wrist",
+          "side": "both",
+          "units": [
+            {
+              "side": "right",
+              "confirmed": "confirmed",
+              "assessment": "high",
+              "reasons": [],
+              "klg": null,
+              "ellman": null
+            },
+            {
+              "side": "left",
+              "confirmed": "unconfirmed",
+              "assessment": "low",
+              "reasons": [
+                "delayed",
+                "other"
+              ],
+              "klg": null,
+              "ellman": null
+            }
+          ],
+          "verticalDistribution": null,
+          "concomitantSpondylosis": null
+        },
+        {
+          "code": "M65.4",
+          "moduleId": "wrist",
+          "side": "left",
+          "units": [
+            {
+              "side": "left",
+              "confirmed": null,
+              "assessment": null,
+              "reasons": [],
+              "klg": null,
+              "ellman": null
+            }
+          ],
+          "verticalDistribution": null,
+          "concomitantSpondylosis": null
+        }
+      ],
+      "jobs": [
+        {
+          "durationYears": 10.99520876112252,
+          "workDaysPerYear": 250,
+          "excludedFromAnalysis": false
+        },
+        {
+          "durationYears": 10.5,
+          "workDaysPerYear": 250,
+          "excludedFromAnalysis": false
+        }
+      ],
+      "modules": {
+        "elbow": {
+          "noEvaluableJobs": false,
+          "temporal": {
+            "recentTaskChange": "process_change",
+            "improvesWithRest": "no",
+            "flags": [],
+            "hasMissingCommonFields": false
+          },
+          "jobs": [
+            {
+              "jobIndex": 0,
+              "groups": [
+                {
+                  "bkType": "BK2101",
+                  "diagnosisRefs": [
+                    0
+                  ],
+                  "riskFactorKeys": [],
+                  "riskFactorCount": 0,
+                  "burdenGrade": "none",
+                  "hasMissingFields": true
+                }
+              ]
+            },
+            {
+              "jobIndex": 1,
+              "groups": [
+                {
+                  "bkType": "BK2101",
+                  "diagnosisRefs": [
+                    0
+                  ],
+                  "riskFactorKeys": [],
+                  "riskFactorCount": 0,
+                  "burdenGrade": "none",
+                  "hasMissingFields": true
+                }
+              ]
+            }
+          ]
+        },
+        "wrist": {
+          "noEvaluableJobs": false,
+          "temporal": {
+            "recentTaskChange": "increased_load",
+            "improvesWithRest": "yes",
+            "flags": [
+              "temporal_fit_high"
+            ],
+            "hasMissingCommonFields": false
+          },
+          "jobs": [
+            {
+              "jobIndex": 0,
+              "groups": [
+                {
+                  "bkType": "BK2113",
+                  "diagnosisRefs": [
+                    1
+                  ],
+                  "riskFactorKeys": [
+                    "temporal_fit_high"
+                  ],
+                  "riskFactorCount": 1,
+                  "burdenGrade": "none",
+                  "hasMissingFields": true
+                },
+                {
+                  "bkType": "BK2101",
+                  "diagnosisRefs": [
+                    2
+                  ],
+                  "riskFactorKeys": [
+                    "temporal_fit_high"
+                  ],
+                  "riskFactorCount": 1,
+                  "burdenGrade": "none",
+                  "hasMissingFields": true
+                }
+              ]
+            },
+            {
+              "jobIndex": 1,
+              "groups": [
+                {
+                  "bkType": "BK2113",
+                  "diagnosisRefs": [
+                    1
+                  ],
+                  "riskFactorKeys": [
+                    "temporal_fit_high"
+                  ],
+                  "riskFactorCount": 1,
+                  "burdenGrade": "none",
+                  "hasMissingFields": true
+                },
+                {
+                  "bkType": "BK2101",
+                  "diagnosisRefs": [
+                    2
+                  ],
+                  "riskFactorKeys": [
+                    "temporal_fit_high"
+                  ],
+                  "riskFactorCount": 1,
+                  "burdenGrade": "none",
+                  "hasMissingFields": true
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "error": null
+  },
+  "golden-batch-elbow-knee-spine": {
+    "input": {
+      "schemaVersion": 1,
+      "demographics": {
+        "ageYears": 55,
+        "gender": "female",
+        "heightCm": 170,
+        "weightKg": 70,
+        "bmi": 24.2,
+        "hypertension": false,
+        "diabetes": false
+      },
+      "diagnoses": [
+        {
+          "code": "M77.0",
+          "moduleId": "elbow",
+          "side": "left",
+          "units": [
+            {
+              "side": "left",
+              "confirmed": null,
+              "assessment": null,
+              "reasons": [],
+              "klg": null,
+              "ellman": null
+            }
+          ],
+          "verticalDistribution": null,
+          "concomitantSpondylosis": null
+        },
+        {
+          "code": "M17.0",
+          "moduleId": "knee",
+          "side": "both",
+          "units": [
+            {
+              "side": "right",
+              "confirmed": "confirmed",
+              "assessment": "high",
+              "reasons": [],
+              "klg": "3",
+              "ellman": null
+            },
+            {
+              "side": "left",
+              "confirmed": "confirmed",
+              "assessment": "low",
+              "reasons": [
+                "lowBurden"
+              ],
+              "klg": "N/A",
+              "ellman": null
+            }
+          ],
+          "verticalDistribution": null,
+          "concomitantSpondylosis": null
+        },
+        {
+          "code": "M51.2",
+          "moduleId": "spine",
+          "side": null,
+          "units": [
+            {
+              "side": "axial",
+              "confirmed": null,
+              "assessment": null,
+              "reasons": [],
+              "klg": null,
+              "ellman": null
+            }
+          ],
+          "verticalDistribution": "confirmed",
+          "concomitantSpondylosis": "unconfirmed"
+        }
+      ],
+      "jobs": [
+        {
+          "durationYears": 10.99794661190965,
+          "workDaysPerYear": 250,
+          "excludedFromAnalysis": false
+        },
+        {
+          "durationYears": 18.494182067077343,
+          "workDaysPerYear": 250,
+          "excludedFromAnalysis": false
+        }
+      ],
+      "modules": {
+        "knee": {
+          "noEvaluableJobs": false,
+          "relatedness": {
+            "minPct": 30.6,
+            "maxPct": 67.3,
+            "avgPct": 49
+          },
+          "cumulativeBurdenSufficient": false,
+          "jobs": [
+            {
+              "jobIndex": 0,
+              "weightKgPerDay": 1200,
+              "squattingMinPerDay": 90,
+              "aux": {
+                "stairs": true,
+                "kneeTwist": false,
+                "startStop": false,
+                "tightSpace": false,
+                "kneeContact": true,
+                "jumpDown": false
+              },
+              "burdenLevel": "lowerModerate"
+            },
+            {
+              "jobIndex": 1,
+              "weightKgPerDay": 300,
+              "squattingMinPerDay": 30,
+              "aux": {
+                "stairs": false,
+                "kneeTwist": false,
+                "startStop": false,
+                "tightSpace": false,
+                "kneeContact": false,
+                "jumpDown": true
+              },
+              "burdenLevel": "low"
+            }
+          ]
+        },
+        "elbow": {
+          "noEvaluableJobs": false,
+          "temporal": {
+            "recentTaskChange": null,
+            "improvesWithRest": null,
+            "flags": [],
+            "hasMissingCommonFields": true
+          },
+          "jobs": [
+            {
+              "jobIndex": 0,
+              "groups": [
+                {
+                  "bkType": "BK2101",
+                  "diagnosisRefs": [
+                    0
+                  ],
+                  "riskFactorKeys": [],
+                  "riskFactorCount": 0,
+                  "burdenGrade": "none",
+                  "hasMissingFields": true
+                }
+              ]
+            },
+            {
+              "jobIndex": 1,
+              "groups": [
+                {
+                  "bkType": "BK2101",
+                  "diagnosisRefs": [
+                    0
+                  ],
+                  "riskFactorKeys": [],
+                  "riskFactorCount": 0,
+                  "burdenGrade": "none",
+                  "hasMissingFields": true
+                }
+              ]
+            }
+          ]
+        },
+        "spine": {
+          "noEvaluableJobs": false,
+          "mddmStatus": "present",
+          "mddm": {
+            "formulaVersion": "v5.1.3",
+            "dailyDoseKNh": 4.416666666666666,
+            "lifetimeDoseMNh": 19.63674277131181,
+            "totalYears": 29.492128678986994,
+            "excluded": false,
+            "weightedDailyDoseKNh": 4.245782220824175,
+            "comparison": {
+              "mddm": {
+                "limit": 17,
+                "percent": 115.51025159595181,
+                "status": "danger"
+              },
+              "court": {
+                "limit": 8.5,
+                "percent": 231.02050319190363,
+                "status": "danger"
+              }
+            },
+            "workRelatedness": {
+              "level": "high",
+              "workContributionPct": 100,
+              "personalContributionPct": 0
+            },
+            "severity": "lowerModerate",
+            "jobs": [
+              {
+                "jobIndex": 0,
+                "periodYears": 10.99794661190965,
+                "workDaysPerYear": 250,
+                "dailyDoseKNh": 1.2166666666666668,
+                "lifetimeDoseMNh": 0,
+                "lifetimeExcluded": true,
+                "tasks": [
+                  {
+                    "posture": "G3",
+                    "weightKg": 0,
+                    "frequencyPerDay": 0,
+                    "timeValue": 0,
+                    "timeUnit": "sec",
+                    "correctionFactor": 0,
+                    "forceN": 1900,
+                    "included": true
+                  },
+                  {
+                    "posture": "G3",
+                    "weightKg": 25,
+                    "frequencyPerDay": 10,
+                    "timeValue": 5,
+                    "timeUnit": "sec",
+                    "correctionFactor": 1,
+                    "forceN": 3650,
+                    "included": true
+                  }
+                ]
+              },
+              {
+                "jobIndex": 1,
+                "periodYears": 18.494182067077343,
+                "workDaysPerYear": 250,
+                "dailyDoseKNh": 4.245782220824175,
+                "lifetimeDoseMNh": 19.63674277131181,
+                "lifetimeExcluded": false,
+                "tasks": [
+                  {
+                    "posture": "G3",
+                    "weightKg": 10,
+                    "frequencyPerDay": 10,
+                    "timeValue": 2,
+                    "timeUnit": "min",
+                    "correctionFactor": 1,
+                    "forceN": 2600,
+                    "included": true
+                  }
+                ]
+              }
+            ]
+          },
+          "vibration": {
+            "exposureStatus": "unknown",
+            "amax8Min": null,
+            "amax8Max": null,
+            "dvMin": null,
+            "dvMax": null,
+            "daily": null,
+            "lifetime": null,
+            "hasInvalidIntervals": false,
+            "jobs": []
+          }
+        }
+      }
+    },
+    "error": null
+  },
+  "golden-batch-no-jobs": {
+    "input": {
+      "schemaVersion": 1,
+      "demographics": {
+        "ageYears": 55,
+        "gender": "male",
+        "heightCm": 170,
+        "weightKg": 70,
+        "bmi": 24.2,
+        "hypertension": false,
+        "diabetes": false
+      },
+      "diagnoses": [
+        {
+          "code": "M50.1",
+          "moduleId": "cervical",
+          "side": null,
+          "units": [
+            {
+              "side": "axial",
+              "confirmed": null,
+              "assessment": null,
+              "reasons": [],
+              "klg": null,
+              "ellman": null
+            }
+          ],
+          "verticalDistribution": null,
+          "concomitantSpondylosis": null
+        }
+      ],
+      "jobs": [],
+      "modules": {
+        "spine": {
+          "noEvaluableJobs": false,
+          "mddmStatus": "present",
+          "mddm": {
+            "formulaVersion": "v5.1.3",
+            "dailyDoseKNh": 0.8666666666666666,
+            "lifetimeDoseMNh": 0,
+            "totalYears": 0,
+            "excluded": true,
+            "weightedDailyDoseKNh": null,
+            "comparison": {
+              "mddm": {
+                "limit": 25,
+                "percent": 0,
+                "status": "safe"
+              },
+              "court": {
+                "limit": 12.5,
+                "percent": 0,
+                "status": "safe"
+              }
+            },
+            "workRelatedness": {
+              "level": "low",
+              "workContributionPct": 0,
+              "personalContributionPct": 100
+            },
+            "severity": "low",
+            "jobs": []
+          },
+          "vibration": {
+            "exposureStatus": "unknown",
+            "amax8Min": null,
+            "amax8Max": null,
+            "dvMin": null,
+            "dvMax": null,
+            "daily": null,
+            "lifetime": null,
+            "hasInvalidIntervals": false,
+            "jobs": []
+          }
+        },
+        "cervical": {
+          "noEvaluableJobs": false,
+          "overallBurdenGrade": "low",
+          "overallCumulativeKgHours": 0,
+          "jobs": []
+        }
+      }
+    },
+    "error": null
+  },
+  "golden-batch-mddm-none": {
+    "input": {
+      "schemaVersion": 1,
+      "demographics": {
+        "ageYears": 55,
+        "gender": "female",
+        "heightCm": 170,
+        "weightKg": 70,
+        "bmi": 24.2,
+        "hypertension": false,
+        "diabetes": false
+      },
+      "diagnoses": [
+        {
+          "code": "M75.1",
+          "moduleId": "shoulder",
+          "side": "right",
+          "units": [
+            {
+              "side": "right",
+              "confirmed": null,
+              "assessment": null,
+              "reasons": [],
+              "klg": null,
+              "ellman": "Grade 2"
+            }
+          ],
+          "verticalDistribution": null,
+          "concomitantSpondylosis": null
+        }
+      ],
+      "jobs": [
+        {
+          "durationYears": 9.998631074606434,
+          "workDaysPerYear": 250,
+          "excludedFromAnalysis": false
+        },
+        {
+          "durationYears": 0,
+          "workDaysPerYear": 250,
+          "excludedFromAnalysis": false
+        }
+      ],
+      "modules": {
+        "shoulder": {
+          "noEvaluableJobs": false,
+          "totals": {
+            "overhead": {
+              "hours": 0,
+              "limitHours": 3600,
+              "ratio": 0,
+              "exceeded": false
+            },
+            "repetitiveMedium": {
+              "hours": 0,
+              "limitHours": 38000,
+              "ratio": 0,
+              "exceeded": false
+            },
+            "repetitiveFast": {
+              "hours": 0,
+              "limitHours": 9400,
+              "ratio": 0,
+              "exceeded": false
+            },
+            "heavyLoad": {
+              "hours": 0,
+              "limitHours": 200,
+              "ratio": 0,
+              "exceeded": false
+            },
+            "vibration": {
+              "hours": 0,
+              "limitHours": 5300,
+              "ratio": 0,
+              "exceeded": false
+            }
+          },
+          "interpretation": "insufficient",
+          "jobs": [
+            {
+              "jobIndex": 0,
+              "periodYears": 9.998631074606434,
+              "exposures": {
+                "overhead": {
+                  "dailyHours": 0,
+                  "cumulativeHours": 0
+                },
+                "repetitiveMedium": {
+                  "dailyHours": 0,
+                  "cumulativeHours": 0
+                },
+                "repetitiveFast": {
+                  "dailyHours": 0,
+                  "cumulativeHours": 0
+                },
+                "heavyLoad": {
+                  "dailyHours": 0,
+                  "cumulativeHours": 0
+                },
+                "vibration": {
+                  "dailyHours": 0,
+                  "cumulativeHours": 0
+                }
+              }
+            },
+            {
+              "jobIndex": 1,
+              "periodYears": 0,
+              "exposures": {
+                "overhead": {
+                  "dailyHours": 0,
+                  "cumulativeHours": 0
+                },
+                "repetitiveMedium": {
+                  "dailyHours": 0,
+                  "cumulativeHours": 0
+                },
+                "repetitiveFast": {
+                  "dailyHours": 1,
+                  "cumulativeHours": 0
+                },
+                "heavyLoad": {
+                  "dailyHours": 0,
+                  "cumulativeHours": 0
+                },
+                "vibration": {
+                  "dailyHours": 2,
+                  "cumulativeHours": 0
+                }
+              }
+            }
+          ]
+        },
+        "spine": {
+          "noEvaluableJobs": false,
+          "mddmStatus": "none",
+          "vibration": {
+            "exposureStatus": "unknown",
+            "amax8Min": null,
+            "amax8Max": null,
+            "dvMin": null,
+            "dvMax": null,
+            "daily": null,
+            "lifetime": null,
+            "hasInvalidIntervals": false,
+            "jobs": []
+          }
+        },
+        "cervical": {
+          "noEvaluableJobs": false,
+          "overallBurdenGrade": "present",
+          "overallCumulativeKgHours": 0,
+          "jobs": [
+            {
+              "jobIndex": 0,
+              "burdenGrade": "present",
+              "flagKeys": [
+                "awkward_static_neck_supported",
+                "mechanical_cervical_load_dominant"
+              ],
+              "riskFactorCount": 0,
+              "cumulativeKgHours": 0,
+              "representativeHours": 2,
+              "totalAwkwardHours": 2,
+              "yearsExposed": 9.998631074606434,
+              "taskCount": 1,
+              "completedTaskCount": 0,
+              "hasBk2109CoreTask": false,
+              "tasks": [
+                {
+                  "exposureTypes": [],
+                  "loadWeightKg": null,
+                  "carryHoursPerShift": null,
+                  "neckNonNeutralHoursPerDay": 2,
+                  "forcedNeckPosture": "yes",
+                  "combinedFlexionRotation": null,
+                  "precisionWork": null
+                }
+              ]
+            },
+            {
+              "jobIndex": 1,
+              "burdenGrade": "present",
+              "flagKeys": [
+                "forced_neck_posture_present",
+                "awkward_static_neck_supported",
+                "mechanical_cervical_load_dominant"
+              ],
+              "riskFactorCount": 1,
+              "cumulativeKgHours": 0,
+              "representativeHours": 2,
+              "totalAwkwardHours": 2,
+              "yearsExposed": 0,
+              "taskCount": 1,
+              "completedTaskCount": 0,
+              "hasBk2109CoreTask": false,
+              "tasks": [
+                {
+                  "exposureTypes": [
+                    "shoulder_heavy_load"
+                  ],
+                  "loadWeightKg": 30,
+                  "carryHoursPerShift": null,
+                  "neckNonNeutralHoursPerDay": 2,
+                  "forcedNeckPosture": "yes",
+                  "combinedFlexionRotation": null,
+                  "precisionWork": null
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "error": null
+  },
+  "golden-batch-wbv": {
+    "input": {
+      "schemaVersion": 1,
+      "demographics": {
+        "ageYears": 55,
+        "gender": "male",
+        "heightCm": 170,
+        "weightKg": 70,
+        "bmi": 24.2,
+        "hypertension": false,
+        "diabetes": false
+      },
+      "diagnoses": [
+        {
+          "code": "M54.5",
+          "moduleId": "spine",
+          "side": null,
+          "units": [
+            {
+              "side": "axial",
+              "confirmed": null,
+              "assessment": null,
+              "reasons": [],
+              "klg": null,
+              "ellman": null
+            }
+          ],
+          "verticalDistribution": null,
+          "concomitantSpondylosis": null
+        }
+      ],
+      "jobs": [
+        {
+          "durationYears": 24,
+          "workDaysPerYear": 250,
+          "excludedFromAnalysis": false
+        }
+      ],
+      "modules": {
+        "spine": {
+          "noEvaluableJobs": false,
+          "mddmStatus": "unknown",
+          "vibration": {
+            "exposureStatus": "unknown",
+            "amax8Min": null,
+            "amax8Max": null,
+            "dvMin": null,
+            "dvMax": null,
+            "daily": null,
+            "lifetime": null,
+            "hasInvalidIntervals": false,
+            "jobs": []
+          }
+        }
+      }
+    },
+    "error": null
+  },
+  "golden-batch-empty": {
+    "input": {
+      "schemaVersion": 1,
+      "demographics": {
+        "ageYears": 55,
+        "gender": "female",
+        "heightCm": 170,
+        "weightKg": 70,
+        "bmi": 24.2,
+        "hypertension": false,
+        "diabetes": false
+      },
+      "diagnoses": [],
+      "jobs": [],
+      "modules": {}
+    },
+    "error": null
+  },
+  "golden-narr-all-modules": {
+    "input": {
+      "schemaVersion": 1,
+      "demographics": {
+        "ageYears": 57,
+        "gender": "male",
+        "heightCm": 172,
+        "weightKg": 74,
+        "bmi": 25,
+        "hypertension": false,
+        "diabetes": false
+      },
+      "diagnoses": [
+        {
+          "code": "M17.0",
+          "moduleId": "knee",
+          "side": "right",
+          "units": [
+            {
+              "side": "right",
+              "confirmed": "confirmed",
+              "assessment": "high",
+              "reasons": [],
+              "klg": "3",
+              "ellman": null
+            }
+          ],
+          "verticalDistribution": null,
+          "concomitantSpondylosis": null
+        },
+        {
+          "code": "M75.1",
+          "moduleId": "shoulder",
+          "side": "right",
+          "units": [
+            {
+              "side": "right",
+              "confirmed": "confirmed",
+              "assessment": "high",
+              "reasons": [],
+              "klg": null,
+              "ellman": null
+            }
+          ],
+          "verticalDistribution": null,
+          "concomitantSpondylosis": null
+        },
+        {
+          "code": "M77.1",
+          "moduleId": "elbow",
+          "side": "right",
+          "units": [
+            {
+              "side": "right",
+              "confirmed": "confirmed",
+              "assessment": "high",
+              "reasons": [],
+              "klg": null,
+              "ellman": null
+            }
+          ],
+          "verticalDistribution": null,
+          "concomitantSpondylosis": null
+        },
+        {
+          "code": "G56.0",
+          "moduleId": "wrist",
+          "side": "left",
+          "units": [
+            {
+              "side": "left",
+              "confirmed": "confirmed",
+              "assessment": "high",
+              "reasons": [],
+              "klg": null,
+              "ellman": null
+            }
+          ],
+          "verticalDistribution": null,
+          "concomitantSpondylosis": null
+        },
+        {
+          "code": "M51.1",
+          "moduleId": "spine",
+          "side": null,
+          "units": [
+            {
+              "side": "axial",
+              "confirmed": null,
+              "assessment": null,
+              "reasons": [],
+              "klg": null,
+              "ellman": null
+            }
+          ],
+          "verticalDistribution": null,
+          "concomitantSpondylosis": null
+        },
+        {
+          "code": "M50.1",
+          "moduleId": "cervical",
+          "side": null,
+          "units": [
+            {
+              "side": "axial",
+              "confirmed": null,
+              "assessment": null,
+              "reasons": [],
+              "klg": null,
+              "ellman": null
+            }
+          ],
+          "verticalDistribution": null,
+          "concomitantSpondylosis": null
+        }
+      ],
+      "jobs": [
+        {
+          "durationYears": 11.994524298425736,
+          "workDaysPerYear": 250,
+          "excludedFromAnalysis": false
+        },
+        {
+          "durationYears": 12.83504449007529,
+          "workDaysPerYear": 250,
+          "excludedFromAnalysis": false
+        }
+      ],
+      "modules": {
+        "knee": {
+          "noEvaluableJobs": false,
+          "relatedness": {
+            "minPct": 47.9,
+            "maxPct": 73.4,
+            "avgPct": 60.7
+          },
+          "cumulativeBurdenSufficient": true,
+          "jobs": [
+            {
+              "jobIndex": 0,
+              "weightKgPerDay": 1500,
+              "squattingMinPerDay": 60,
+              "aux": {
+                "stairs": true,
+                "kneeTwist": false,
+                "startStop": false,
+                "tightSpace": false,
+                "kneeContact": false,
+                "jumpDown": false
+              },
+              "burdenLevel": "lowerModerate"
+            },
+            {
+              "jobIndex": 1,
+              "weightKgPerDay": 2600,
+              "squattingMinPerDay": 40,
+              "aux": {
+                "stairs": false,
+                "kneeTwist": true,
+                "startStop": true,
+                "tightSpace": false,
+                "kneeContact": false,
+                "jumpDown": false
+              },
+              "burdenLevel": "lowerModerate"
+            }
+          ]
+        },
+        "shoulder": {
+          "noEvaluableJobs": false,
+          "totals": {
+            "overhead": {
+              "hours": 6207.392197125257,
+              "limitHours": 3600,
+              "ratio": 1.7242756103125714,
+              "exceeded": true
+            },
+            "repetitiveMedium": {
+              "hours": 5997.262149212868,
+              "limitHours": 38000,
+              "ratio": 0.15782268813718076,
+              "exceeded": false
+            },
+            "repetitiveFast": {
+              "hours": 1283.504449007529,
+              "limitHours": 9400,
+              "ratio": 0.13654302649016267,
+              "exceeded": false
+            },
+            "heavyLoad": {
+              "hours": 83.29530762795649,
+              "limitHours": 200,
+              "ratio": 0.41647653813978247,
+              "exceeded": false
+            },
+            "vibration": {
+              "hours": 1499.315537303217,
+              "limitHours": 5300,
+              "ratio": 0.28288972401947493,
+              "exceeded": false
+            }
+          },
+          "interpretation": "exceeded",
+          "jobs": [
+            {
+              "jobIndex": 0,
+              "periodYears": 11.994524298425736,
+              "exposures": {
+                "overhead": {
+                  "dailyHours": 1,
+                  "cumulativeHours": 2998.631074606434
+                },
+                "repetitiveMedium": {
+                  "dailyHours": 2,
+                  "cumulativeHours": 5997.262149212868
+                },
+                "repetitiveFast": {
+                  "dailyHours": 0,
+                  "cumulativeHours": 0
+                },
+                "heavyLoad": {
+                  "dailyHours": 0.027777777777777776,
+                  "cumulativeHours": 83.29530762795649
+                },
+                "vibration": {
+                  "dailyHours": 0.5,
+                  "cumulativeHours": 1499.315537303217
+                }
+              }
+            },
+            {
+              "jobIndex": 1,
+              "periodYears": 12.83504449007529,
+              "exposures": {
+                "overhead": {
+                  "dailyHours": 1,
+                  "cumulativeHours": 3208.7611225188225
+                },
+                "repetitiveMedium": {
+                  "dailyHours": 0,
+                  "cumulativeHours": 0
+                },
+                "repetitiveFast": {
+                  "dailyHours": 0.4,
+                  "cumulativeHours": 1283.504449007529
+                },
+                "heavyLoad": {
+                  "dailyHours": 0,
+                  "cumulativeHours": 0
+                },
+                "vibration": {
+                  "dailyHours": 0,
+                  "cumulativeHours": 0
+                }
+              }
+            }
+          ]
+        },
+        "elbow": {
+          "noEvaluableJobs": false,
+          "temporal": {
+            "recentTaskChange": "increased_load",
+            "improvesWithRest": "yes",
+            "flags": [
+              "temporal_fit_high"
+            ],
+            "hasMissingCommonFields": false
+          },
+          "jobs": [
+            {
+              "jobIndex": 0,
+              "groups": [
+                {
+                  "bkType": "BK2101",
+                  "diagnosisRefs": [
+                    2
+                  ],
+                  "riskFactorKeys": [
+                    "core_exposure_present",
+                    "daily_share_high",
+                    "rest_unfavorable",
+                    "mechanical_load_dominant",
+                    "bk2101_high_freq_example",
+                    "bk2101_pattern_supported",
+                    "temporal_fit_high"
+                  ],
+                  "riskFactorCount": 7,
+                  "burdenGrade": "high",
+                  "hasMissingFields": false
+                }
+              ]
+            },
+            {
+              "jobIndex": 1,
+              "groups": [
+                {
+                  "bkType": "BK2101",
+                  "diagnosisRefs": [
+                    2
+                  ],
+                  "riskFactorKeys": [
+                    "temporal_fit_high"
+                  ],
+                  "riskFactorCount": 1,
+                  "burdenGrade": "none",
+                  "hasMissingFields": true
+                }
+              ]
+            }
+          ]
+        },
+        "wrist": {
+          "noEvaluableJobs": false,
+          "temporal": {
+            "recentTaskChange": null,
+            "improvesWithRest": null,
+            "flags": [],
+            "hasMissingCommonFields": true
+          },
+          "jobs": [
+            {
+              "jobIndex": 0,
+              "groups": [
+                {
+                  "bkType": "BK2113",
+                  "diagnosisRefs": [
+                    3
+                  ],
+                  "riskFactorKeys": [
+                    "core_exposure_present",
+                    "daily_share_high",
+                    "rest_unfavorable",
+                    "mechanical_load_dominant",
+                    "bk2113_pattern_supported",
+                    "bk2113_combined_exposure_present"
+                  ],
+                  "riskFactorCount": 6,
+                  "burdenGrade": "high",
+                  "hasMissingFields": false
+                }
+              ]
+            },
+            {
+              "jobIndex": 1,
+              "groups": [
+                {
+                  "bkType": "BK2113",
+                  "diagnosisRefs": [
+                    3
+                  ],
+                  "riskFactorKeys": [],
+                  "riskFactorCount": 0,
+                  "burdenGrade": "none",
+                  "hasMissingFields": true
+                }
+              ]
+            }
+          ]
+        },
+        "spine": {
+          "noEvaluableJobs": false,
+          "mddmStatus": "present",
+          "mddm": {
+            "formulaVersion": "v5.1.3",
+            "dailyDoseKNh": 3.499293897028053,
+            "lifetimeDoseMNh": 0,
+            "totalYears": 24.829568788501028,
+            "excluded": true,
+            "weightedDailyDoseKNh": 3.094718080859709,
+            "comparison": {
+              "mddm": {
+                "limit": 25,
+                "percent": 0,
+                "status": "safe"
+              },
+              "court": {
+                "limit": 12.5,
+                "percent": 0,
+                "status": "safe"
+              }
+            },
+            "workRelatedness": {
+              "level": "low",
+              "workContributionPct": 0,
+              "personalContributionPct": 100
+            },
+            "severity": "low",
+            "jobs": [
+              {
+                "jobIndex": 0,
+                "periodYears": 11.994524298425736,
+                "workDaysPerYear": 250,
+                "dailyDoseKNh": 1.6333333333333333,
+                "lifetimeDoseMNh": 0,
+                "lifetimeExcluded": true,
+                "tasks": [
+                  {
+                    "posture": "G4",
+                    "weightKg": 15,
+                    "frequencyPerDay": 40,
+                    "timeValue": 5,
+                    "timeUnit": "sec",
+                    "correctionFactor": 1.2,
+                    "forceN": 2450,
+                    "included": true
+                  }
+                ]
+              },
+              {
+                "jobIndex": 1,
+                "periodYears": 12.83504449007529,
+                "workDaysPerYear": 250,
+                "dailyDoseKNh": 3.094718080859709,
+                "lifetimeDoseMNh": 0,
+                "lifetimeExcluded": true,
+                "tasks": [
+                  {
+                    "posture": "G5",
+                    "weightKg": 20,
+                    "frequencyPerDay": 60,
+                    "timeValue": 6,
+                    "timeUnit": "sec",
+                    "correctionFactor": 1.2,
+                    "forceN": 3460,
+                    "included": true
+                  }
+                ]
+              }
+            ]
+          },
+          "vibration": {
+            "exposureStatus": "present",
+            "amax8Min": 0.4242640687119285,
+            "amax8Max": 0.848528137423857,
+            "dvMin": 0,
+            "dvMax": 2310.308008213552,
+            "daily": {
+              "percentMin": 67.34350297014738,
+              "percentMax": 134.68700594029477,
+              "status": "warning"
+            },
+            "lifetime": {
+              "percentMin": 0,
+              "percentMax": 165.02200058668228,
+              "status": "warning"
+            },
+            "hasInvalidIntervals": false,
+            "jobs": [
+              {
+                "jobIndex": 0,
+                "periodYears": 11.994524298425736,
+                "workDaysPerYear": 250,
+                "intervals": []
+              },
+              {
+                "jobIndex": 1,
+                "periodYears": 12.83504449007529,
+                "workDaysPerYear": 250,
+                "intervals": [
+                  {
+                    "awMin": 0.6,
+                    "awMax": 1.2,
+                    "timeValue": 4,
+                    "timeUnit": "hr"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "cervical": {
+          "noEvaluableJobs": false,
+          "overallBurdenGrade": "high_bk2109",
+          "overallCumulativeKgHours": 216591.37577002053,
+          "jobs": [
+            {
+              "jobIndex": 0,
+              "burdenGrade": "present",
+              "flagKeys": [
+                "daily_share_moderate",
+                "awkward_static_neck_supported",
+                "mechanical_cervical_load_dominant"
+              ],
+              "riskFactorCount": 0,
+              "cumulativeKgHours": 0,
+              "representativeHours": 2.5,
+              "totalAwkwardHours": 2.5,
+              "yearsExposed": 11.994524298425736,
+              "taskCount": 1,
+              "completedTaskCount": 1,
+              "hasBk2109CoreTask": false,
+              "tasks": [
+                {
+                  "exposureTypes": [
+                    "awkward_static_neck_load"
+                  ],
+                  "loadWeightKg": null,
+                  "carryHoursPerShift": null,
+                  "neckNonNeutralHoursPerDay": 2.5,
+                  "forcedNeckPosture": null,
+                  "combinedFlexionRotation": "yes",
+                  "precisionWork": "yes"
+                }
+              ]
+            },
+            {
+              "jobIndex": 1,
+              "burdenGrade": "high_bk2109",
+              "flagKeys": [
+                "heavy_load_present",
+                "carry_time_supported",
+                "forced_neck_posture_present",
+                "cumulative_load_supported",
+                "bk2109_pattern_supported",
+                "mechanical_cervical_load_dominant"
+              ],
+              "riskFactorCount": 4,
+              "cumulativeKgHours": 216591.37577002053,
+              "representativeHours": 1.5,
+              "totalAwkwardHours": 0,
+              "yearsExposed": 12.83504449007529,
+              "taskCount": 1,
+              "completedTaskCount": 1,
+              "hasBk2109CoreTask": true,
+              "tasks": [
+                {
+                  "exposureTypes": [
+                    "shoulder_heavy_load"
+                  ],
+                  "loadWeightKg": 45,
+                  "carryHoursPerShift": 1.5,
+                  "neckNonNeutralHoursPerDay": null,
+                  "forcedNeckPosture": "yes",
+                  "combinedFlexionRotation": null,
+                  "precisionWork": null
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "error": null
+  },
+  "golden-narr-no-evaluable-jobs": {
+    "input": {
+      "schemaVersion": 1,
+      "demographics": {
+        "ageYears": 57,
+        "gender": "male",
+        "heightCm": 172,
+        "weightKg": 74,
+        "bmi": 25,
+        "hypertension": false,
+        "diabetes": false
+      },
+      "diagnoses": [
+        {
+          "code": "M17.0",
+          "moduleId": "knee",
+          "side": "left",
+          "units": [
+            {
+              "side": "left",
+              "confirmed": "confirmed",
+              "assessment": "low",
+              "reasons": [
+                "lowBurden"
+              ],
+              "klg": null,
+              "ellman": null
+            }
+          ],
+          "verticalDistribution": null,
+          "concomitantSpondylosis": null
+        }
+      ],
+      "jobs": [
+        {
+          "durationYears": 10.99520876112252,
+          "workDaysPerYear": 250,
+          "excludedFromAnalysis": true
+        },
+        {
+          "durationYears": 8.999315537303216,
+          "workDaysPerYear": 250,
+          "excludedFromAnalysis": true
+        }
+      ],
+      "modules": {
+        "knee": {
+          "noEvaluableJobs": true,
+          "relatedness": {
+            "minPct": 0,
+            "maxPct": 0,
+            "avgPct": 0
+          },
+          "cumulativeBurdenSufficient": false,
+          "jobs": []
+        },
+        "shoulder": {
+          "noEvaluableJobs": true,
+          "totals": {
+            "overhead": {
+              "hours": 0,
+              "limitHours": 3600,
+              "ratio": 0,
+              "exceeded": false
+            },
+            "repetitiveMedium": {
+              "hours": 0,
+              "limitHours": 38000,
+              "ratio": 0,
+              "exceeded": false
+            },
+            "repetitiveFast": {
+              "hours": 0,
+              "limitHours": 9400,
+              "ratio": 0,
+              "exceeded": false
+            },
+            "heavyLoad": {
+              "hours": 0,
+              "limitHours": 200,
+              "ratio": 0,
+              "exceeded": false
+            },
+            "vibration": {
+              "hours": 0,
+              "limitHours": 5300,
+              "ratio": 0,
+              "exceeded": false
+            }
+          },
+          "interpretation": null,
+          "jobs": []
+        },
+        "elbow": {
+          "noEvaluableJobs": true,
+          "temporal": {
+            "recentTaskChange": null,
+            "improvesWithRest": null,
+            "flags": [],
+            "hasMissingCommonFields": true
+          },
+          "jobs": []
+        },
+        "wrist": {
+          "noEvaluableJobs": true,
+          "temporal": {
+            "recentTaskChange": null,
+            "improvesWithRest": null,
+            "flags": [],
+            "hasMissingCommonFields": true
+          },
+          "jobs": []
+        },
+        "spine": {
+          "noEvaluableJobs": true,
+          "mddmStatus": "present",
+          "mddm": {
+            "formulaVersion": "v5.1.3",
+            "dailyDoseKNh": 0,
+            "lifetimeDoseMNh": 0,
+            "totalYears": 0,
+            "excluded": true,
+            "weightedDailyDoseKNh": null,
+            "comparison": {
+              "mddm": {
+                "limit": 25,
+                "percent": 0,
+                "status": "safe"
+              },
+              "court": {
+                "limit": 12.5,
+                "percent": 0,
+                "status": "safe"
+              }
+            },
+            "workRelatedness": {
+              "level": "low",
+              "workContributionPct": 0,
+              "personalContributionPct": 100
+            },
+            "severity": "low",
+            "jobs": []
+          },
+          "vibration": {
+            "exposureStatus": "unknown",
+            "amax8Min": null,
+            "amax8Max": null,
+            "dvMin": null,
+            "dvMax": null,
+            "daily": null,
+            "lifetime": null,
+            "hasInvalidIntervals": false,
+            "jobs": []
+          }
+        },
+        "cervical": {
+          "noEvaluableJobs": true,
+          "overallBurdenGrade": "low",
+          "overallCumulativeKgHours": 0,
+          "jobs": []
+        }
+      }
+    },
+    "error": null
+  },
+  "golden-narr-blank-values": {
+    "input": {
+      "schemaVersion": 1,
+      "demographics": {
+        "ageYears": 57,
+        "gender": "female",
+        "heightCm": 172,
+        "weightKg": 74,
+        "bmi": 25,
+        "hypertension": false,
+        "diabetes": false
+      },
+      "diagnoses": [
+        {
+          "code": "M17.1",
+          "moduleId": "knee",
+          "side": "right",
+          "units": [
+            {
+              "side": "right",
+              "confirmed": null,
+              "assessment": null,
+              "reasons": [],
+              "klg": null,
+              "ellman": null
+            }
+          ],
+          "verticalDistribution": null,
+          "concomitantSpondylosis": null
+        },
+        {
+          "code": "M77.0",
+          "moduleId": "elbow",
+          "side": null,
+          "units": [],
+          "verticalDistribution": null,
+          "concomitantSpondylosis": null
+        },
+        {
+          "code": "M77.1",
+          "moduleId": "elbow",
+          "side": null,
+          "units": [],
+          "verticalDistribution": null,
+          "concomitantSpondylosis": null
+        },
+        {
+          "code": "M65.3",
+          "moduleId": "wrist",
+          "side": null,
+          "units": [],
+          "verticalDistribution": null,
+          "concomitantSpondylosis": null
+        },
+        {
+          "code": "M50.1",
+          "moduleId": "cervical",
+          "side": null,
+          "units": [
+            {
+              "side": "axial",
+              "confirmed": null,
+              "assessment": null,
+              "reasons": [],
+              "klg": null,
+              "ellman": null
+            }
+          ],
+          "verticalDistribution": null,
+          "concomitantSpondylosis": null
+        },
+        {
+          "code": null,
+          "moduleId": "wrist",
+          "side": null,
+          "units": [],
+          "verticalDistribution": null,
+          "concomitantSpondylosis": null
+        },
+        {
+          "code": "M25.52",
+          "moduleId": "elbow",
+          "side": "left",
+          "units": [
+            {
+              "side": "left",
+              "confirmed": null,
+              "assessment": null,
+              "reasons": [],
+              "klg": null,
+              "ellman": null
+            }
+          ],
+          "verticalDistribution": null,
+          "concomitantSpondylosis": null
+        },
+        {
+          "code": null,
+          "moduleId": "elbow",
+          "side": "right",
+          "units": [
+            {
+              "side": "right",
+              "confirmed": null,
+              "assessment": null,
+              "reasons": [],
+              "klg": null,
+              "ellman": null
+            }
+          ],
+          "verticalDistribution": null,
+          "concomitantSpondylosis": null
+        },
+        {
+          "code": "M25.53",
+          "moduleId": "wrist",
+          "side": "right",
+          "units": [
+            {
+              "side": "right",
+              "confirmed": null,
+              "assessment": null,
+              "reasons": [],
+              "klg": null,
+              "ellman": null
+            }
+          ],
+          "verticalDistribution": null,
+          "concomitantSpondylosis": null
+        }
+      ],
+      "jobs": [
+        {
+          "durationYears": 6.997946611909651,
+          "workDaysPerYear": 250,
+          "excludedFromAnalysis": false
+        },
+        {
+          "durationYears": 7.997262149212868,
+          "workDaysPerYear": 250,
+          "excludedFromAnalysis": false
+        }
+      ],
+      "modules": {
+        "knee": {
+          "noEvaluableJobs": false,
+          "relatedness": {
+            "minPct": 0,
+            "maxPct": 35.7,
+            "avgPct": 17.9
+          },
+          "cumulativeBurdenSufficient": false,
+          "jobs": [
+            {
+              "jobIndex": 0,
+              "weightKgPerDay": null,
+              "squattingMinPerDay": null,
+              "aux": {
+                "stairs": false,
+                "kneeTwist": false,
+                "startStop": false,
+                "tightSpace": false,
+                "kneeContact": false,
+                "jumpDown": false
+              },
+              "burdenLevel": "low"
+            },
+            {
+              "jobIndex": 1,
+              "weightKgPerDay": null,
+              "squattingMinPerDay": null,
+              "aux": {
+                "stairs": false,
+                "kneeTwist": false,
+                "startStop": false,
+                "tightSpace": false,
+                "kneeContact": false,
+                "jumpDown": false
+              },
+              "burdenLevel": "low"
+            }
+          ]
+        },
+        "elbow": {
+          "noEvaluableJobs": false,
+          "temporal": {
+            "recentTaskChange": null,
+            "improvesWithRest": null,
+            "flags": [],
+            "hasMissingCommonFields": true
+          },
+          "jobs": [
+            {
+              "jobIndex": 0,
+              "groups": [
+                {
+                  "bkType": "BK2101",
+                  "diagnosisRefs": [
+                    1
+                  ],
+                  "riskFactorKeys": [],
+                  "riskFactorCount": 0,
+                  "burdenGrade": "none",
+                  "hasMissingFields": true
+                },
+                {
+                  "bkType": null,
+                  "diagnosisRefs": [
+                    2
+                  ],
+                  "riskFactorKeys": [],
+                  "riskFactorCount": 0,
+                  "burdenGrade": "none",
+                  "hasMissingFields": true
+                },
+                {
+                  "bkType": null,
+                  "diagnosisRefs": [
+                    6
+                  ],
+                  "riskFactorKeys": [],
+                  "riskFactorCount": 0,
+                  "burdenGrade": "none",
+                  "hasMissingFields": true
+                },
+                {
+                  "bkType": null,
+                  "diagnosisRefs": [
+                    7
+                  ],
+                  "riskFactorKeys": [],
+                  "riskFactorCount": 0,
+                  "burdenGrade": "none",
+                  "hasMissingFields": true
+                }
+              ]
+            },
+            {
+              "jobIndex": 1,
+              "groups": [
+                {
+                  "bkType": "BK2101",
+                  "diagnosisRefs": [
+                    1,
+                    2
+                  ],
+                  "riskFactorKeys": [],
+                  "riskFactorCount": 0,
+                  "burdenGrade": "none",
+                  "hasMissingFields": true
+                },
+                {
+                  "bkType": null,
+                  "diagnosisRefs": [
+                    6
+                  ],
+                  "riskFactorKeys": [],
+                  "riskFactorCount": 0,
+                  "burdenGrade": "none",
+                  "hasMissingFields": true
+                },
+                {
+                  "bkType": null,
+                  "diagnosisRefs": [
+                    7
+                  ],
+                  "riskFactorKeys": [],
+                  "riskFactorCount": 0,
+                  "burdenGrade": "none",
+                  "hasMissingFields": true
+                }
+              ]
+            }
+          ]
+        },
+        "wrist": {
+          "noEvaluableJobs": false,
+          "temporal": {
+            "recentTaskChange": null,
+            "improvesWithRest": null,
+            "flags": [],
+            "hasMissingCommonFields": true
+          },
+          "jobs": [
+            {
+              "jobIndex": 0,
+              "groups": [
+                {
+                  "bkType": "BK2101",
+                  "diagnosisRefs": [
+                    3
+                  ],
+                  "riskFactorKeys": [],
+                  "riskFactorCount": 0,
+                  "burdenGrade": "none",
+                  "hasMissingFields": true
+                },
+                {
+                  "bkType": null,
+                  "diagnosisRefs": [
+                    5
+                  ],
+                  "riskFactorKeys": [],
+                  "riskFactorCount": 0,
+                  "burdenGrade": "none",
+                  "hasMissingFields": true
+                },
+                {
+                  "bkType": null,
+                  "diagnosisRefs": [
+                    8
+                  ],
+                  "riskFactorKeys": [],
+                  "riskFactorCount": 0,
+                  "burdenGrade": "none",
+                  "hasMissingFields": true
+                }
+              ]
+            },
+            {
+              "jobIndex": 1,
+              "groups": [
+                {
+                  "bkType": "BK2101",
+                  "diagnosisRefs": [
+                    3
+                  ],
+                  "riskFactorKeys": [],
+                  "riskFactorCount": 0,
+                  "burdenGrade": "none",
+                  "hasMissingFields": true
+                },
+                {
+                  "bkType": null,
+                  "diagnosisRefs": [
+                    5
+                  ],
+                  "riskFactorKeys": [],
+                  "riskFactorCount": 0,
+                  "burdenGrade": "none",
+                  "hasMissingFields": true
+                },
+                {
+                  "bkType": null,
+                  "diagnosisRefs": [
+                    8
+                  ],
+                  "riskFactorKeys": [],
+                  "riskFactorCount": 0,
+                  "burdenGrade": "none",
+                  "hasMissingFields": true
+                }
+              ]
+            }
+          ]
+        },
+        "cervical": {
+          "noEvaluableJobs": false,
+          "overallBurdenGrade": "low",
+          "overallCumulativeKgHours": 0,
+          "jobs": [
+            {
+              "jobIndex": 0,
+              "burdenGrade": "low",
+              "flagKeys": [],
+              "riskFactorCount": 0,
+              "cumulativeKgHours": 0,
+              "representativeHours": 0,
+              "totalAwkwardHours": 0,
+              "yearsExposed": 6.997946611909651,
+              "taskCount": 1,
+              "completedTaskCount": 0,
+              "hasBk2109CoreTask": false,
+              "tasks": [
+                {
+                  "exposureTypes": [],
+                  "loadWeightKg": null,
+                  "carryHoursPerShift": null,
+                  "neckNonNeutralHoursPerDay": null,
+                  "forcedNeckPosture": null,
+                  "combinedFlexionRotation": null,
+                  "precisionWork": null
+                }
+              ]
+            },
+            {
+              "jobIndex": 1,
+              "burdenGrade": "low",
+              "flagKeys": [],
+              "riskFactorCount": 0,
+              "cumulativeKgHours": 0,
+              "representativeHours": 0.5,
+              "totalAwkwardHours": 0.5,
+              "yearsExposed": 7.997262149212868,
+              "taskCount": 1,
+              "completedTaskCount": 1,
+              "hasBk2109CoreTask": false,
+              "tasks": [
+                {
+                  "exposureTypes": [
+                    "awkward_static_neck_load"
+                  ],
+                  "loadWeightKg": null,
+                  "carryHoursPerShift": null,
+                  "neckNonNeutralHoursPerDay": 0.5,
+                  "forcedNeckPosture": null,
+                  "combinedFlexionRotation": "no",
+                  "precisionWork": "no"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "error": null
+  },
+  "golden-narr-shoulder-combined": {
+    "input": {
+      "schemaVersion": 1,
+      "demographics": {
+        "ageYears": 57,
+        "gender": "male",
+        "heightCm": 172,
+        "weightKg": 74,
+        "bmi": 25,
+        "hypertension": false,
+        "diabetes": false
+      },
+      "diagnoses": [
+        {
+          "code": "M75.1",
+          "moduleId": "shoulder",
+          "side": "both",
+          "units": [
+            {
+              "side": "right",
+              "confirmed": "confirmed",
+              "assessment": "high",
+              "reasons": [],
+              "klg": null,
+              "ellman": null
+            },
+            {
+              "side": "left",
+              "confirmed": "confirmed",
+              "assessment": "high",
+              "reasons": [],
+              "klg": null,
+              "ellman": null
+            }
+          ],
+          "verticalDistribution": null,
+          "concomitantSpondylosis": null
+        },
+        {
+          "code": "M75.4",
+          "moduleId": "shoulder",
+          "side": "right",
+          "units": [
+            {
+              "side": "right",
+              "confirmed": "confirmed",
+              "assessment": "high",
+              "reasons": [],
+              "klg": null,
+              "ellman": null
+            }
+          ],
+          "verticalDistribution": null,
+          "concomitantSpondylosis": null
+        }
+      ],
+      "jobs": [
+        {
+          "durationYears": 9.998631074606434,
+          "workDaysPerYear": 250,
+          "excludedFromAnalysis": false
+        },
+        {
+          "durationYears": 1.995893223819302,
+          "workDaysPerYear": 250,
+          "excludedFromAnalysis": true
+        },
+        {
+          "durationYears": 0,
+          "workDaysPerYear": 250,
+          "excludedFromAnalysis": false
+        },
+        {
+          "durationYears": 4.999315537303217,
+          "workDaysPerYear": 250,
+          "excludedFromAnalysis": false
+        }
+      ],
+      "modules": {
+        "shoulder": {
+          "noEvaluableJobs": false,
+          "totals": {
+            "overhead": {
+              "hours": 3124.5722108145105,
+              "limitHours": 3600,
+              "ratio": 0.8679367252262529,
+              "exceeded": false
+            },
+            "repetitiveMedium": {
+              "hours": 31245.722108145106,
+              "limitHours": 38000,
+              "ratio": 0.822255844951187,
+              "exceeded": false
+            },
+            "repetitiveFast": {
+              "hours": 0,
+              "limitHours": 9400,
+              "ratio": 0,
+              "exceeded": false
+            },
+            "heavyLoad": {
+              "hours": 0,
+              "limitHours": 200,
+              "ratio": 0,
+              "exceeded": false
+            },
+            "vibration": {
+              "hours": 0,
+              "limitHours": 5300,
+              "ratio": 0,
+              "exceeded": false
+            }
+          },
+          "interpretation": "combinedSufficient",
+          "jobs": [
+            {
+              "jobIndex": 0,
+              "periodYears": 9.998631074606434,
+              "exposures": {
+                "overhead": {
+                  "dailyHours": 1.2,
+                  "cumulativeHours": 2999.5893223819303
+                },
+                "repetitiveMedium": {
+                  "dailyHours": 10,
+                  "cumulativeHours": 24996.577686516084
+                },
+                "repetitiveFast": {
+                  "dailyHours": 0,
+                  "cumulativeHours": 0
+                },
+                "heavyLoad": {
+                  "dailyHours": 0,
+                  "cumulativeHours": 0
+                },
+                "vibration": {
+                  "dailyHours": 0,
+                  "cumulativeHours": 0
+                }
+              }
+            },
+            {
+              "jobIndex": 2,
+              "periodYears": 0,
+              "exposures": {
+                "overhead": {
+                  "dailyHours": 2,
+                  "cumulativeHours": 0
+                },
+                "repetitiveMedium": {
+                  "dailyHours": 0,
+                  "cumulativeHours": 0
+                },
+                "repetitiveFast": {
+                  "dailyHours": 0,
+                  "cumulativeHours": 0
+                },
+                "heavyLoad": {
+                  "dailyHours": 0,
+                  "cumulativeHours": 0
+                },
+                "vibration": {
+                  "dailyHours": 0,
+                  "cumulativeHours": 0
+                }
+              }
+            },
+            {
+              "jobIndex": 3,
+              "periodYears": 4.999315537303217,
+              "exposures": {
+                "overhead": {
+                  "dailyHours": 0.1,
+                  "cumulativeHours": 124.98288843258042
+                },
+                "repetitiveMedium": {
+                  "dailyHours": 5,
+                  "cumulativeHours": 6249.144421629021
+                },
+                "repetitiveFast": {
+                  "dailyHours": 0,
+                  "cumulativeHours": 0
+                },
+                "heavyLoad": {
+                  "dailyHours": 0,
+                  "cumulativeHours": 0
+                },
+                "vibration": {
+                  "dailyHours": 0,
+                  "cumulativeHours": 0
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "error": null
+  },
+  "golden-narr-spine-vibration": {
+    "input": {
+      "schemaVersion": 1,
+      "demographics": {
+        "ageYears": 57,
+        "gender": "male",
+        "heightCm": 172,
+        "weightKg": 74,
+        "bmi": 25,
+        "hypertension": false,
+        "diabetes": false
+      },
+      "diagnoses": [
+        {
+          "code": "M51.1",
+          "moduleId": "spine",
+          "side": null,
+          "units": [
+            {
+              "side": "axial",
+              "confirmed": null,
+              "assessment": null,
+              "reasons": [],
+              "klg": null,
+              "ellman": null
+            }
+          ],
+          "verticalDistribution": null,
+          "concomitantSpondylosis": null
+        }
+      ],
+      "jobs": [
+        {
+          "durationYears": 14.99794661190965,
+          "workDaysPerYear": 250,
+          "excludedFromAnalysis": false
+        },
+        {
+          "durationYears": 9.995893223819301,
+          "workDaysPerYear": 250,
+          "excludedFromAnalysis": false
+        },
+        {
+          "durationYears": 4.999315537303217,
+          "workDaysPerYear": 250,
+          "excludedFromAnalysis": false
+        }
+      ],
+      "modules": {
+        "spine": {
+          "noEvaluableJobs": false,
+          "mddmStatus": "present",
+          "mddm": {
+            "formulaVersion": "v5.1.3",
+            "dailyDoseKNh": 4.204583312687873,
+            "lifetimeDoseMNh": 17.695982473589677,
+            "totalYears": 29.99315537303217,
+            "excluded": false,
+            "weightedDailyDoseKNh": 2.8315658487705866,
+            "comparison": {
+              "mddm": {
+                "limit": 25,
+                "percent": 70.7839298943587,
+                "status": "safe"
+              },
+              "court": {
+                "limit": 12.5,
+                "percent": 141.5678597887174,
+                "status": "danger"
+              }
+            },
+            "workRelatedness": {
+              "level": "high",
+              "workContributionPct": 100,
+              "personalContributionPct": 0
+            },
+            "severity": "upperModerate",
+            "jobs": [
+              {
+                "jobIndex": 0,
+                "periodYears": 14.99794661190965,
+                "workDaysPerYear": 250,
+                "dailyDoseKNh": 4.101219330881976,
+                "lifetimeDoseMNh": 15.37957249080741,
+                "lifetimeExcluded": false,
+                "tasks": [
+                  {
+                    "posture": "G4",
+                    "weightKg": 20,
+                    "frequencyPerDay": 150,
+                    "timeValue": 6,
+                    "timeUnit": "sec",
+                    "correctionFactor": 1.2,
+                    "forceN": 2900,
+                    "included": true
+                  }
+                ]
+              },
+              {
+                "jobIndex": 1,
+                "periodYears": 9.995893223819301,
+                "workDaysPerYear": 250,
+                "dailyDoseKNh": 0.926563993112906,
+                "lifetimeDoseMNh": 2.316409982782265,
+                "lifetimeExcluded": false,
+                "tasks": [
+                  {
+                    "posture": "G7",
+                    "weightKg": 45,
+                    "frequencyPerDay": 3,
+                    "timeValue": 5,
+                    "timeUnit": "sec",
+                    "correctionFactor": 1.2,
+                    "forceN": 5075,
+                    "included": true
+                  }
+                ]
+              },
+              {
+                "jobIndex": 2,
+                "periodYears": 4.999315537303217,
+                "workDaysPerYear": 250,
+                "dailyDoseKNh": 0,
+                "lifetimeDoseMNh": 0,
+                "lifetimeExcluded": true,
+                "tasks": [
+                  {
+                    "posture": "G3",
+                    "weightKg": null,
+                    "frequencyPerDay": null,
+                    "timeValue": 5,
+                    "timeUnit": "sec",
+                    "correctionFactor": 1,
+                    "forceN": 1900,
+                    "included": true
+                  }
+                ]
+              }
+            ]
+          },
+          "vibration": {
+            "exposureStatus": "present",
+            "amax8Min": 0.7901740314639554,
+            "amax8Max": 1.1464619487798102,
+            "dvMin": 2341.0857289527717,
+            "dvMax": 4928.231519507188,
+            "daily": {
+              "percentMin": 125.42444943872309,
+              "percentMax": 181.9780871079064,
+              "status": "danger"
+            },
+            "lifetime": {
+              "percentMin": 167.22040921091227,
+              "percentMax": 352.0165371076563,
+              "status": "danger"
+            },
+            "hasInvalidIntervals": true,
+            "jobs": [
+              {
+                "jobIndex": 0,
+                "periodYears": 14.99794661190965,
+                "workDaysPerYear": 250,
+                "intervals": [
+                  {
+                    "awMin": 0.9,
+                    "awMax": 1.3,
+                    "timeValue": 6,
+                    "timeUnit": "hr"
+                  },
+                  {
+                    "awMin": 0.3,
+                    "awMax": 0.5,
+                    "timeValue": 90,
+                    "timeUnit": "min"
+                  }
+                ]
+              },
+              {
+                "jobIndex": 1,
+                "periodYears": 9.995893223819301,
+                "workDaysPerYear": 250,
+                "intervals": [
+                  {
+                    "awMin": 0.4,
+                    "awMax": 0.7,
+                    "timeValue": 7200,
+                    "timeUnit": "sec"
+                  }
+                ]
+              },
+              {
+                "jobIndex": 2,
+                "periodYears": 4.999315537303217,
+                "workDaysPerYear": 250,
+                "intervals": []
+              }
+            ]
+          }
+        }
+      }
+    },
+    "error": null
+  },
+  "golden-narr-spine-empty": {
+    "input": {
+      "schemaVersion": 1,
+      "demographics": {
+        "ageYears": null,
+        "gender": null,
+        "heightCm": null,
+        "weightKg": null,
+        "bmi": 0,
+        "hypertension": false,
+        "diabetes": false
+      },
+      "diagnoses": [
+        {
+          "code": "M51.1",
+          "moduleId": "spine",
+          "side": null,
+          "units": [
+            {
+              "side": "axial",
+              "confirmed": null,
+              "assessment": null,
+              "reasons": [],
+              "klg": null,
+              "ellman": null
+            }
+          ],
+          "verticalDistribution": null,
+          "concomitantSpondylosis": null
+        }
+      ],
+      "jobs": [
+        {
+          "durationYears": 12.999315537303216,
+          "workDaysPerYear": 250,
+          "excludedFromAnalysis": false
+        }
+      ],
+      "modules": {
+        "spine": {
+          "noEvaluableJobs": false,
+          "mddmStatus": "present",
+          "mddm": {
+            "formulaVersion": "legacy",
+            "dailyDoseKNh": 0,
+            "lifetimeDoseMNh": 0,
+            "totalYears": 12.999315537303216,
+            "excluded": true,
+            "weightedDailyDoseKNh": null,
+            "comparison": {
+              "mddm": {
+                "limit": 25,
+                "percent": 0,
+                "status": "safe"
+              },
+              "court": {
+                "limit": 12.5,
+                "percent": 0,
+                "status": "safe"
+              }
+            },
+            "workRelatedness": {
+              "level": "low",
+              "workContributionPct": 0,
+              "personalContributionPct": 100
+            },
+            "severity": "low",
+            "jobs": [
+              {
+                "jobIndex": 0,
+                "periodYears": 12.999315537303216,
+                "workDaysPerYear": 250,
+                "dailyDoseKNh": 0,
+                "lifetimeDoseMNh": 0,
+                "lifetimeExcluded": true,
+                "tasks": []
+              }
+            ]
+          },
+          "vibration": {
+            "exposureStatus": "present",
+            "amax8Min": 0,
+            "amax8Max": 0,
+            "dvMin": 0,
+            "dvMax": 0,
+            "daily": {
+              "percentMin": 0,
+              "percentMax": 0,
+              "status": "safe"
+            },
+            "lifetime": {
+              "percentMin": 0,
+              "percentMax": 0,
+              "status": "safe"
+            },
+            "hasInvalidIntervals": false,
+            "jobs": [
+              {
+                "jobIndex": 0,
+                "periodYears": 12.999315537303216,
+                "workDaysPerYear": 250,
+                "intervals": []
+              }
+            ]
+          }
+        }
+      }
+    },
+    "error": null
+  },
+  "golden-narr-upper-limb-no-diagnosis": {
+    "input": {
+      "schemaVersion": 1,
+      "demographics": {
+        "ageYears": 57,
+        "gender": "male",
+        "heightCm": 172,
+        "weightKg": 74,
+        "bmi": 25,
+        "hypertension": false,
+        "diabetes": false
+      },
+      "diagnoses": [
+        {
+          "code": "M17.0",
+          "moduleId": "knee",
+          "side": "right",
+          "units": [
+            {
+              "side": "right",
+              "confirmed": null,
+              "assessment": null,
+              "reasons": [],
+              "klg": null,
+              "ellman": null
+            }
+          ],
+          "verticalDistribution": null,
+          "concomitantSpondylosis": null
+        }
+      ],
+      "jobs": [
+        {
+          "durationYears": 14.99794661190965,
+          "workDaysPerYear": 250,
+          "excludedFromAnalysis": false
+        }
+      ],
+      "modules": {
+        "elbow": {
+          "noEvaluableJobs": false,
+          "temporal": {
+            "recentTaskChange": null,
+            "improvesWithRest": null,
+            "flags": [],
+            "hasMissingCommonFields": true
+          },
+          "jobs": [
+            {
+              "jobIndex": 0,
+              "groups": []
+            }
+          ]
+        },
+        "wrist": {
+          "noEvaluableJobs": false,
+          "temporal": {
+            "recentTaskChange": null,
+            "improvesWithRest": null,
+            "flags": [],
+            "hasMissingCommonFields": true
+          },
+          "jobs": [
+            {
+              "jobIndex": 0,
+              "groups": []
+            }
+          ]
+        }
+      }
+    },
+    "error": null
+  }
+}
