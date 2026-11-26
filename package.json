@@ -83,7 +83,7 @@
     "@wr/analytics-core": "*",
     "@wr/contracts": "*",
     "electron": "^22.3.27",
-    "electron-builder": "^24.9.1",
+    "electron-builder": "^26.18.0",
     "eslint": "^9.39.4",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.1.1",
