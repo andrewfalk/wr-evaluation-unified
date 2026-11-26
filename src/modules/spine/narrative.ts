@@ -6,7 +6,6 @@ import { buildSpineSectionSummary, buildSpineSectionText } from './utils/section
 type SpineSectionCalc = Parameters<typeof buildSpineSectionText>[0];
 
 export const spineNarrative: ModuleNarrative = {
-  emrOrder: 60,
   render(variant: NarrativeVariant, calc: unknown): string {
     const spineCalc = calc as SpineSectionCalc;
     if (variant === 'emrSummary') return buildSpineSectionSummary(spineCalc);

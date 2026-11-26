@@ -6,25 +6,26 @@ import '../../../modules';
 import type { ModuleManifest } from '../../modules/manifest';
 import { buildNarrativeDiffTable, getNarrativeDiffTable } from '../diffTable';
 
-const fake = (id: string, emrOrder: number, phrases?: Record<string, Record<string, string>>) => ({
+const fake = (id: string, phrases?: Record<string, Record<string, string>>) => ({
   id,
   name: `모듈 ${id}`,
-  narrative: { emrOrder, render: () => '', ...(phrases ? { phrases } : {}) },
+  narrative: { render: () => '', ...(phrases ? { phrases } : {}) },
 }) as unknown as ModuleManifest;
 
 describe('서술 문구 차이 표', () => {
   it('등록된 모듈의 표(골든)', async () => {
     const table = getNarrativeDiffTable();
-    expect(table.modules.map(m => m.id)).toEqual(['knee', 'shoulder', 'wrist', 'elbow', 'cervical']);
+    expect(table.modules.map(m => m.id)).toEqual(['knee', 'cervical', 'shoulder', 'elbow', 'wrist']);
     expect(table.modulesWithoutPhrases).toEqual(['spine']);
     await expect(`${JSON.stringify(table, null, 2)}\n`).toMatchFileSnapshot('./__goldens__/narrative-diff.json');
   });
 
-  it('값이 있는 변형 사이에 다른 값이 있을 때만 differs — 한 변형에만 있는 항목은 같은 것으로 본다', () => {
+  it('값이 있는 변형 사이에 다른 값이 있을 때만 differs — 한 변형에만 있는 항목은 같은 것으로 본다. 모듈은 받은 순서', () => {
     const table = buildNarrativeDiffTable([
-      fake('b', 20, { same: { report: 'x', emrSection: 'x', emrSummary: 'x' }, only: { report: 'y' } }),
-      fake('a', 10, { diff: { report: '< A >', emrSection: '<A>' } }),
-      fake('c', 30),
+      fake('a', { diff: { report: '< A >', emrSection: '<A>' } }),
+      fake('b', { same: { report: 'x', emrSection: 'x', emrSummary: 'x' }, only: { report: 'y' } }),
+      fake('c'),
+      { id: 'none', name: '서술 없음' } as unknown as ModuleManifest,
     ]);
     expect(table.modules.map(m => m.id)).toEqual(['a', 'b']);
     expect(table.modulesWithoutPhrases).toEqual(['c']);

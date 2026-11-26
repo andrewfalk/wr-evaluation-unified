@@ -8,32 +8,27 @@
     {
       "id": "knee",
       "name": "무릎 (슬관절)",
-      "emrOrder": 10,
       "items": 6
-    },
-    {
-      "id": "shoulder",
-      "name": "어깨",
-      "emrOrder": 20,
-      "items": 5
-    },
-    {
-      "id": "wrist",
-      "name": "손목/손가락",
-      "emrOrder": 30,
-      "items": 7
-    },
-    {
-      "id": "elbow",
-      "name": "팔꿈치",
-      "emrOrder": 40,
-      "items": 7
     },
     {
       "id": "cervical",
       "name": "경추(목)",
-      "emrOrder": 50,
       "items": 4
+    },
+    {
+      "id": "shoulder",
+      "name": "어깨",
+      "items": 5
+    },
+    {
+      "id": "elbow",
+      "name": "팔꿈치",
+      "items": 7
+    },
+    {
+      "id": "wrist",
+      "name": "손목/손가락",
+      "items": 7
     }
   ],
   "modulesWithoutPhrases": [
@@ -105,6 +100,50 @@
       "differs": true
     },
     {
+      "moduleId": "cervical",
+      "moduleName": "경추(목)",
+      "item": "heading",
+      "values": {
+        "report": "\n< 경추(목) >\n",
+        "emrSection": "\n<경추(목)>\n",
+        "emrSummary": "\n<경추(목)>\n"
+      },
+      "differs": true
+    },
+    {
+      "moduleId": "cervical",
+      "moduleName": "경추(목)",
+      "item": "jobLine",
+      "values": {
+        "report": "- 직력{n}: {name}\n",
+        "emrSection": "- {name}\n",
+        "emrSummary": "- {name}\n"
+      },
+      "differs": true
+    },
+    {
+      "moduleId": "cervical",
+      "moduleName": "경추(목)",
+      "item": "flagsLabel",
+      "values": {
+        "report": "      확인된 목 부위 부담 지표: ",
+        "emrSection": "  부담 요인: ",
+        "emrSummary": "  부담 요인: "
+      },
+      "differs": true
+    },
+    {
+      "moduleId": "cervical",
+      "moduleName": "경추(목)",
+      "item": "noFlags",
+      "values": {
+        "report": "확인된 부담 지표 없음",
+        "emrSection": "확인된 부담 요인 없음",
+        "emrSummary": "확인된 부담 요인 없음"
+      },
+      "differs": true
+    },
+    {
       "moduleId": "shoulder",
       "moduleName": "어깨",
       "item": "heading",
@@ -158,80 +197,6 @@
         "emrSummary": "** 노출 기준치에 미달하여 누적 신체부담 불충분함."
       },
       "differs": false
-    },
-    {
-      "moduleId": "wrist",
-      "moduleName": "손목/손가락",
-      "item": "heading",
-      "values": {
-        "report": "\n< 손목/손가락 >",
-        "emrSection": "\n<손목/손가락>\n",
-        "emrSummary": "\n<손목/손가락>\n"
-      },
-      "differs": true
-    },
-    {
-      "moduleId": "wrist",
-      "moduleName": "손목/손가락",
-      "item": "temporalFlagsLead",
-      "values": {
-        "report": "- 공통 시간적 선후관계 ",
-        "emrSection": "- 공통 시간적 선후관계: "
-      },
-      "differs": true
-    },
-    {
-      "moduleId": "wrist",
-      "moduleName": "손목/손가락",
-      "item": "jobLine",
-      "values": {
-        "report": "- 직력{n}: {name}",
-        "emrSection": "- {name}\n",
-        "emrSummary": "\n[{name}]\n"
-      },
-      "differs": true
-    },
-    {
-      "moduleId": "wrist",
-      "moduleName": "손목/손가락",
-      "item": "jobNameEmpty",
-      "values": {
-        "report": "-",
-        "emrSection": "-",
-        "emrSummary": "직업 미입력"
-      },
-      "differs": true
-    },
-    {
-      "moduleId": "wrist",
-      "moduleName": "손목/손가락",
-      "item": "narrativeEmpty",
-      "values": {
-        "report": "",
-        "emrSection": "-"
-      },
-      "differs": true
-    },
-    {
-      "moduleId": "wrist",
-      "moduleName": "손목/손가락",
-      "item": "riskFactorLabel",
-      "values": {
-        "report": "      업무관련성 위험 요인: ",
-        "emrSection": "      업무에 포함된 위험 요인: "
-      },
-      "differs": true
-    },
-    {
-      "moduleId": "wrist",
-      "moduleName": "손목/손가락",
-      "item": "conclusionLead",
-      "values": {
-        "report": "\n      **종합평가** ",
-        "emrSection": "\n      **종합평가** ",
-        "emrSummary": "    **종합평가** "
-      },
-      "differs": true
     },
     {
       "moduleId": "elbow",
@@ -308,46 +273,76 @@
       "differs": true
     },
     {
-      "moduleId": "cervical",
-      "moduleName": "경추(목)",
+      "moduleId": "wrist",
+      "moduleName": "손목/손가락",
       "item": "heading",
       "values": {
-        "report": "\n< 경추(목) >\n",
-        "emrSection": "\n<경추(목)>\n",
-        "emrSummary": "\n<경추(목)>\n"
+        "report": "\n< 손목/손가락 >",
+        "emrSection": "\n<손목/손가락>\n",
+        "emrSummary": "\n<손목/손가락>\n"
       },
       "differs": true
     },
     {
-      "moduleId": "cervical",
-      "moduleName": "경추(목)",
+      "moduleId": "wrist",
+      "moduleName": "손목/손가락",
+      "item": "temporalFlagsLead",
+      "values": {
+        "report": "- 공통 시간적 선후관계 ",
+        "emrSection": "- 공통 시간적 선후관계: "
+      },
+      "differs": true
+    },
+    {
+      "moduleId": "wrist",
+      "moduleName": "손목/손가락",
       "item": "jobLine",
       "values": {
-        "report": "- 직력{n}: {name}\n",
+        "report": "- 직력{n}: {name}",
         "emrSection": "- {name}\n",
-        "emrSummary": "- {name}\n"
+        "emrSummary": "\n[{name}]\n"
       },
       "differs": true
     },
     {
-      "moduleId": "cervical",
-      "moduleName": "경추(목)",
-      "item": "flagsLabel",
+      "moduleId": "wrist",
+      "moduleName": "손목/손가락",
+      "item": "jobNameEmpty",
       "values": {
-        "report": "      확인된 목 부위 부담 지표: ",
-        "emrSection": "  부담 요인: ",
-        "emrSummary": "  부담 요인: "
+        "report": "-",
+        "emrSection": "-",
+        "emrSummary": "직업 미입력"
       },
       "differs": true
     },
     {
-      "moduleId": "cervical",
-      "moduleName": "경추(목)",
-      "item": "noFlags",
+      "moduleId": "wrist",
+      "moduleName": "손목/손가락",
+      "item": "narrativeEmpty",
       "values": {
-        "report": "확인된 부담 지표 없음",
-        "emrSection": "확인된 부담 요인 없음",
-        "emrSummary": "확인된 부담 요인 없음"
+        "report": "",
+        "emrSection": "-"
+      },
+      "differs": true
+    },
+    {
+      "moduleId": "wrist",
+      "moduleName": "손목/손가락",
+      "item": "riskFactorLabel",
+      "values": {
+        "report": "      업무관련성 위험 요인: ",
+        "emrSection": "      업무에 포함된 위험 요인: "
+      },
+      "differs": true
+    },
+    {
+      "moduleId": "wrist",
+      "moduleName": "손목/손가락",
+      "item": "conclusionLead",
+      "values": {
+        "report": "\n      **종합평가** ",
+        "emrSection": "\n      **종합평가** ",
+        "emrSummary": "    **종합평가** "
       },
       "differs": true
     }

@@ -171,26 +171,25 @@ describe('validateManifest', () => {
 describe('validateManifest — narrative(P2-60)', () => {
   const render = () => '';
 
-  it('emrOrder·render만 있어도, phrases가 있어도 문제가 없다', () => {
-    expect(validateManifest(validManifest({ narrative: { emrOrder: 10, render } }))).toEqual([]);
+  it('render만 있어도, phrases가 있어도 문제가 없다', () => {
+    expect(validateManifest(validManifest({ narrative: { render } }))).toEqual([]);
     expect(validateManifest(validManifest({
-      narrative: { emrOrder: 10, render, phrases: { heading: { report: '< 무릎 >', emrSection: '<무릎>' }, empty: {} } },
+      narrative: { render, phrases: { heading: { report: '< 무릎 >', emrSection: '<무릎>' }, empty: {} } },
     }))).toEqual([]);
   });
 
   it('하위 모양을 본다', () => {
     expect(validateManifest(validManifest({ narrative: [] }))).toEqual(['narrative는 객체여야 합니다']);
-    expect(validateManifest(validManifest({ narrative: { emrOrder: Number.NaN, render: 'x', section: () => '' } }))).toEqual([
+    expect(validateManifest(validManifest({ narrative: { order: 10, render: 'x', section: () => '' } }))).toEqual([
+      "narrative에 모르는 키 'order'",
       "narrative에 모르는 키 'section'",
-      'narrative.emrOrder는 유한한 숫자여야 합니다',
       'narrative.render는 함수여야 합니다',
     ]);
-    expect(validateManifest(validManifest({ narrative: { render } }))).toEqual(['narrative.emrOrder는 유한한 숫자여야 합니다']);
-    expect(validateManifest(validManifest({ narrative: { emrOrder: 1, render, phrases: [] } }))).toEqual([
+    expect(validateManifest(validManifest({ narrative: { render, phrases: [] } }))).toEqual([
       'narrative.phrases는 객체여야 합니다',
     ]);
     expect(validateManifest(validManifest({
-      narrative: { emrOrder: 1, render, phrases: { heading: 'x', jobLine: { report: 1, emr: '-' } } },
+      narrative: { render, phrases: { heading: 'x', jobLine: { report: 1, emr: '-' } } },
     }))).toEqual([
       'narrative.phrases.heading는 객체여야 합니다',
       "narrative.phrases.jobLine에 모르는 변형 'emr'",

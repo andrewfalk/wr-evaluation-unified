@@ -2,31 +2,29 @@
 // 옮겨온 것으로, xlsx/jszip 의존성이 없어 미리보기 화면(AssessmentStep)이 byte 계산을
 // 위해 가볍게 import할 수 있다.
 
-import { getEmrNarrativeModules } from '../narrative/emrOrder';
+import { renderNarrativeBlocks } from '../narrative/renderBlocks';
 import { calculateAge, calculateBMI } from './common';
 import { selectModuleNote } from './moduleNotes';
 import { buildJobHistoryLines } from './jobHistory';
 import { EMR_TEXT_LIMIT_BYTES, cp949ByteLength, truncateCp949Bytes } from './emrText';
 import { buildAssessmentBlocks, buildConfirmedDiagnosisLines, formatGroupedAssessment } from './assessmentGroups';
 
-// 모듈 블록 — 서술(narrative)이 있는 등록 모듈을 emrOrder 순서로(무릎 → 어깨 → 손목 → 팔꿈치 → 경추 → 척추, 등록 순서·
-// activeModules 순서와 무관 — core/narrative/emrOrder.ts). 계산은 소견서와 같이 computeCalc({ shared, module })로 부른다.
-function buildModuleBlocks(variant, shared, modules, activeModules) {
-  return getEmrNarrativeModules()
-    .filter(manifest => activeModules.includes(manifest.id))
-    .map(manifest => manifest.narrative.render(variant, manifest.computeCalc({ shared, module: modules[manifest.id] || {} }), {}))
-    .join('');
+// 모듈 블록 — 소견서와 같은 조립 함수(core/narrative/renderBlocks.ts)로, activeModules 순서(ADR 0001 B1). 직업력 번호 맵도
+// 소견서처럼 넘긴다(어깨 [직력별 기여]가 쓴다).
+function buildModuleBlocks(variant, shared, modules, activeModules, jobHistory) {
+  return renderNarrativeBlocks(variant, shared, modules, activeModules, { jobNumberingByJobId: jobHistory.numberingByJobId });
 }
 
 function buildExposureSection(shared, modules, activeModules) {
+  const jobHistory = buildJobHistoryLines(shared.jobs);
   let text = '[직업력]\n';
-  text += buildJobHistoryLines(shared.jobs).text;
+  text += jobHistory.text;
 
   if (activeModules.length > 0) {
     text += '\n[부위별 신체부담 평가]\n';
   }
 
-  text += buildModuleBlocks('emrSection', shared, modules, activeModules);
+  text += buildModuleBlocks('emrSection', shared, modules, activeModules, jobHistory);
   return text;
 }
 
@@ -34,14 +32,15 @@ function buildExposureSection(shared, modules, activeModules) {
 // 누적신체부담·초과 판정)은 남기고, 참고문구·근거 상세·narrative는 뺀다. 전문은
 // txtJobCusCont(4.직업적 요인, buildExposureSection)에 그대로 남아 있으므로 정보 손실은 없다.
 function buildExposureSummary(shared, modules, activeModules) {
+  const jobHistory = buildJobHistoryLines(shared.jobs);
   let text = '[직업력]\n';
-  text += buildJobHistoryLines(shared.jobs).text;
+  text += jobHistory.text;
 
   if (activeModules.length > 0) {
     text += '\n[부위별 신체부담 평가]\n';
   }
 
-  text += buildModuleBlocks('emrSummary', shared, modules, activeModules);
+  text += buildModuleBlocks('emrSummary', shared, modules, activeModules, jobHistory);
   return text;
 }
 

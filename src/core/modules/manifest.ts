@@ -119,11 +119,10 @@ export type NarrativePhrases = Readonly<Record<string, Readonly<Partial<Record<N
 
 /**
  * 모듈 서술(선택, P2-60 — Phase 2 C7-a). 소견서·EMR 문구의 모듈 블록을 만든다. calc는 computeCalc({ shared, module })의 결과다.
- * emrOrder = EMR b6·b8의 모듈 순서(등록 순서와 무관, 작을수록 앞). phrases = 항목 → 변형별 문구(문구 차이 표의 원본).
+ * 모듈 블록의 순서는 소견서·EMR 모두 환자의 activeModules 순서다(core/narrative/renderBlocks.ts). phrases = 항목 → 변형별 문구(문구 차이 표의 원본).
  * 서술 코드는 레지스트리·reportGenerator·emrReport·exportService·xlsx를 import하지 않는다.
  */
 export interface ModuleNarrative {
-  emrOrder: number;
   render(variant: NarrativeVariant, calc: unknown, context: NarrativeContext): string;
   phrases?: NarrativePhrases;
 }
@@ -161,7 +160,7 @@ const VIDEO_MAPPING_CONFIG_KEYS: readonly string[] = ['scope', 'featureKeys', 'c
 const DEV_FIXTURE_KEYS: readonly string[] = ['createJobEvaluation', 'createDiagnosisEntry'];
 const BATCH_EXPORT_KEYS: readonly string[] = ['order', 'columns', 'rowTasks'];
 const BATCH_COLUMN_KEYS: readonly string[] = ['header', 'cell'];
-const NARRATIVE_KEYS: readonly string[] = ['emrOrder', 'render', 'phrases'];
+const NARRATIVE_KEYS: readonly string[] = ['render', 'phrases'];
 
 type Fields = Record<string, unknown>;
 
@@ -306,9 +305,6 @@ function checkNarrative(narrative: unknown, problems: string[]): void {
     return;
   }
   for (const key of unknownKeys(narrative, NARRATIVE_KEYS)) problems.push(`narrative에 모르는 키 '${key}'`);
-  if (typeof narrative.emrOrder !== 'number' || !Number.isFinite(narrative.emrOrder)) {
-    problems.push('narrative.emrOrder는 유한한 숫자여야 합니다');
-  }
   if (typeof narrative.render !== 'function') problems.push('narrative.render는 함수여야 합니다');
   if (narrative.phrases === undefined) return;
   if (!isRecord(narrative.phrases)) {

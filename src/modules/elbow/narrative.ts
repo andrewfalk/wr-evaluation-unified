@@ -151,7 +151,6 @@ function buildElbowExposureSummary(calc: ElbowCalcResult): string {
 }
 
 export const elbowNarrative: ModuleNarrative = {
-  emrOrder: 40,
   render(variant: NarrativeVariant, calc: unknown): string {
     const elbowCalc = calc as ElbowCalcResult;
     if (variant === 'report') return genElbowBurdenSection(elbowCalc);

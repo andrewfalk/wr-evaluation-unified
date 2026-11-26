@@ -27,11 +27,11 @@ function kneeDiag(overrides = {}) {
   };
 }
 
-describe('generateUnifiedReport — [업무관련성 평가 결과] 배선(assessmentGroups.js 연동)', () => {
+describe('generateUnifiedReport — [ 업무관련성 평가 결과 ] 배선(assessmentGroups.js 연동)', () => {
   it('그룹 옵션 꺼짐(기본값): 상병별 개별 문구를 그대로 출력한다', () => {
     const patient = makePatient({ diagnoses: [kneeDiag()], activeModules: ['knee'] });
     const text = generateUnifiedReport(patient);
-    expect(text).toContain('[업무관련성 평가 결과]');
+    expect(text).toContain('[ 업무관련성 평가 결과 ]');
     expect(text).toContain('#1: M17.0 무릎 관절증');
     expect(text).toContain('  우측: 상병 상태(확인) / 업무관련성(높음)');
   });
