@@ -203,11 +203,11 @@
       "moduleName": "팔꿈치",
       "item": "heading",
       "values": {
-        "report": "\n< 팔꿈치(주관절) >\n",
+        "report": "\n<팔꿈치(주관절)>\n",
         "emrSection": "\n<팔꿈치(주관절)>\n",
         "emrSummary": "\n<팔꿈치(주관절)>\n"
       },
-      "differs": true
+      "differs": false
     },
     {
       "moduleId": "elbow",
@@ -225,21 +225,21 @@
       "item": "jobLine",
       "values": {
         "report": "- 직력{n}: {name}\n",
-        "emrSection": "- {name}\n",
-        "emrSummary": "\n[{name}]\n"
+        "emrSection": "- 직력{n}: {name}\n",
+        "emrSummary": "- 직력{n}: {name}\n"
       },
-      "differs": true
+      "differs": false
     },
     {
       "moduleId": "elbow",
       "moduleName": "팔꿈치",
       "item": "jobNameEmpty",
       "values": {
-        "report": "-",
-        "emrSection": "-",
+        "report": "직업 미입력",
+        "emrSection": "직업 미입력",
         "emrSummary": "직업 미입력"
       },
-      "differs": true
+      "differs": false
     },
     {
       "moduleId": "elbow",
@@ -268,52 +268,52 @@
       "values": {
         "report": "\n      **종합평가** ",
         "emrSection": "\n      **종합평가** ",
-        "emrSummary": "    **종합평가** "
+        "emrSummary": "\n      **종합평가** "
       },
-      "differs": true
+      "differs": false
     },
     {
       "moduleId": "wrist",
       "moduleName": "손목/손가락",
       "item": "heading",
       "values": {
-        "report": "\n< 손목/손가락 >",
+        "report": "\n<손목/손가락>\n",
         "emrSection": "\n<손목/손가락>\n",
         "emrSummary": "\n<손목/손가락>\n"
       },
-      "differs": true
+      "differs": false
     },
     {
       "moduleId": "wrist",
       "moduleName": "손목/손가락",
       "item": "temporalFlagsLead",
       "values": {
-        "report": "- 공통 시간적 선후관계 ",
+        "report": "- 공통 시간적 선후관계: ",
         "emrSection": "- 공통 시간적 선후관계: "
       },
-      "differs": true
+      "differs": false
     },
     {
       "moduleId": "wrist",
       "moduleName": "손목/손가락",
       "item": "jobLine",
       "values": {
-        "report": "- 직력{n}: {name}",
-        "emrSection": "- {name}\n",
-        "emrSummary": "\n[{name}]\n"
+        "report": "- 직력{n}: {name}\n",
+        "emrSection": "- 직력{n}: {name}\n",
+        "emrSummary": "- 직력{n}: {name}\n"
       },
-      "differs": true
+      "differs": false
     },
     {
       "moduleId": "wrist",
       "moduleName": "손목/손가락",
       "item": "jobNameEmpty",
       "values": {
-        "report": "-",
-        "emrSection": "-",
+        "report": "직업 미입력",
+        "emrSection": "직업 미입력",
         "emrSummary": "직업 미입력"
       },
-      "differs": true
+      "differs": false
     },
     {
       "moduleId": "wrist",
@@ -330,10 +330,10 @@
       "moduleName": "손목/손가락",
       "item": "riskFactorLabel",
       "values": {
-        "report": "      업무관련성 위험 요인: ",
+        "report": "      업무에 포함된 위험 요인: ",
         "emrSection": "      업무에 포함된 위험 요인: "
       },
-      "differs": true
+      "differs": false
     },
     {
       "moduleId": "wrist",
@@ -342,9 +342,9 @@
       "values": {
         "report": "\n      **종합평가** ",
         "emrSection": "\n      **종합평가** ",
-        "emrSummary": "    **종합평가** "
+        "emrSummary": "\n      **종합평가** "
       },
-      "differs": true
+      "differs": false
     }
   ]
 }

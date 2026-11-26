@@ -5,7 +5,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import '../../../modules';
 import { useGoldenEnvironment } from '../../fixtures/goldenEnv';
-import { loadGoldenPatients } from '../../fixtures/goldenPatients';
+import { loadGoldenBatchPatients, loadGoldenNarrativePatients, loadGoldenPatients } from '../../fixtures/goldenPatients';
 import { getModule } from '../../modules/registry';
 import { generateUnifiedEMR } from '../../utils/emrReport';
 import { generateUnifiedReport } from '../../utils/reportGenerator';
@@ -46,7 +46,8 @@ function blockJobLines(text: string, heading: string): Array<[number, string]> {
 }
 
 function patientWithFirstJobExcluded(id: string): GoldenPatient {
-  const patient = (loadGoldenPatients() as GoldenPatient[]).find(p => p.id === id);
+  const all = [...loadGoldenPatients(), ...loadGoldenBatchPatients(), ...loadGoldenNarrativePatients()] as GoldenPatient[];
+  const patient = all.find(p => p.id === id);
   if (!patient) throw new Error(`골든 환자 ${id} 없음`);
   patient.data.shared.jobs[0].excludeFromAnalysis = true;
   return patient;
@@ -55,6 +56,8 @@ function patientWithFirstJobExcluded(id: string): GoldenPatient {
 describe('일부 직력 미포함 — 모듈 블록 직력 번호 = [직업력] 번호(세 변형)', () => {
   it.each([
     ['cervical', '<경추(목)>', '00000000-0000-4000-8000-000000000170'],
+    ['wrist', '<손목/손가락>', '00000000-0000-4000-8000-000000000170'],
+    ['elbow', '<팔꿈치(주관절)>', 'golden-batch-elbow-wrist'],
   ])('%s', (_moduleId, heading, patientId) => {
     useGoldenEnvironment();
     const patient = patientWithFirstJobExcluded(patientId);

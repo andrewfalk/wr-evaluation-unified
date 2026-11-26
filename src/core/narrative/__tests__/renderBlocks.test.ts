@@ -85,3 +85,60 @@ describe('소견서 ≡ EMR 4번 칸(모듈 서술)', () => {
     expect(checked).toBeGreaterThan(0);
   });
 });
+
+// 손목·팔꿈치(P2-66d): 분석 정리가 빈 값일 때의 줄(narrativeEmpty — ADR 0001 표 A 13·19행 유지)만 다르다 — 소견서 '      ',
+// 4번 칸 '      -'. 그 밖의 줄은 줄바꿈 하나까지 같다.
+const EMPTY_NARRATIVE_LINES: readonly [string, string] = ['      ', '      -'];
+const REPORT_EQUALS_EMR_SECTION_BUT_EMPTY_NARRATIVE = ['wrist', 'elbow'];
+
+function differingLines(report: string, section: string): Array<[string, string]> {
+  const left = report.split('\n');
+  const right = section.split('\n');
+  expect(left.length).toBe(right.length);
+  return left.flatMap((line, i): Array<[string, string]> => (line === right[i] ? [] : [[line, right[i]]]));
+}
+
+/** calc의 상병 요약 분석 정리를 모두 빈 값으로(골든이 덮지 않는 분기 — 계획 F19 ②). 바꾼 개수를 돌려준다. */
+function clearNarratives(calc: unknown): number {
+  const { jobSummaries = [] } = calc as { jobSummaries?: Array<{ diagnosisSummaries?: Array<{ narrative?: string }> }> };
+  let cleared = 0;
+  for (const job of jobSummaries) {
+    for (const summary of job.diagnosisSummaries || []) {
+      summary.narrative = '';
+      cleared += 1;
+    }
+  }
+  return cleared;
+}
+
+describe('소견서 ≡ EMR 4번 칸 — 손목·팔꿈치(narrativeEmpty 줄만 예외)', () => {
+  it.each(REPORT_EQUALS_EMR_SECTION_BUT_EMPTY_NARRATIVE)('%s: 골든·보강 환자 전원', (moduleId) => {
+    useGoldenEnvironment();
+    const { manifest, narrative } = moduleOf(moduleId);
+    let checked = 0;
+    for (const patient of allPatients()) {
+      if (!(patient.data.activeModules || []).includes(moduleId)) continue;
+      const calc = manifest.computeCalc({ shared: patient.data.shared, module: patient.data.modules[moduleId] || {} });
+      for (const pair of differingLines(narrative.render('report', calc, {}), narrative.render('emrSection', calc, {}))) {
+        expect(pair, patient.id).toEqual(EMPTY_NARRATIVE_LINES);
+      }
+      checked += 1;
+    }
+    expect(checked).toBeGreaterThan(0);
+  });
+
+  it.each(REPORT_EQUALS_EMR_SECTION_BUT_EMPTY_NARRATIVE)('%s: 분석 정리가 빈 값이면 소견서는 빈 값, 4번 칸은 "-" — 그 줄만 다르다', (moduleId) => {
+    useGoldenEnvironment();
+    const { manifest, narrative } = moduleOf(moduleId);
+    let checkedLines = 0;
+    for (const patient of allPatients()) {
+      if (!(patient.data.activeModules || []).includes(moduleId)) continue;
+      const calc = manifest.computeCalc({ shared: patient.data.shared, module: patient.data.modules[moduleId] || {} });
+      if (clearNarratives(calc) === 0) continue;
+      const pairs = differingLines(narrative.render('report', calc, {}), narrative.render('emrSection', calc, {}));
+      for (const pair of pairs) expect(pair, patient.id).toEqual(EMPTY_NARRATIVE_LINES);
+      checkedLines += pairs.length;
+    }
+    expect(checkedLines).toBeGreaterThan(0);
+  });
+});
