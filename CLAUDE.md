@@ -1,53 +1,46 @@
 # 직업성 질환 통합 평가 시스템 (wr-evaluation-unified)
 
-## 프로젝트 개요
-직업환경의학 전문의를 위한 통합 평가 도구. 무릎(슬관절) + 팔꿈치(BK2101/2103/2105/2106) + 어깨(BK2117) + 척추(MDDM) 평가를 모듈식으로 결합.
-향후 고관절 등 추가 예정 → 플러그인 아키텍처.
+직업환경의학 전문의용 통합 평가 도구. 무릎·어깨·팔꿈치·척추·경추·손목 6개 모듈을 플러그인 방식으로 결합한다.
 
-- **기술 스택**: React 18 + Vite 5 + CSS Variables
-- **배포**: 웹(Vercel) + 데스크톱(Electron) 동시 지원
-- **원본 소스**: `mddm-vercel` (척추, Vanilla JS → React 마이그레이션), `wr-evaluation-claude` (무릎, React)
+- **기술 스택**: React 18 + Vite 5 + CSS Variables, 서버는 Express + PostgreSQL, 통계 엔진은 Python
+- **배포 3형태**: 웹(Vercel) · 독립형 Electron · 인트라넷(서버 + Electron 셸)
+- **브라우저 하한 Chrome 108**(Win7 Chrome 109·설치본 Electron 22) — 그보다 새 기능은 `verify:browser-compat`가 `check`에서 막는다
 
-## 빌드 & 실행
+이 파일에는 코드에서 바로 알 수 없는 규칙과 위치만 적는다. 폴더·라우터·필드 목록은 여기에 베끼지 말고 코드를 본다.
+
+## 명령
 
 ```bash
-npm run dev              # 개발 서버 (Vite, localhost:3000) + @wr/contracts·@wr/analytics-core tsup --watch (클라이언트는 별칭 없이 dist로 해석)
-npm run check            # 병합 전 로컬 검증 묶음 (lint·typecheck·test 루트+서버, build:web) — CI 대신 (로드맵 D9)
-npm run typecheck        # 루트(shared·packages) + 클라이언트 TS(strict, tsconfig.client.json) + 클라이언트 JS(완화 checkJs, tsconfig.client.js.json) — 새 @ts-nocheck는 scripts/ts-ratchet.mjs가 막음
-npm run check:full       # check + 실DB 통합 테스트(일회용 Docker PostgreSQL) + 운영 버전 pytest(Python 3.11 컨테이너) + 운영 의존성 audit(검토 목록 scripts/audit-allowlist.json) + gitleaks — DB·동시성·통계 엔진·마이그레이션 변경 PR과 릴리스 전
-npm run verify:secrets   # gitleaks로 git 이력의 비밀 정보 검사(Docker, 약 30초) — 공개 저장소이므로 push 전에
-npm run build:web        # 웹 빌드 → dist/web/
-npm run build:electron   # Electron 빌드 → dist/electron/
-npm run electron:dev     # Electron 개발 실행
-npm run electron:build   # Electron 패키징 (electron-builder)
-vercel deploy            # Vercel 배포
+npm run dev              # Vite(localhost:3000, /api는 3001로 프록시) + @wr/contracts·@wr/analytics-core watch(클라이언트는 dist로 해석)
+npm run check            # 병합 전 로컬 검증 묶음(lint·typecheck·test 루트+서버·build:web·verify:*) — CI 대신(로드맵 D9)
+npm run check:full       # check + 실DB 통합 테스트(일회용 Docker PostgreSQL) + 운영 버전 pytest + 의존성 audit + gitleaks
+                         #   — DB·동시성·통계 엔진·마이그레이션 변경 PR과 릴리스 전
+npm run verify:secrets   # gitleaks로 git 이력 검사(Docker, 약 30초) — 공개 저장소이므로 push 전에
+npm run typecheck        # 루트 + 클라이언트 TS(strict) + 클라이언트 JS(완화 checkJs)
+npm run build:web        # → dist/web/        (build:electron → dist/electron/)
+npm run electron:dev     # 독립형 Electron 개발 실행 (인트라넷 셸은 electron:dev:intranet)
 ```
 
-## 디렉토리 구조
+서버 스크립트는 `server/package.json`(`dev`·`migrate`·`seed:admin`·`retention` 등), 그 밖의 스크립트는 루트 `package.json`을 본다.
+
+## 어디에 무엇이 있나
 
 ```
-src/
-├── core/                    # 공유 프레임워크
-│   ├── moduleRegistry.js    # registerModule(), getModule(), getAllModules() — shim, 구현은 modules/registry.ts
-│   ├── modules/             # manifest.ts(매니페스트 타입·validateManifest), registry.ts
-│   ├── components/          # BasicInfoForm, DiagnosisForm, AIAnalysisPanel, PresetSearch, PresetManageModal, Dashboard, BatchImportModal, SettingsModal
-│   ├── hooks/               # useAIAnalysis (web/electron 자동 분기), usePatientList
-│   ├── services/            # presetRepository (프리셋 CRUD, builtin+custom 병합)
-│   └── utils/               # storage, platform, common, data
-├── modules/
-│   ├── knee/                # 무릎 모듈 (KneeEvaluation, JobTab, AssessmentTab, KneeResultPanel)
-│   ├── shoulder/            # 어깨 모듈 (ShoulderEvaluation, JobTab, ShoulderResultPanel)
-│   ├── elbow/               # 팔꿈치 모듈 (ElbowEvaluation, ExposureForm, ElbowResultPanel)
-│   ├── spine/               # 척추 MDDM 모듈 (SpineEvaluation, TaskManager, TaskEditor, ResultDashboard)
-│   ├── cervical/            # 경추(목) 모듈 (CervicalEvaluation, TaskManager — spine과 유사한 부담 노출 평가)
-│   └── wrist/                # 손목/손가락 모듈 (WristEvaluation — BK2101/2106/2113 공통 노출 평가)
-api/analyze.js               # Vercel 서버리스 (Gemini/Claude API 프록시)
-electron/                    # main.js + preload-intranet.js/preload-standalone.js + emr-helper/ (IPC: AI 호출 + EMR 연동)
-server/                       # 인트라넷 서버 (Express + PostgreSQL, server/src/routes/ — 아래 "서버" 섹션 참고)
-packages/analytics-core/      # @wr/analytics-core — 6개 모듈 계산·변수 카탈로그를 클라이언트·서버가 공유 (통계 워크벤치 기반)
-services/stats-engine/        # 통계 Python 엔진 (app 이미지 내 /opt/stats-venv로 spawn)
-shared/contracts/             # 클라이언트-서버 공유 zod 스키마 (아래 "공유 계약" 섹션 참고)
+src/app/                  # 앱 셸(App.tsx)·화면·라우터·모달
+src/core/                 # 공유 프레임워크 — src/modules를 import하지 않는다
+src/modules/<id>/         # 평가 모듈 6개, 등록 순서는 src/modules/index.ts
+src/platform/             # 웹/Electron 분기(bridge.ts) — window.electron은 여기서만
+packages/analytics-core/  # @wr/analytics-core — 모듈 계산·변수 카탈로그(클라이언트·서버 공유)
+shared/contracts/         # @wr/contracts — 클라이언트·서버 공유 zod 스키마
+server/src/routes/        # 인트라넷 서버 라우터 (통계는 server/src/stats/)
+server/migrations/        # DB 마이그레이션
+services/stats-engine/    # 통계 Python 엔진
+electron/                 # main.js + preload 2종 + emr-helper/
+api/analyze.js            # Vercel 서버리스(AI 프록시)
 ```
+
+자세한 내용은 문서를 본다: 구조도 `docs/ARCHITECTURE_DIAGRAM.md`, 리팩터링 현황·결정(D1~D9) `docs/REFACTORING_ROADMAP.md`,
+모듈 저장 규칙 `docs/MODULE_STORAGE_CONVENTIONS.md`, 설계 결정 `docs/adr/`, 운영 `docs/OPERATIONS_RUNBOOK.md`·`docs/INTRANET_DEPLOYMENT.md`.
 
 ## 모듈 추가 방법
 
@@ -88,67 +81,31 @@ registerModule({
 ## 데이터 모델
 
 ```javascript
-Patient = {
-  id, phase,
-  data: {
-    shared: { patientNo, name, gender, height, weight, birthDate, injuryDate, evaluationDate,
-              hospitalName, department, doctorName, specialNotes, diagnoses[], jobs[],
-              medicalRecord, highBloodPressure, diabetes, visitHistory,
-              consultReplyOrtho, consultReplyNeuro, consultReplyRehab, consultReplyOther },
-    // shared.jobs[] 원소: { id, jobName, presetId, startDate, endDate, workPeriodOverride, workDaysPerYear,
-    //   excludeFromAnalysis? } — true면 신체부담평가(모듈 평가·결과·통계 신체부담 변수)에서 제외, 직업력 출력에는 남음.
-    //   판정은 항상 `=== true`이며 필드를 직접 읽지 말고 packages/analytics-core/jobScope.ts 헬퍼를 쓴다.
-    modules: { knee: {}, shoulder: {}, elbow: {}, spine: {}, cervical: {}, wrist: {} },
-    activeModules: ['knee', 'spine', ...]
-  }
-}
+Patient = { id, phase, data: {
+  shared: { /* 인적사항·diagnoses[]·jobs[]·진료기록 등 — 필드는 shared/contracts/patient.ts */ },
+  modules: { knee: {}, shoulder: {}, elbow: {}, spine: {}, cervical: {}, wrist: {} },
+  activeModules: ['knee', 'spine', ...]
+} }
 ```
 
-## 서버 (server/)
+- `shared.jobs[].excludeFromAnalysis`가 `true`면 그 직력은 신체부담평가(모듈 평가·결과·통계 신체부담 변수)에서 빠지고 직업력 출력에는 남는다.
+  판정은 항상 `=== true`이며 필드를 직접 읽지 말고 `packages/analytics-core/jobScope.ts` 헬퍼를 쓴다.
 
-인트라넷 배포용 Express + PostgreSQL 서버. `server/src/routes/`에 15개 라우터:
+## 지켜야 할 규칙
 
-- **auth.ts**: 로그인/로그아웃/비밀번호 변경/가입 요청, `/me`, CSRF 토큰 재발급
-- **admin.ts**: 디바이스 관리, 조직 설정, 사용자 비밀번호 초기화/권한 부여 등 관리자 기능
-- **patients.ts**: 환자 레코드 CRUD, 일괄 작업, 충돌 해소, 담당의 배정
-- **workspaces.ts**: 환자 목록 스냅샷(워크스페이스) CRUD (사용자/조직 범위)
-- **autosave.ts**: 워크스페이스 자동저장 스냅샷 조회/저장/삭제
-- **presets.ts**: 직업 노출 프리셋 CRUD (공유/조직/개인 범위)
-- **devices.ts**: 디바이스 등록 — PC(Ed25519 장치 키 지문) 단위, 한 PC는 한 기관(`server/src/devices/pcIdentity.ts`)
-- **audit.ts**: Electron 메인 프로세스에서 전송한 EMR 감사 로그 수신 — 서명으로 PC를 찾고 기관·행위자·표시를 정한다(`server/src/devices/`)
-- **opsStatus.ts**: 백업 실행 상태 조회, 실행/알림 확인 작업
-- **config.ts**: `/api/config/public` — 배포 모드, AI 활성화 여부, 서버 시간 등 공개 설정
-- **ai.ts**: `/api/ai/analyze` — 내부 LLM 또는 승인된 외부 벤더로 AI 분석 요청 프록시
-- **videoAnalysis.ts**: 작업 영상 업로드·분석·결과 (`VIDEO_ANALYSIS_ENABLED`)
-- **updates.ts**: Electron 셸 자동 업데이트(electron-updater) 정적 배포 경로·정책
-- **stats.ts**: `/api/stats/*` — 통계분석 워크벤치(catalog·preview·analyze·runs·export), `STATS_WORKBENCH_ENABLED` + intranet에서만 열림(아니면 404)
-- **capabilityGrants.ts**: `/api/capabilities/*` — 통계 capability 정의·grant 부여/회수 (기본 허용 3종은 grant 불필요)
-
-서버 스크립트(`server/package.json`): `dev`(tsx watch), `build`(tsc), `start`,
-`migrate`(DB 마이그레이션), `seed:admin`(관리자 계정 시딩, 루트에서는
-`npm run server:seed:admin`), `retention`(데이터 보존정책 정리 CLI).
-
-## 공유 계약 (shared/contracts/)
-
-클라이언트(`src/`)와 서버(`server/`) 간 요청/응답 형태를 정의하는 zod 스키마 모음
-(`index.ts`에서 재export). `auth.ts`(User/Org/Capabilities), `patient.ts`(Diagnosis/
-SharedJob/SharedData), `workspace.ts`(WorkspaceScope/WorkspaceItem), `autosave.ts`,
-`config.ts`, `preset.ts` 등 — 런타임 의존 없이 타입/스키마만 공유.
+- **골든(특성화) 테스트** (`**/__goldens__/*.json`, `src/core/fixtures/goldenEnv.js`): 계산·출력 결과를 그대로 얼려 둔 것. 리팩터링 PR에서 실패하면 동작이 바뀐 것이니 코드를 고친다 — **골든을 갱신하지 않는다**. 의도한 출력 변경(기능 PR)만 `npx vitest run -u <테스트 파일>`로 갱신하고 PR에 diff와 이유를 적는다. 입력 `src/core/fixtures/goldenPatients.json`은 재생성하지 않는다(새 사례는 추가).
+- **구조 래칫** (`scripts/arch-baseline.json` ↔ `src/__tests__/architecture.ratchet.test.js`): 값은 줄어들기만 한다. 올리지 말고, 줄였으면 `node scripts/arch-metrics.mjs --lower`. core→modules import·`window.electron` 직접 참조·raw `fetch`는 0이다.
+- **TS 점진 전환**(로드맵 D3): 새 파일과 분할·수정하는 파일은 `.ts`/`.tsx`로. 새 `@ts-nocheck`는 `scripts/ts-ratchet.mjs`가 막는다.
+- **마이그레이션**: 머지된 `server/migrations/*.sql`은 고치지 않고 다음 번호로 추가한다(`verify:migrations-immutable`).
+- **공유 패키지**(`@wr/contracts`·`@wr/analytics-core`)를 바꾸면 테스트만으로 끝내지 말고 `npm run check`까지 돌린다(서버 tsc·Vite 빌드는 dist로 해석).
+- localStorage 키 접두사 `wrEvalUnified`(`src/core/storage/keys.ts`), 자세 이미지 `public/images/`(G1-G11), 직업 프리셋 `public/job-presets.json`, `index.html`은 프로젝트 루트(Vite 요구사항).
 
 ## AI API 분기
 
-- **웹**: `fetch('/api/analyze')` → Vercel 서버리스 → Gemini(기본)/Claude API (서버 환경변수 GEMINI_API_KEY / CLAUDE_API_KEY)
-- **Electron**: `window.electron.analyzeAI()` → IPC → main process → 직접 Gemini/Claude API (사용자 입력 키)
-- 분기 로직: `src/core/hooks/useAIAnalysis.js`
-
-## 주의사항
-
-- **골든(특성화) 테스트** (`**/__goldens__/*.json`, `src/core/fixtures/goldenEnv.js`): 계산·출력 결과를 그대로 얼려 둔 것. 리팩터링 PR에서 실패하면 동작이 바뀐 것이니 코드를 고친다 — **골든을 갱신하지 않는다**. 의도한 출력 변경(기능 PR)만 `npx vitest run -u <테스트 파일>`로 갱신하고 PR에 diff와 이유를 적는다. 입력 `src/core/fixtures/goldenPatients.json`은 재생성하지 않는다(새 사례는 추가).
-
-- localStorage 키 접두사: `wrEvalUnified`
-- 자세 이미지: `public/images/` (G1-G11)
-- 직업 프리셋: `public/job-presets.json`
-- index.html은 프로젝트 루트에 위치 (Vite 요구사항)
+- **웹**: `fetch('/api/analyze')` → Vercel 서버리스 → Gemini(기본)/Claude API (서버 환경변수 `GEMINI_API_KEY`/`CLAUDE_API_KEY`)
+- **독립형 Electron**: `src/platform/bridge.ts` → IPC → main process → 직접 Gemini/Claude API (사용자 입력 키)
+- **인트라넷**: `/api/ai/analyze` → 서버가 내부 LLM 또는 승인된 외부 벤더로 프록시
+- 분기 로직: `src/core/services/analysisClient.js` (`src/core/hooks/useAIAnalysis.js`가 호출)
 
 ## 코드 탐색 · 수정 원칙 (토큰 절약)
 
@@ -161,4 +118,3 @@ SharedJob/SharedData), `workspace.ts`(WorkspaceScope/WorkspaceItem), `autosave.t
 3. **부분 Read**: `offset` / `limit`으로 필요한 범위만 읽을 것 — **파일 전체 Read 금지**
    - 예외: 파일이 매우 짧거나 전체를 재작성해야 하는 경우
 4. **매번 보고**: 그래프를 읽었는지·안 읽었는지, 왜 그랬는지 매 작업마다 명시
-
