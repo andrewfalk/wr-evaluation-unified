@@ -153,7 +153,6 @@ function buildShoulderExposureSummary(calc: ShoulderNarrativeCalc | undefined): 
 }
 
 export const shoulderNarrative: ModuleNarrative = {
-  emrOrder: 20,
   render(variant: NarrativeVariant, calc: unknown, context: NarrativeContext): string {
     const shoulderCalc = calc as ShoulderNarrativeCalc | undefined;
     if (variant === 'report') return genShoulderBurdenSection(shoulderCalc as ShoulderNarrativeCalc, context.jobNumberingByJobId ?? null);

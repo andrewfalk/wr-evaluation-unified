@@ -1,4 +1,4 @@
-import { getModule } from '../moduleRegistry';
+import { renderNarrativeBlocks } from '../narrative/renderBlocks';
 import { getSideText } from '../i18n/sideLabels';
 import { buildAssessmentBlocks, formatGroupedAssessment } from './assessmentGroups';
 import { calculateAge, calculateBMI } from './common';
@@ -34,21 +34,15 @@ export function generateUnifiedReport(patient) {
   text += `\n[직업력]\n`;
   text += jobHistory.text;
 
-  text += `\n[부위별 신체부담 평가]\n`;
-  // 모듈 블록은 activeModules 순서로, 각 모듈의 서술(narrative)이 만든다(Phase 2 C7-a). 등록되지 않았거나 서술이 없는
-  // 모듈은 건너뛴다. 계산은 computeCalc({ shared, module })로 부른다(activeModules를 넘기지 않는다 — 넘기면 팔꿈치·손목·
-  // 경추가 상병을 걸러 문구가 바뀔 수 있다).
-  for (const moduleId of activeModules) {
-    const moduleManifest = getModule(moduleId);
-    if (!moduleManifest?.computeCalc || !moduleManifest.narrative) continue;
-    const calc = moduleManifest.computeCalc({
-      shared,
-      module: modules[moduleId] || {},
-    });
-    text += moduleManifest.narrative.render('report', calc, { jobNumberingByJobId: jobHistory.numberingByJobId });
+  // 머리글은 평가 부위가 하나라도 있을 때만(ADR 0001 B2 — EMR과 같게).
+  if (activeModules.length > 0) {
+    text += `\n[부위별 신체부담 평가]\n`;
   }
+  // 모듈 블록은 activeModules 순서로, 각 모듈의 서술(narrative)이 만든다 — EMR b6·b8과 같은 조립 함수(core/narrative/renderBlocks.ts).
+  text += renderNarrativeBlocks('report', shared, modules, activeModules, { jobNumberingByJobId: jobHistory.numberingByJobId });
 
-  text += `\n[업무관련성 평가 결과]\n`;
+  // 머리글 표기는 EMR 6번 칸과 같게(ADR 0001 B3).
+  text += `\n[ 업무관련성 평가 결과 ]\n`;
   if (shared.reportOptions?.groupAssessmentResults) {
     text += `\n${formatGroupedAssessment(diagnoses, activeModules)}\n`;
   } else {

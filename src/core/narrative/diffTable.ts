@@ -4,7 +4,7 @@
 // 사람이 읽는 표는 scripts/narrative-diff.mjs가 그 JSON에서 만든다(docs/adr/0001-narrative-canonical-wording.md).
 import { NARRATIVE_VARIANTS, type ModuleManifest, type NarrativeVariant } from '../modules/manifest';
 import { getAllModules } from '../modules/registry';
-import { sortByEmrOrder } from './emrOrder';
+import { isNarratedModule } from './renderBlocks';
 
 export interface NarrativePhraseRow {
   moduleId: string;
@@ -18,16 +18,16 @@ export interface NarrativePhraseRow {
 
 export interface NarrativeDiffTable {
   variants: readonly NarrativeVariant[];
-  /** phrases가 있는 모듈(EMR 순서) */
-  modules: Array<{ id: string; name: string; emrOrder: number; items: number }>;
+  /** phrases가 있는 모듈(등록 순서) */
+  modules: Array<{ id: string; name: string; items: number }>;
   /** phrases가 없는 서술 모듈 */
   modulesWithoutPhrases: string[];
   rows: NarrativePhraseRow[];
 }
 
-/** 모듈 목록 → 차이 표. 모듈은 EMR 순서, 항목은 각 모듈 phrases의 키 순서. */
+/** 모듈 목록 → 차이 표. 모듈은 받은 순서(레지스트리면 등록 순서 — src/modules/index.ts), 항목은 각 모듈 phrases의 키 순서. */
 export function buildNarrativeDiffTable(manifests: readonly ModuleManifest[]): NarrativeDiffTable {
-  const narrated = sortByEmrOrder(manifests);
+  const narrated = manifests.filter(isNarratedModule);
   const rows: NarrativePhraseRow[] = [];
   const modules: NarrativeDiffTable['modules'] = [];
   const modulesWithoutPhrases: string[] = [];
@@ -37,7 +37,7 @@ export function buildNarrativeDiffTable(manifests: readonly ModuleManifest[]): N
       modulesWithoutPhrases.push(manifest.id);
       continue;
     }
-    modules.push({ id: manifest.id, name: manifest.name, emrOrder: manifest.narrative.emrOrder, items: Object.keys(phrases).length });
+    modules.push({ id: manifest.id, name: manifest.name, items: Object.keys(phrases).length });
     for (const [item, byVariant] of Object.entries(phrases)) {
       const values: Partial<Record<NarrativeVariant, string>> = {};
       for (const variant of NARRATIVE_VARIANTS) {

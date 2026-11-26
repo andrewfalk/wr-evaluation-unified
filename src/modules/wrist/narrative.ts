@@ -154,7 +154,6 @@ function buildWristExposureSummary(calc: WristCalcResult): string {
 }
 
 export const wristNarrative: ModuleNarrative = {
-  emrOrder: 30,
   render(variant: NarrativeVariant, calc: unknown): string {
     const wristCalc = calc as WristCalcResult;
     if (variant === 'report') return genWristBurdenSection(wristCalc);

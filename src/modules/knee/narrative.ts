@@ -142,7 +142,6 @@ function buildKneeExposureSummary(calc: KneeNarrativeCalc | undefined): string {
 }
 
 export const kneeNarrative: ModuleNarrative = {
-  emrOrder: 10,
   render(variant: NarrativeVariant, calc: unknown): string {
     const kneeCalc = calc as KneeNarrativeCalc | undefined;
     if (variant === 'report') return genKneeBurdenSection(kneeCalc as KneeNarrativeCalc);

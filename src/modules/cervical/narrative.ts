@@ -82,7 +82,6 @@ function buildCervicalExposureText(calc: CervicalNarrativeCalc | undefined): str
 }
 
 export const cervicalNarrative: ModuleNarrative = {
-  emrOrder: 50,
   render(variant: NarrativeVariant, calc: unknown): string {
     const cervicalCalc = calc as CervicalNarrativeCalc | undefined;
     if (variant === 'report') return genCervicalBurdenSection(cervicalCalc as CervicalNarrativeCalc);
