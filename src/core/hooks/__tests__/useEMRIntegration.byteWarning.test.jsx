@@ -224,6 +224,80 @@ describe('useEMRIntegration — 확인 상병 칸 사전 경고', () => {
   });
 });
 
+// 게이트 C P2-66e: 4.직업적 요인(b6)은 소견서와 같은 전문이라 길어질 수 있다 — 넘으면 전송 전에 알린다(절단 전 원본 기준).
+describe('useEMRIntegration — 4.직업적 요인 한도 초과 사전 경고', () => {
+  const withExposure = (exposureSection, base = autoResult()) => ({ ...base, exposureSection });
+
+  it('4번 칸이 한도를 넘으면 초과분을 알리는 확인창을 띄우고, 받아들이면 전송한다', async () => {
+    mockPrepareEmrInjection.mockReturnValue(withExposure({ bytes: 6460, overLimit: true }));
+    const { result } = setup();
+
+    await result.current.handleInjectEMR();
+
+    expect(showConfirm).toHaveBeenCalledTimes(2);
+    const message = showConfirm.mock.calls[1][0];
+    expect(message).toContain('4.직업적 요인이 EMR 한도를 초과합니다');
+    expect(message).toContain('6,460 / 3,950 byte (2,510 byte 초과)');
+    expect(message).toContain('...(이하 생략)');
+    expect(message).toContain('잘린 상태로 계속 전송하시겠습니까?');
+    expect(window.electron.injectEMR).toHaveBeenCalledTimes(1);
+  });
+
+  it('4번 칸 경고에서 거절하면 전송하지 않는다', async () => {
+    mockPrepareEmrInjection.mockReturnValue(withExposure({ bytes: 6460, overLimit: true }));
+    showConfirm.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    const { result } = setup();
+
+    await result.current.handleInjectEMR();
+
+    expect(window.electron.injectEMR).not.toHaveBeenCalled();
+  });
+
+  it('4번 칸이 한도 이내면 추가 확인 없이 전송한다', async () => {
+    mockPrepareEmrInjection.mockReturnValue(withExposure({ bytes: 3950, overLimit: false }));
+    const { result } = setup();
+
+    await result.current.handleInjectEMR();
+
+    expect(showConfirm).toHaveBeenCalledTimes(1);
+    expect(window.electron.injectEMR).toHaveBeenCalledTimes(1);
+  });
+
+  it('4번 칸이 한도 이내면 다른 경고의 확인창 문구는 이 기능 전과 같다', async () => {
+    const sixOnly = autoResult({ txtSyth1Cont: 'a'.repeat(4200), _truncatedFields: ['txtSyth1Cont'] }, 4200);
+    mockPrepareEmrInjection.mockReturnValue(sixOnly);
+    const { result } = setup();
+    await result.current.handleInjectEMR();
+    const before = showConfirm.mock.calls[1][0];
+
+    vi.clearAllMocks();
+    mockPrepareEmrInjection.mockReturnValue(withExposure({ bytes: 3000, overLimit: false }, sixOnly));
+    const { result: again } = setup();
+    await again.current.handleInjectEMR();
+
+    expect(showConfirm.mock.calls[1][0]).toBe(before);
+    expect(before).not.toContain('4.직업적 요인');
+  });
+
+  it('6번 칸·4번 칸·확인 상병 경고가 겹치면 한 창에 모으고 전송 질문은 한 번이다', async () => {
+    mockPrepareEmrInjection.mockReturnValue({
+      ...autoResult({ txtSyth1Cont: 'a'.repeat(4200), _truncatedFields: ['txtSyth1Cont', 'txtJobCusCont'] }, 4200),
+      confirmedDx: { isEmpty: true, bytes: 0, overLimit: false },
+      exposureSection: { bytes: 5000, overLimit: true },
+    });
+    const { result } = setup();
+
+    await result.current.handleInjectEMR();
+
+    expect(showConfirm).toHaveBeenCalledTimes(2);
+    const merged = showConfirm.mock.calls[1][0];
+    expect(merged.indexOf('6.종합소견이 EMR 한도를 초과')).toBeLessThan(merged.indexOf('4.직업적 요인이 EMR 한도를 초과'));
+    expect(merged.indexOf('4.직업적 요인이 EMR 한도를 초과')).toBeLessThan(merged.indexOf('"확인"으로 입력된 상병이 없습니다'));
+    expect(merged.match(/전송하시겠습니까\?/g)).toHaveLength(1);
+    expect(merged).toContain('잘린 상태로 계속 전송하시겠습니까?');
+  });
+});
+
 describe('useEMRIntegration — dirty(미저장 편집 중) 차단', () => {
   it('활성 환자가 dirtyAssessmentPatientId와 일치하면 확인창 없이 전송을 차단한다', async () => {
     const { result } = setup({ dirtyAssessmentPatientId: 'p1' });
@@ -265,6 +339,8 @@ describe('useEMRIntegration — 낡은 오버라이드 재확인', () => {
     await result.current.handleInjectEMR();
 
     expect(showConfirm).toHaveBeenNthCalledWith(2, expect.stringContaining('변경되었습니다'));
+    // P2-66e: 프로그램 업데이트로 자동 생성 문구가 달라져도 낡음으로 판정된다는 것을 함께 알린다(판정 방식은 그대로).
+    expect(showConfirm).toHaveBeenNthCalledWith(2, expect.stringContaining('프로그램 업데이트로 자동 생성 문구가 달라졌습니다'));
     expect(window.electron.injectEMR).toHaveBeenCalledTimes(1);
   });
 

@@ -36,7 +36,7 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
       const { prepareEmrInjection } = await import('../utils/emrReport');
       const { EMR_TEXT_LIMIT_BYTES } = await import('../utils/emrText');
 
-      const { fieldData, effective, bytes, confirmedDx } = prepareEmrInjection(activePatient);
+      const { fieldData, effective, bytes, confirmedDx, exposureSection } = prepareEmrInjection(activePatient);
 
       if (effective.hasInvalidOverride) {
         await alertAlive('저장된 종합소견 편집 데이터가 손상되어 전송할 수 없습니다.\n종합평가 화면에서 "깨진 편집 데이터 삭제" 후 다시 시도하세요.');
@@ -46,13 +46,13 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
       // 직전에 한 번 더 확인만 한다(정책: 화면 경고 배너 + 전송 직전 재확인).
       if (effective.isStale) {
         const proceedStale = await confirmAlive(
-          '⚠ 직접 편집한 종합소견 이후 상병·직업·평가 데이터가 변경되었습니다.\n'
+          '⚠ 직접 편집한 종합소견 이후 상병·직업·평가 데이터가 변경되었습니다(또는 프로그램 업데이트로 자동 생성 문구가 달라졌습니다).\n'
           + '전송될 내용은 편집 시점 그대로이며 최신 데이터와 다를 수 있습니다.\n\n'
           + '편집본을 그대로 전송하시겠습니까?'
         );
         if (!proceedStale) return;
       }
-      // 전송 전 경고(종합소견 한도 초과 · 확인 상병 0건/한도 초과)는 사유를 모아 확인창 한 번으로
+      // 전송 전 경고(종합소견 한도 초과 · 4.직업적 요인 한도 초과 · 확인 상병 0건/한도 초과)는 사유를 모아 확인창 한 번으로
       // 묻는다. 확인 상병 판정은 절단 전 원본 b5 기준(confirmedDx) — 이미 절단된
       // fieldData.txtAppvSickCont 길이로는 초과를 알 수 없다. EMR 헬퍼는 빈 값이면 칸을 건드리지
       // 않으므로(SetField early-return), 0건이면 EMR에 이미 들어 있던 값이 그대로 남는다.
@@ -69,6 +69,16 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
           + `${bytes.toLocaleString()} / ${EMR_TEXT_LIMIT_BYTES.toLocaleString()} byte (${over.toLocaleString()} byte 초과)\n`
           + `그대로 전송하면 끝부분이 "...(이하 생략)"으로 잘립니다.\n`
           + reduceHint
+        );
+      }
+      // 4.직업적 요인(b6)도 절단 전 원본 기준(exposureSection). 줄이는 방법은 없어 알리기만 한다 — 전문은 소견서·엑셀에 남는다.
+      if (exposureSection?.overLimit) {
+        willTruncate = true;
+        warnings.push(
+          `⚠ 4.직업적 요인이 EMR 한도를 초과합니다.\n`
+          + `${exposureSection.bytes.toLocaleString()} / ${EMR_TEXT_LIMIT_BYTES.toLocaleString()} byte (${(exposureSection.bytes - EMR_TEXT_LIMIT_BYTES).toLocaleString()} byte 초과)\n`
+          + `그대로 전송하면 끝부분이 "...(이하 생략)"으로 잘려, 뒤에 오는 부위의 내용이 빠질 수 있습니다.\n`
+          + '전문은 소견서와 엑셀 내보내기에 그대로 남습니다.'
         );
       }
       if (confirmedDx?.isEmpty) {

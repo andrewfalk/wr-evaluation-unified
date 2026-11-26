@@ -223,11 +223,15 @@ export function prepareEmrInjection(patient) {
   // confirmedDx: 전송 전 경고용 — 절단 전 원본 b5 기준(이미 절단된 fieldData.txtAppvSickCont로는
   // 한도 초과를 알 수 없다).
   const confirmedDxBytes = cp949ByteLength(unified.b5 || '');
+  // exposureSection: 전송 전 경고용 — 절단 전 원본 b6(4.직업적 요인) 기준(게이트 C P2-66e). 4번 칸은 소견서와 같은 전문이라
+  // 길어질 수 있고, 넘으면 뒤에 오는 부위부터 잘린다.
+  const exposureSectionBytes = cp949ByteLength(unified.b6 || '');
   return {
     fieldData,
     effective,
     bytes: cp949ByteLength(effective.text),
     confirmedDx: { isEmpty: !unified.b5, bytes: confirmedDxBytes, overLimit: confirmedDxBytes > EMR_TEXT_LIMIT_BYTES },
+    exposureSection: { bytes: exposureSectionBytes, overLimit: exposureSectionBytes > EMR_TEXT_LIMIT_BYTES },
   };
 }
 
