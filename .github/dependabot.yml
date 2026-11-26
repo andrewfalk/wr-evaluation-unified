@@ -31,6 +31,11 @@ updates:
           - "typescript"
           - "vitest"
           - "@types/*"
+    ignore:
+      # 설치본은 Windows 7 지원 때문에 Electron 22(Chromium 108)에 고정한다 — 메이저 업데이트는 받지 않는다.
+      - dependency-name: "electron"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: "github-actions"
     directory: "/"
