@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import '../../../modules';
 import { loadGoldenBatchPatients, loadGoldenNarrativePatients, loadGoldenPatients } from '../../fixtures/goldenPatients';
 import { useGoldenEnvironment } from '../../fixtures/goldenEnv';
+import { buildJobHistoryLines } from '../../utils/jobHistory';
 import { getModule } from '../../modules/registry';
 import { renderNarrativeBlocks } from '../renderBlocks';
 
@@ -67,7 +68,7 @@ describe('renderNarrativeBlocks', () => {
 });
 
 // 게이트 C에서 소견서와 4번 칸을 맞춘 모듈. 맞춘 PR이 여기에 더한다.
-const REPORT_EQUALS_EMR_SECTION = ['spine'];
+const REPORT_EQUALS_EMR_SECTION = ['spine', 'knee', 'shoulder'];
 
 describe('소견서 ≡ EMR 4번 칸(모듈 서술)', () => {
   it.each(REPORT_EQUALS_EMR_SECTION)('%s: 골든·보강 환자 전원에서 render("report") === render("emrSection")', (moduleId) => {
@@ -77,7 +78,7 @@ describe('소견서 ≡ EMR 4번 칸(모듈 서술)', () => {
     for (const patient of allPatients()) {
       if (!(patient.data.activeModules || []).includes(moduleId)) continue;
       const calc = manifest.computeCalc({ shared: patient.data.shared, module: patient.data.modules[moduleId] || {} });
-      const context = {};
+      const context = { jobNumberingByJobId: buildJobHistoryLines(patient.data.shared.jobs as unknown[]).numberingByJobId };
       expect(narrative.render('report', calc, context), patient.id).toBe(narrative.render('emrSection', calc, context));
       checked += 1;
     }
