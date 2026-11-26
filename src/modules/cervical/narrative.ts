@@ -30,10 +30,10 @@ interface CervicalNarrativeCalc {
 
 /** 변형별 문구. b8은 b6과 같은 블록을 쓰므로 emrSummary 값은 emrSection과 같다. {n} = 직력 번호, {name} = 직종명. */
 const CERVICAL_PHRASES = {
-  heading: { report: '\n< 경추(목) >\n', emrSection: '\n<경추(목)>\n', emrSummary: '\n<경추(목)>\n' },
-  jobLine: { report: '- 직력{n}: {name}\n', emrSection: '- {name}\n', emrSummary: '- {name}\n' },
-  flagsLabel: { report: '      확인된 목 부위 부담 지표: ', emrSection: '  부담 요인: ', emrSummary: '  부담 요인: ' },
-  noFlags: { report: '확인된 부담 지표 없음', emrSection: '확인된 부담 요인 없음', emrSummary: '확인된 부담 요인 없음' },
+  heading: { report: '\n<경추(목)>\n', emrSection: '\n<경추(목)>\n', emrSummary: '\n<경추(목)>\n' },
+  jobLine: { report: '- 직력{n}: {name}\n', emrSection: '- 직력{n}: {name}\n', emrSummary: '- 직력{n}: {name}\n' },
+  flagsLabel: { report: '      부담 요인: ', emrSection: '      부담 요인: ', emrSummary: '  부담 요인: ' },
+  noFlags: { report: '확인된 부담 요인 없음', emrSection: '확인된 부담 요인 없음', emrSummary: '확인된 부담 요인 없음' },
 } as const satisfies NarrativePhrases;
 
 const P = CERVICAL_PHRASES;
@@ -46,7 +46,7 @@ function genCervicalBurdenSection(calc: CervicalNarrativeCalc): string {
   (calc.jobSummaries || []).forEach((jobSummary, index) => {
     text += fillPhrase(P.jobLine.report, { n: index + 1, name: jobSummary.jobName || '-' });
     const burdenIndicatorText = jobSummary.flagItems?.length > 0
-      ? jobSummary.flagItems.map(flag => flag.label).join(', ')
+      ? jobSummary.flagItems.map(flag => flag.label || flag.key).join(', ')
       : P.noFlags.report;
 
     if (jobSummary.missingFields.length > 0) {
@@ -67,15 +67,15 @@ function genCervicalBurdenSection(calc: CervicalNarrativeCalc): string {
 
 // emrReport.js buildCervicalExposureText — EMR b6·b8 공용 블록.
 function buildCervicalExposureText(calc: CervicalNarrativeCalc | undefined): string {
-  let text: string = P.heading.emrSection;
+  let text: string = P.heading.emrSummary;
   if (calc?.noEvaluableJobs) return `${text}${NO_EVALUABLE_JOBS_NOTE}\n`;
 
-  (calc?.jobSummaries || []).forEach(jobSummary => {
-    text += fillPhrase(P.jobLine.emrSection, { name: jobSummary.jobName || '-' });
+  (calc?.jobSummaries || []).forEach((jobSummary, index) => {
+    text += fillPhrase(P.jobLine.emrSummary, { n: index + 1, name: jobSummary.jobName || '-' });
     const burdenIndicatorText = jobSummary.flagItems?.length > 0
       ? jobSummary.flagItems.map(flag => flag.label || flag.key).join(', ')
-      : P.noFlags.emrSection;
-    text += `${P.flagsLabel.emrSection}${burdenIndicatorText}\n`;
+      : P.noFlags.emrSummary;
+    text += `${P.flagsLabel.emrSummary}${burdenIndicatorText}\n`;
   });
 
   return text;
@@ -84,7 +84,7 @@ function buildCervicalExposureText(calc: CervicalNarrativeCalc | undefined): str
 export const cervicalNarrative: ModuleNarrative = {
   render(variant: NarrativeVariant, calc: unknown): string {
     const cervicalCalc = calc as CervicalNarrativeCalc | undefined;
-    if (variant === 'report') return genCervicalBurdenSection(cervicalCalc as CervicalNarrativeCalc);
+    if (variant === 'report' || variant === 'emrSection') return genCervicalBurdenSection(cervicalCalc as CervicalNarrativeCalc);
     return buildCervicalExposureText(cervicalCalc);
   },
   phrases: CERVICAL_PHRASES,

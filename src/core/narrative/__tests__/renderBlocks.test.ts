@@ -68,7 +68,7 @@ describe('renderNarrativeBlocks', () => {
 });
 
 // 게이트 C에서 소견서와 4번 칸을 맞춘 모듈. 맞춘 PR이 여기에 더한다.
-const REPORT_EQUALS_EMR_SECTION = ['spine', 'knee', 'shoulder'];
+const REPORT_EQUALS_EMR_SECTION = ['spine', 'knee', 'shoulder', 'cervical'];
 
 describe('소견서 ≡ EMR 4번 칸(모듈 서술)', () => {
   it.each(REPORT_EQUALS_EMR_SECTION)('%s: 골든·보강 환자 전원에서 render("report") === render("emrSection")', (moduleId) => {
