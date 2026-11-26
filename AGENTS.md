@@ -1,95 +1,11 @@
 # 직업성 질환 통합 평가 시스템 (wr-evaluation-unified)
 
-## 프로젝트 개요
-직업환경의학 전문의를 위한 통합 평가 도구. 무릎(슬관절) + 척추(MDDM) 평가를 모듈식으로 결합.
-향후 고관절, 어깨 등 추가 예정 → 플러그인 아키텍처.
+프로젝트 지침의 정본은 [CLAUDE.md](CLAUDE.md)다. 작업을 시작하기 전에 그 파일을 읽고 거기 적힌 명령·구조·규칙을 그대로 따른다
+(골든 테스트, 구조 래칫, 마이그레이션, 코드 탐색 원칙 포함). 같은 내용을 이 파일에 다시 적지 않는다 — 두 파일이 어긋나면 CLAUDE.md가 맞다.
 
-- **기술 스택**: React 18 + Vite 5 + CSS Variables
-- **배포**: 웹(Vercel) + 데스크톱(Electron) 동시 지원
-- **원본 소스**: `mddm-vercel` (척추, Vanilla JS → React 마이그레이션), `wr-evaluation-Codex` (무릎, React)
+code-review-graph MCP가 없는 도구는 CLAUDE.md "코드 탐색 · 수정 원칙"의 그래프 단계를 Grep으로 대신하고, 부분 Read 규칙은 그대로 지킨다.
 
-## 빌드 & 실행
-
-```bash
-npm run dev              # 개발 서버 (Vite, localhost:3000)
-npm run build:web        # 웹 빌드 → dist/web/
-npm run build:electron   # Electron 빌드 → dist/electron/
-npm run electron:dev     # Electron 개발 실행
-npm run electron:build   # Electron 패키징 (electron-builder)
-vercel deploy            # Vercel 배포
-```
-
-## 디렉토리 구조
-
-```
-src/
-├── core/                    # 공유 프레임워크
-│   ├── moduleRegistry.js    # registerModule(), getModule(), getAllModules() — shim, 구현은 modules/registry.ts
-│   ├── modules/             # manifest.ts(매니페스트 타입·validateManifest), registry.ts
-│   ├── components/          # BasicInfoForm, DiagnosisForm, AIAnalysisPanel, ModuleSelector, SettingsModal
-│   ├── hooks/               # useAIAnalysis (web/electron 자동 분기), usePatientList
-│   └── utils/               # storage, platform, common, data
-├── modules/
-│   ├── knee/                # 무릎 모듈 (KneeEvaluation, JobTab, AssessmentTab, KneeResultPanel)
-│   └── spine/               # 척추 MDDM 모듈 (SpineEvaluation, TaskManager, TaskEditor, ResultDashboard)
-api/analyze.js               # Vercel 서버리스 (Codex API 프록시)
-electron/                    # main.js + preload-intranet.js/preload-standalone.js (IPC 기반 AI 호출)
-```
-
-## 모듈 추가 방법
-
-`src/modules/<name>/index.js`에서 `registerModule()` 호출:
-
-```javascript
-import { registerModule } from '../../core/moduleRegistry';
-registerModule({
-  id: 'new-module',
-  name: '표시 이름',
-  icon: '아이콘',
-  description: '설명',
-  createModuleData: () => ({ /* 초기 데이터 */ }),
-  EvaluationComponent: MyComponent,
-  computeCalc: computeFn,
-  isComplete: checkFn,
-  tabs: [{ id: 'main', label: '평가' }],   // 필수 — 탭마다 평가 단계 하나
-  batchImportConfig: {                     // BatchImportModal 일괄 import 연동 (선택)
-    columns: { fieldKey: ['엑셀헤더후보1', 'header_candidate2'] },  // findCol 후보 목록
-    applyRow({ patient, row, diagnosis, job, colMap, getCell, rowIndex }) {
-      // colMap[key] + getCell(row, index)로 셀 값을 읽어 patient.data.modules[id]에 반영
-      // 데이터가 없으면 즉시 return (hasXxxData 가드)
-    },
-  },
-});
-```
-
-그리고 `src/modules/index.ts`에 `import './<name>';` 한 줄 추가(이 파일의 순서가 화면 목록·일괄 가져오기 순서다).
-등록할 때 `src/core/modules/manifest.ts`의 `validateManifest()`가 매니페스트를 검사한다 — 필수 키(`tabs` 포함)가 없거나
-모르는 키·잘못된 타입이 있거나 같은 id를 다시 등록하면 throw한다(개발 모드의 같은 id 재등록만 교체 허용, HMR용).
-
-## 데이터 모델
-
-```javascript
-Patient = {
-  id, moduleId,
-  data: {
-    shared: { name, gender, height, weight, birthDate, evaluationDate, hospitalName, department, doctorName, diagnoses },
-    module: { /* 모듈별 고유 데이터 */ }
-  }
-}
-```
-
-## AI API 분기
-
-- **웹**: `fetch('/api/analyze')` → Vercel 서버리스 → Codex API (서버 환경변수 CLAUDE_API_KEY)
-- **Electron**: `window.electron.analyzeAI()` → IPC → main process → 직접 Codex API (사용자 입력 키)
-- 분기 로직: `src/core/hooks/useAIAnalysis.js`
-
-## 주의사항
-
-- localStorage 키 접두사: `wrEvalUnified`
-- 자세 이미지: `public/images/` (G1-G11)
-- 직업 프리셋: `public/job-presets.json`
-- index.html은 프로젝트 루트에 위치 (Vite 요구사항)
+아래는 이 파일에만 있는 규칙이다.
 
 ## AI 협업 워크플로
 
@@ -103,15 +19,3 @@ Patient = {
 - 애매한 요청은 구현 요청으로 해석하지 않는다.
 - 사용자의 최신 명시적 구현 지시가 있을 때만 실제 수정으로 전환한다.
 - 그 전까지는 탐색, 재현, 읽기, 검색, 빌드, 테스트 같은 비파괴 작업만 허용한다.
-
-## 코드 탐색 · 수정 원칙 (토큰 절약)
-
-코드를 읽거나 수정하기 전 반드시 다음 순서를 따를 것:
-
-1. **사전 보고**: 그래프를 쓸지 말지, 이유를 한 줄로 먼저 알릴 것
-   - 예: "그래프로 `callers_of` 확인 후 해당 라인만 읽겠습니다"
-   - 예: "위치가 명확해서 Grep으로 바로 가겠습니다"
-2. **그래프 우선**: code-review-graph MCP(`file_summary`, `callers_of`, `importers_of` 등)로 대상 함수/노드의 파일·행 번호를 먼저 특정
-3. **부분 Read**: `offset` / `limit`으로 필요한 범위만 읽을 것 — **파일 전체 Read 금지**
-   - 예외: 파일이 매우 짧거나 전체를 재작성해야 하는 경우
-4. **매번 보고**: 그래프를 읽었는지·안 읽었는지, 왜 그랬는지 매 작업마다 명시
