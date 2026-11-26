@@ -77,6 +77,14 @@ function totalLine(total: ShoulderTotal): string {
   return `- ${total.label}: ${total.totalHours > 0 ? `${total.totalHours.toFixed(1)}시간` : '-'} (기준 ${total.limit.toLocaleString()}시간${pct}${total.exceeded ? ' [초과]' : ''})\n`;
 }
 
+// 하루 노출 시간은 결과 화면(ShoulderResultPanel의 직력별 기여 상세)과 같이 소수 둘째 자리까지, 끝의 0은 뗀다.
+// 분 단위 입력이 시간으로 바뀌면 0.0666…처럼 끝없는 소수가 되므로 그대로 적지 않는다.
+// 0보다 큰 값만 이 줄에 오므로, 반올림해 0이 되는 값은 "0시간/일" 대신 "0.01시간/일 미만"으로 적는다.
+export function formatDailyHours(hours: number): string {
+  const rounded = parseFloat(hours.toFixed(2));
+  return rounded > 0 ? `${rounded}시간/일` : '0.01시간/일 미만';
+}
+
 // 소견서·EMR 4번 칸(b6) 공용 전문 블록.
 // jobNumbering: 미포함 직력이 있을 때만 전달되는 jobId → 직업력 번호 맵(jobHistory.js). [직력별 기여]는 직종명이 빈
 // 직력을 뺀 뒤 번호를 다시 매기므로, 맵이 있으면 [직업력] 목록과 같은 번호를 쓴다.
@@ -96,7 +104,7 @@ function buildShoulderFullSection(calc: ShoulderNarrativeCalc | undefined, varia
       text += `- 직력${resolveJobNumber(jobNumbering, job.id, index + 1)}: ${job.jobName} (${job.periodYears > 0 ? `${job.periodYears.toFixed(1)}년` : '-'})\n`;
       (job.exposures || []).forEach(exposure => {
         if (exposure.dailyHours > 0) {
-          text += `  ${exposure.label}: ${exposure.dailyHours}시간/일, 누적 ${exposure.cumulativeHours.toFixed(1)}시간\n`;
+          text += `  ${exposure.label}: ${formatDailyHours(exposure.dailyHours)}, 누적 ${exposure.cumulativeHours.toFixed(1)}시간\n`;
         }
       });
     });
