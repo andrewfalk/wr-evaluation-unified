@@ -17,61 +17,61 @@ type WristDiagnosisOfSummary = Partial<DiagnosisSummary['diagnosis']>;
  * 소견서 값에는 줄 끝 '\n'이 없다(머리글·직력 줄).
  */
 const WRIST_PHRASES = {
-  heading: { report: '\n< 손목/손가락 >', emrSection: '\n<손목/손가락>\n', emrSummary: '\n<손목/손가락>\n' },
-  temporalFlagsLead: { report: '- 공통 시간적 선후관계 ', emrSection: '- 공통 시간적 선후관계: ' },
-  jobLine: { report: '- 직력{n}: {name}', emrSection: '- {name}\n', emrSummary: '\n[{name}]\n' },
-  jobNameEmpty: { report: '-', emrSection: '-', emrSummary: '직업 미입력' },
+  heading: { report: '\n<손목/손가락>\n', emrSection: '\n<손목/손가락>\n', emrSummary: '\n<손목/손가락>\n' },
+  temporalFlagsLead: { report: '- 공통 시간적 선후관계: ', emrSection: '- 공통 시간적 선후관계: ' },
+  jobLine: { report: '- 직력{n}: {name}\n', emrSection: '- 직력{n}: {name}\n', emrSummary: '- 직력{n}: {name}\n' },
+  jobNameEmpty: { report: '직업 미입력', emrSection: '직업 미입력', emrSummary: '직업 미입력' },
   narrativeEmpty: { report: '', emrSection: '-' },
-  riskFactorLabel: { report: '      업무관련성 위험 요인: ', emrSection: '      업무에 포함된 위험 요인: ' },
-  conclusionLead: { report: '\n      **종합평가** ', emrSection: '\n      **종합평가** ', emrSummary: '    **종합평가** ' },
+  riskFactorLabel: { report: '      업무에 포함된 위험 요인: ', emrSection: '      업무에 포함된 위험 요인: ' },
+  conclusionLead: { report: '\n      **종합평가** ', emrSection: '\n      **종합평가** ', emrSummary: '\n      **종합평가** ' },
 } as const satisfies NarrativePhrases;
 
 const P = WRIST_PHRASES;
 
-// reportGenerator.js genWristBurdenSection — 소견서 블록.
+// reportGenerator.js genWristBurdenSection — 소견서 블록. 게이트 C(P2-66d)에서 줄 목록 join을 이어 붙이기로 바꿨다(F8).
 function genWristBurdenSection(calc: WristCalcResult): string {
-  const wristLines: string[] = [P.heading.report];
-  if (calc.noEvaluableJobs) return `${wristLines[0]}\n${NO_EVALUABLE_JOBS_NOTE}\n`;
+  let text: string = P.heading.report;
+  if (calc.noEvaluableJobs) return `${text}${NO_EVALUABLE_JOBS_NOTE}\n`;
 
   if (calc.missingCommonFields?.length) {
-    wristLines.push(`- 공통 시간적 선후관계 누락: ${calc.missingCommonFields.join(', ')}`);
+    text += `- 공통 시간적 선후관계 누락: ${calc.missingCommonFields.join(', ')}\n`;
   }
 
   const wristTemporalFlags = calc.temporalFlagItems || [];
   if (wristTemporalFlags.length > 0) {
-    wristLines.push(`${P.temporalFlagsLead.report}${wristTemporalFlags.map(flag => flag.label).join(', ')}`);
+    text += `${P.temporalFlagsLead.report}${wristTemporalFlags.map(flag => flag.label).join(', ')}\n`;
   }
 
   (calc.jobSummaries || []).forEach((jobSummary, index) => {
-    wristLines.push(fillPhrase(P.jobLine.report, { n: index + 1, name: jobSummary.jobName || P.jobNameEmpty.report }));
+    text += fillPhrase(P.jobLine.report, { n: index + 1, name: jobSummary.jobName || P.jobNameEmpty.report });
     const groups = groupWristSummaries(jobSummary.diagnosisSummaries || []);
     groups.forEach(group => {
       const merged = mergeWristGroups(group.summaries);
       const diagList = group.summaries
         .map(s => {
           const d: WristDiagnosisOfSummary = s.diagnosis || {};
-          return `${d.code || ''} ${d.name || ''} (${getSideText(d.side)})`.trim();
+          return `${d.code || ''} ${d.name || ''}${d.side ? ` (${getSideText(d.side)})` : ''}`.trim();
         })
         .join(' / ');
       const bkLabel = group.bkType ? WRIST_BK_LABELS[group.bkType] || group.bkType : null;
       const header = bkLabel ? `[${bkLabel}] ${diagList}` : diagList;
-      wristLines.push(`  - ${header}`);
+      text += `  - ${header}\n`;
       if (merged.missingFields?.length > 0) {
-        wristLines.push(`    입력 누락: ${merged.missingFields.join(', ')}`);
+        text += `    입력 누락: ${merged.missingFields.join(', ')}\n`;
       }
       const riskFactorText = merged.riskFactorItems?.length > 0
         ? merged.riskFactorItems.map(flag => flag.label).join(', ')
         : '확인된 위험 요인 없음';
-      wristLines.push('    분석 정리:');
-      wristLines.push(`      ${(merged.narrative || P.narrativeEmpty.report).split('\n').join('\n      ')}`);
-      wristLines.push(`${P.riskFactorLabel.report}${riskFactorText}`);
+      text += '    분석 정리:\n';
+      text += `      ${(merged.narrative || P.narrativeEmpty.report).split('\n').join('\n      ')}\n`;
+      text += `${P.riskFactorLabel.report}${riskFactorText}\n`;
       if (merged.riskFactorSentence) {
-        wristLines.push(`${P.conclusionLead.report}${merged.riskFactorSentence}`);
+        text += `${P.conclusionLead.report}${merged.riskFactorSentence}\n`;
       }
     });
   });
 
-  return `${wristLines.join('\n')}\n`;
+  return text;
 }
 
 // emrReport.js buildExposureSection의 손목 블록 — EMR 4번 칸(b6).
@@ -87,8 +87,8 @@ function buildWristExposureSection(calc: WristCalcResult): string {
     if (calc?.temporalFlagItems?.length > 0) {
       text += `${P.temporalFlagsLead.emrSection}${calc.temporalFlagItems.map(flag => flag.label).join(', ')}\n`;
     }
-    (calc?.jobSummaries || []).forEach(jobSummary => {
-      text += fillPhrase(P.jobLine.emrSection, { name: jobSummary.jobName || P.jobNameEmpty.emrSection });
+    (calc?.jobSummaries || []).forEach((jobSummary, index) => {
+      text += fillPhrase(P.jobLine.emrSection, { n: index + 1, name: jobSummary.jobName || P.jobNameEmpty.emrSection });
       const wristGroups = groupWristSummaries(jobSummary.diagnosisSummaries || []);
       wristGroups.forEach(group => {
         const merged = mergeWristGroups(group.summaries);
@@ -126,10 +126,10 @@ function buildWristExposureSummary(calc: WristCalcResult): string {
   if (calc?.noEvaluableJobs) {
     text += `${NO_EVALUABLE_JOBS_NOTE}\n`;
   } else {
-    (calc?.jobSummaries || []).forEach(jobSummary => {
+    (calc?.jobSummaries || []).forEach((jobSummary, index) => {
       const wristGroups = groupWristSummaries(jobSummary.diagnosisSummaries || []);
       if (wristGroups.length === 0) return;
-      text += fillPhrase(P.jobLine.emrSummary, { name: jobSummary.jobName || P.jobNameEmpty.emrSummary });
+      text += fillPhrase(P.jobLine.emrSummary, { n: index + 1, name: jobSummary.jobName || P.jobNameEmpty.emrSummary });
       wristGroups.forEach(group => {
         const merged = mergeWristGroups(group.summaries);
         const diagList = group.summaries

@@ -14,13 +14,13 @@ type ElbowDiagnosisOfSummary = Partial<DiagnosisSummary['diagnosis']>;
 
 /** 변형별 문구. {n} = 직력 번호, {name} = 직종명(빈 값이면 jobNameEmpty). */
 const ELBOW_PHRASES = {
-  heading: { report: '\n< 팔꿈치(주관절) >\n', emrSection: '\n<팔꿈치(주관절)>\n', emrSummary: '\n<팔꿈치(주관절)>\n' },
+  heading: { report: '\n<팔꿈치(주관절)>\n', emrSection: '\n<팔꿈치(주관절)>\n', emrSummary: '\n<팔꿈치(주관절)>\n' },
   temporalFlagsLead: { report: '- 공통 시간적 선후관계: ', emrSection: '- 공통 시간적 선후관계: ' },
-  jobLine: { report: '- 직력{n}: {name}\n', emrSection: '- {name}\n', emrSummary: '\n[{name}]\n' },
-  jobNameEmpty: { report: '-', emrSection: '-', emrSummary: '직업 미입력' },
+  jobLine: { report: '- 직력{n}: {name}\n', emrSection: '- 직력{n}: {name}\n', emrSummary: '- 직력{n}: {name}\n' },
+  jobNameEmpty: { report: '직업 미입력', emrSection: '직업 미입력', emrSummary: '직업 미입력' },
   narrativeEmpty: { report: '', emrSection: '-' },
   riskFactorLabel: { report: '      업무에 포함된 위험 요인: ', emrSection: '      업무에 포함된 위험 요인: ' },
-  conclusionLead: { report: '\n      **종합평가** ', emrSection: '\n      **종합평가** ', emrSummary: '    **종합평가** ' },
+  conclusionLead: { report: '\n      **종합평가** ', emrSection: '\n      **종합평가** ', emrSummary: '\n      **종합평가** ' },
 } as const satisfies NarrativePhrases;
 
 const P = ELBOW_PHRASES;
@@ -47,7 +47,7 @@ function genElbowBurdenSection(calc: ElbowCalcResult): string {
       const diagList = group.summaries
         .map(s => {
           const d: ElbowDiagnosisOfSummary = s.diagnosis || {};
-          return `${d.code || ''} ${d.name || ''} (${getSideText(d.side)})`.trim();
+          return `${d.code || ''} ${d.name || ''}${d.side ? ` (${getSideText(d.side)})` : ''}`.trim();
         })
         .join(' / ');
       const bkLabel = group.bkType ? ELBOW_BK_LABELS[group.bkType] || group.bkType : null;
@@ -84,8 +84,8 @@ function buildElbowExposureSection(calc: ElbowCalcResult): string {
     if (calc?.temporalFlagItems?.length > 0) {
       text += `${P.temporalFlagsLead.emrSection}${calc.temporalFlagItems.map(flag => flag.label).join(', ')}\n`;
     }
-    (calc?.jobSummaries || []).forEach(jobSummary => {
-      text += fillPhrase(P.jobLine.emrSection, { name: jobSummary.jobName || P.jobNameEmpty.emrSection });
+    (calc?.jobSummaries || []).forEach((jobSummary, index) => {
+      text += fillPhrase(P.jobLine.emrSection, { n: index + 1, name: jobSummary.jobName || P.jobNameEmpty.emrSection });
       const elbowGroups = groupElbowSummaries(jobSummary.diagnosisSummaries || []);
       elbowGroups.forEach(group => {
         const merged = mergeElbowGroups(group.summaries);
@@ -123,10 +123,10 @@ function buildElbowExposureSummary(calc: ElbowCalcResult): string {
   if (calc?.noEvaluableJobs) {
     text += `${NO_EVALUABLE_JOBS_NOTE}\n`;
   } else {
-    (calc?.jobSummaries || []).forEach(jobSummary => {
+    (calc?.jobSummaries || []).forEach((jobSummary, index) => {
       const elbowGroups = groupElbowSummaries(jobSummary.diagnosisSummaries || []);
       if (elbowGroups.length === 0) return;
-      text += fillPhrase(P.jobLine.emrSummary, { name: jobSummary.jobName || P.jobNameEmpty.emrSummary });
+      text += fillPhrase(P.jobLine.emrSummary, { n: index + 1, name: jobSummary.jobName || P.jobNameEmpty.emrSummary });
       elbowGroups.forEach(group => {
         const merged = mergeElbowGroups(group.summaries);
         const diagList = group.summaries
