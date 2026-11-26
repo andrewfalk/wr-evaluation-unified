@@ -302,6 +302,24 @@ describe('prepareEmrInjection — 편집본 CP949 절단 + 생성 1회 통일', 
     expect(fieldData._truncatedFields).toContain('txtSyth1Cont');
     expect(bytes).toBe(cp949ByteLength(longText)); // bytes는 절단 전 편집본 기준(byte 경고용)
   });
+
+  // P2-66e: 4.직업적 요인(b6) 사전 경고용 바이트는 절단 전 원본 b6 기준이다.
+  it('exposureSection은 절단 전 b6의 바이트와 한도 초과 여부를 돌려준다', () => {
+    const patient = makeAssessmentPatient({ diagnoses: [kneeDiag()], activeModules: ['knee'], modules: { knee: {} } });
+    const { exposureSection } = prepareEmrInjection(patient);
+    expect(exposureSection).toEqual({ bytes: cp949ByteLength(generateUnifiedEMR(patient).b6), overLimit: false });
+
+    const longJobs = Array.from({ length: 40 }, (_, i) => ({
+      id: `j${i}`, jobName: '아주 긴 직종명을 가진 작업자'.repeat(3), startDate: '2000-01-01', endDate: '2001-01-01',
+    }));
+    const long = makeAssessmentPatient({ diagnoses: [kneeDiag()], activeModules: ['knee'], modules: { knee: {} } });
+    long.data.shared.jobs = longJobs;
+    const fullBytes = cp949ByteLength(generateUnifiedEMR(long).b6);
+    expect(fullBytes).toBeGreaterThan(EMR_TEXT_LIMIT_BYTES);
+    const prepared = prepareEmrInjection(long);
+    expect(prepared.exposureSection).toEqual({ bytes: fullBytes, overLimit: true });
+    expect(prepared.fieldData._truncatedFields).toContain('txtJobCusCont');
+  });
 });
 
 describe('확인 상병(txtAppvSickCont / 엑셀 3.최종 확인 상병명) — 신청 상병 복사가 아니라 "확인"만', () => {

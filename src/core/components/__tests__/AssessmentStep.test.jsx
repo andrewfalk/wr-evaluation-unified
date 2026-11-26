@@ -209,6 +209,7 @@ describe('AssessmentStep — 저장된 오버라이드 상태', () => {
     });
 
     expect(screen.getByText(/변경되어/)).toBeTruthy();
+    expect(screen.getByText(/프로그램 업데이트로 자동 생성 문구가 달라져/)).toBeTruthy(); // P2-66e
     await user.click(screen.getByRole('button', { name: '최신 반영 확인' }));
 
     expect(showConfirm).toHaveBeenCalled();

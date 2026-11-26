@@ -254,7 +254,7 @@ export function AssessmentStep({ patient, activeModules, updateDiagnoses, update
 
           {mode === 'override' && effective.isStale && (
             <div className="assessment-override-banner">
-              ⚠ 편집 이후 상병·직업·평가 데이터가 변경되어 편집본이 낡았을 수 있습니다. 전송 내용은 편집 시점 그대로 유지됩니다.
+              ⚠ 편집 이후 상병·직업·평가 데이터가 변경되어(또는 프로그램 업데이트로 자동 생성 문구가 달라져) 편집본이 낡았을 수 있습니다. 전송 내용은 편집 시점 그대로 유지됩니다.
               <button type="button" className="btn btn-secondary btn-sm" onClick={handleConfirmLatest} disabled={!canMutate}>
                 최신 반영 확인
               </button>
