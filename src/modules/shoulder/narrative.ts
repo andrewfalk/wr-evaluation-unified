@@ -35,9 +35,9 @@ type JobNumbering = NarrativeContext['jobNumberingByJobId'];
 
 /** 변형별 문구. 해석 문장 세 가지는 지금 세 변형이 같다({labels} = 기준을 넘은 항목). */
 const SHOULDER_PHRASES = {
-  heading: { report: '\n< 어깨(견관절) >\n', emrSection: '\n<어깨(견관절)>\n', emrSummary: '\n<어깨(견관절)>\n' },
+  heading: { report: '\n<어깨(견관절)>\n', emrSection: '\n<어깨(견관절)>\n', emrSummary: '\n<어깨(견관절)>\n' },
   /** 해석 문장 앞 */
-  interpretationLead: { report: '\n', emrSection: '\n', emrSummary: '' },
+  interpretationLead: { report: '\n', emrSection: '\n', emrSummary: '\n' },
   interpretationExceeded: {
     report: '** {labels} 기준을 초과하여 누적 신체부담은 충분함.',
     emrSection: '** {labels} 기준을 초과하여 누적 신체부담은 충분함.',
@@ -104,7 +104,7 @@ function genShoulderBurdenSection(calc: ShoulderNarrativeCalc, jobNumbering: Job
 }
 
 // emrReport.js buildExposureSection의 어깨 블록 — EMR 4번 칸(b6).
-function buildShoulderExposureSection(calc: ShoulderNarrativeCalc | undefined): string {
+function buildShoulderExposureSection(calc: ShoulderNarrativeCalc | undefined, jobNumbering: JobNumbering = null): string {
   let text = '';
   text += P.heading.emrSection;
   if (calc?.noEvaluableJobs) {
@@ -123,6 +123,18 @@ function buildShoulderExposureSection(calc: ShoulderNarrativeCalc | undefined): 
       text += `${P.interpretationLead.emrSection}${P.interpretationCombined.emrSection}\n`;
     } else {
       text += `${P.interpretationLead.emrSection}${P.interpretationInsufficient.emrSection}\n`;
+    }
+    const jobsWithData = (calc?.jobBurdens || []).filter(job => job.jobName);
+    if (jobsWithData.length > 1) {
+      text += `\n[직력별 기여]\n`;
+      jobsWithData.forEach((job, index) => {
+        text += `- 직력${resolveJobNumber(jobNumbering, job.id, index + 1)}: ${job.jobName} (${job.periodYears > 0 ? `${job.periodYears.toFixed(1)}년` : '-'})\n`;
+        (job.exposures || []).forEach(exposure => {
+          if (exposure.dailyHours > 0) {
+            text += `  ${exposure.label}: ${exposure.dailyHours}시간/일, 누적 ${exposure.cumulativeHours.toFixed(1)}시간\n`;
+          }
+        });
+      });
     }
   }
   return text;
@@ -156,7 +168,7 @@ export const shoulderNarrative: ModuleNarrative = {
   render(variant: NarrativeVariant, calc: unknown, context: NarrativeContext): string {
     const shoulderCalc = calc as ShoulderNarrativeCalc | undefined;
     if (variant === 'report') return genShoulderBurdenSection(shoulderCalc as ShoulderNarrativeCalc, context.jobNumberingByJobId ?? null);
-    if (variant === 'emrSection') return buildShoulderExposureSection(shoulderCalc);
+    if (variant === 'emrSection') return buildShoulderExposureSection(shoulderCalc, context.jobNumberingByJobId ?? null);
     return buildShoulderExposureSummary(shoulderCalc);
   },
   phrases: SHOULDER_PHRASES,

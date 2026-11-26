@@ -40,21 +40,21 @@
       "moduleName": "무릎 (슬관절)",
       "item": "heading",
       "values": {
-        "report": "\n  < 무릎(슬관절) >\n",
+        "report": "\n<무릎(슬관절)>\n",
         "emrSection": "\n<무릎(슬관절)>\n",
         "emrSummary": "\n<무릎(슬관절)>\n"
       },
-      "differs": true
+      "differs": false
     },
     {
       "moduleId": "knee",
       "moduleName": "무릎 (슬관절)",
       "item": "indent",
       "values": {
-        "report": "  ",
+        "report": "",
         "emrSection": ""
       },
-      "differs": true
+      "differs": false
     },
     {
       "moduleId": "knee",
@@ -94,10 +94,10 @@
       "moduleName": "무릎 (슬관절)",
       "item": "jobGap",
       "values": {
-        "report": "",
+        "report": "\n",
         "emrSection": "\n"
       },
-      "differs": true
+      "differs": false
     },
     {
       "moduleId": "cervical",
@@ -148,11 +148,11 @@
       "moduleName": "어깨",
       "item": "heading",
       "values": {
-        "report": "\n< 어깨(견관절) >\n",
+        "report": "\n<어깨(견관절)>\n",
         "emrSection": "\n<어깨(견관절)>\n",
         "emrSummary": "\n<어깨(견관절)>\n"
       },
-      "differs": true
+      "differs": false
     },
     {
       "moduleId": "shoulder",
@@ -161,9 +161,9 @@
       "values": {
         "report": "\n",
         "emrSection": "\n",
-        "emrSummary": ""
+        "emrSummary": "\n"
       },
-      "differs": true
+      "differs": false
     },
     {
       "moduleId": "shoulder",

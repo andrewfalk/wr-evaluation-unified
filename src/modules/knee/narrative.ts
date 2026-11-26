@@ -25,14 +25,14 @@ interface KneeNarrativeCalc {
 
 /** 변형별 문구. 소견서와 b6은 줄마다 쓰고, b8은 직력당 한 줄 요약이다. */
 const KNEE_PHRASES = {
-  heading: { report: '\n  < 무릎(슬관절) >\n', emrSection: '\n<무릎(슬관절)>\n', emrSummary: '\n<무릎(슬관절)>\n' },
+  heading: { report: '\n<무릎(슬관절)>\n', emrSection: '\n<무릎(슬관절)>\n', emrSummary: '\n<무릎(슬관절)>\n' },
   /** 직종·범례·참고 문단·평가 대상 없음 줄 앞 들여쓰기 */
-  indent: { report: '  ', emrSection: '' },
+  indent: { report: '', emrSection: '' },
   weightLabel: { report: '일 중량물 취급량: ', emrSection: '일 중량물 취급량: ', emrSummary: '중량물 ' },
   squattingLabel: { report: '일 쪼그려 앉기 시간: ', emrSection: '일 쪼그려 앉기 시간: ', emrSummary: '쪼그려앉기 ' },
   burdenLabel: { report: '무릎 부담 정도: ', emrSection: '무릎 부담 정도: ', emrSummary: '부담 정도 ' },
   /** 직력 블록 뒤에 붙는 빈 줄 */
-  jobGap: { report: '', emrSection: '\n' },
+  jobGap: { report: '\n', emrSection: '\n' },
 } as const satisfies NarrativePhrases;
 
 const P = KNEE_PHRASES;
@@ -46,7 +46,7 @@ function genKneeBurdenSection(calc: KneeNarrativeCalc): string {
     ? ((Number(relatedness.min) + Number(relatedness.max)) / 2).toFixed(1)
     : null;
 
-  (jobBurdens || []).forEach(job => {
+  (jobBurdens || []).filter(job => job.jobName).forEach(job => {
     const checked = Object.entries(AUX_LABELS)
       .filter(([key]) => job[key])
       .map(([, label]) => label);
@@ -61,7 +61,7 @@ function genKneeBurdenSection(calc: KneeNarrativeCalc): string {
   });
 
   if (relatedness) {
-    text += `\n${P.indent.report}참고) 신체부담 정도는 다음의 4단계로 구분함.\n`;
+    text += `${P.indent.report}참고) 신체부담 정도는 다음의 4단계로 구분함.\n`;
     text += `${P.indent.report}1) 고도: 퇴행성 변화를 유발 또는 가속하는 것이 확실함(definite)\n`;
     text += `${P.indent.report}2) 중등도상: 퇴행성 변화를 유발 또는 가속하기에 충분함(probable)\n`;
     text += `${P.indent.report}3) 중등도하: 퇴행성 변화를 유발 또는 가속할 가능성이 있음(possible)\n`;
