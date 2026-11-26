@@ -104,11 +104,11 @@
       "moduleName": "경추(목)",
       "item": "heading",
       "values": {
-        "report": "\n< 경추(목) >\n",
+        "report": "\n<경추(목)>\n",
         "emrSection": "\n<경추(목)>\n",
         "emrSummary": "\n<경추(목)>\n"
       },
-      "differs": true
+      "differs": false
     },
     {
       "moduleId": "cervical",
@@ -116,18 +116,18 @@
       "item": "jobLine",
       "values": {
         "report": "- 직력{n}: {name}\n",
-        "emrSection": "- {name}\n",
-        "emrSummary": "- {name}\n"
+        "emrSection": "- 직력{n}: {name}\n",
+        "emrSummary": "- 직력{n}: {name}\n"
       },
-      "differs": true
+      "differs": false
     },
     {
       "moduleId": "cervical",
       "moduleName": "경추(목)",
       "item": "flagsLabel",
       "values": {
-        "report": "      확인된 목 부위 부담 지표: ",
-        "emrSection": "  부담 요인: ",
+        "report": "      부담 요인: ",
+        "emrSection": "      부담 요인: ",
         "emrSummary": "  부담 요인: "
       },
       "differs": true
@@ -137,11 +137,11 @@
       "moduleName": "경추(목)",
       "item": "noFlags",
       "values": {
-        "report": "확인된 부담 지표 없음",
+        "report": "확인된 부담 요인 없음",
         "emrSection": "확인된 부담 요인 없음",
         "emrSummary": "확인된 부담 요인 없음"
       },
-      "differs": true
+      "differs": false
     },
     {
       "moduleId": "shoulder",
