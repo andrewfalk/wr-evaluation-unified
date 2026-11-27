@@ -9,37 +9,45 @@ import {
 import { thresholds } from './thresholds';
 import { SPINE_FORMULA_V513 } from './formulaVersion';
 import { NO_EVALUABLE_JOBS_NOTE } from '../../../core/utils/jobHistory';
+import type { MddmCalcResult, SpineCalcResult, SpineTask, VibrationCalcResult } from '@wr/analytics-core/modules/spine/index';
+
+/** 기준 비교 한 칸(법원·MDDM)의 모양 — analytics-core compareThresholds의 결과. */
+type SpineThresholdItem = MddmCalcResult['comparison']['court'];
+type SpineComparison = MddmCalcResult['comparison'];
+/** 척추 섹션이 읽는 계산 결과. 구형 calc(상태 없음)·직접 WBV calc(top-level evalMethod)도 받으므로 필드는 모두 선택이다. */
+export type SpineSectionCalc = Partial<SpineCalcResult> & { evalMethod?: string };
+export type VibrationSectionCalc = Partial<VibrationCalcResult>;
 
 const EXCLUDED_NOTE = '(일 임계값 미만으로 누적 노출량이 0으로 계산됩니다)';
 
-export function formatSpineNumber(value, digits = 2) {
+export function formatSpineNumber(value: unknown, digits = 2): string {
   return Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : '-';
 }
 
-export function formatSpinePercent(item) {
-  return Number.isFinite(item?.percent) ? item.percent.toFixed(0) : '0';
+export function formatSpinePercent(item: SpineThresholdItem | undefined): string {
+  return Number.isFinite(item?.percent) ? (item as SpineThresholdItem).percent.toFixed(0) : '0';
 }
 
-export function formatSpineLimit(item) {
-  return Number.isFinite(item?.limit) ? item.limit.toFixed(1) : '-';
+export function formatSpineLimit(item: SpineThresholdItem | undefined): string {
+  return Number.isFinite(item?.limit) ? (item as SpineThresholdItem).limit.toFixed(1) : '-';
 }
 
-export function isSpineThresholdExceeded(item) {
-  return Number.isFinite(item?.percent) && item.percent > 100;
+export function isSpineThresholdExceeded(item: SpineThresholdItem | undefined): boolean {
+  return Number.isFinite(item?.percent) && (item as SpineThresholdItem).percent > 100;
 }
 
-export function getSpineThresholdStatus(item) {
+export function getSpineThresholdStatus(item: SpineThresholdItem | undefined): string {
   return isSpineThresholdExceeded(item) ? '초과' : '미만';
 }
 
-export function getSpineTaskTotalHours(task) {
-  const totalSeconds = convertTimeToSeconds(task.timeValue, task.timeUnit) * (Number(task.frequency) || 0);
+export function getSpineTaskTotalHours(task: SpineTask): number {
+  const totalSeconds = convertTimeToSeconds(task.timeValue as number, task.timeUnit as string) * (Number(task.frequency) || 0);
   return totalSeconds / 3600;
 }
 
 // markdown=true (기본): 텍스트 미리보기/EMR용. 앞에 `** ` 마커 포함.
 // markdown=false: SpineResultPanel 등 JSX 렌더링용. plain text(접두 제거).
-export function getSpineInterpretation(comparison, { markdown = true } = {}) {
+export function getSpineInterpretation(comparison: SpineComparison | undefined, { markdown = true }: { markdown?: boolean } = {}): string {
   if (!comparison) return '';
 
   const courtLimit = formatSpineLimit(comparison.court);
@@ -59,29 +67,29 @@ export function getSpineInterpretation(comparison, { markdown = true } = {}) {
 
 // 척추 섹션 단일 소스. reportGenerator와 exportService가 각각 호출.
 // MDDM 섹션(mddmStatus로 게이트) + WBV 섹션(calc.vibration)을 함께 출력한다.
-export function buildSpineSectionText(calc = {}) {
+export function buildSpineSectionText(calc: SpineSectionCalc = {}): string {
   // 직력이 있으나 전부 "신체부담평가 미포함"이면 임상 결론 대신 평가 대상 없음 한 줄만 출력한다.
   if (calc?.noEvaluableJobs) return `\n< 허리(요추) >\n${NO_EVALUABLE_JOBS_NOTE}\n`;
   // 정상 경로는 calc.vibration 서브객체. 구형/직접 WBV calc(top-level evalMethod:'wbv')도 방어.
-  const vibration = calc?.vibration || (calc?.evalMethod === 'wbv' ? calc : {});
+  const vibration = calc?.vibration || (calc?.evalMethod === 'wbv' ? calc as unknown as VibrationSectionCalc : {});
   return buildMddmSectionText(calc) + buildVibrationSectionText(vibration);
 }
 
 // buildSpineSectionText의 요약본 — 작업별 분석(반복 행)은 빼고 종합·기준치 대비 결론만
 // 남긴다. EMR 종합소견(b8) byte 절감용. 전문은 buildSpineSectionText가 그대로 담당한다.
-export function buildSpineSectionSummary(calc = {}) {
+export function buildSpineSectionSummary(calc: SpineSectionCalc = {}): string {
   if (calc?.noEvaluableJobs) return `\n< 허리(요추) >\n${NO_EVALUABLE_JOBS_NOTE}\n`;
-  const vibration = calc?.vibration || (calc?.evalMethod === 'wbv' ? calc : {});
+  const vibration = calc?.vibration || (calc?.evalMethod === 'wbv' ? calc as unknown as VibrationSectionCalc : {});
   return buildMddmSectionSummary(calc) + buildVibrationSectionSummary(vibration);
 }
 
-function buildMddmSectionSummary(calc = {}) {
+function buildMddmSectionSummary(calc: SpineSectionCalc = {}): string {
   const mddmStatus = calc?.mddmStatus || 'present';
   if (mddmStatus !== 'present') return '';
 
   const { lifetimeDose, comparison, maxForce, weightedDailyDose, dailyDose, gender } = calc || {};
   const dailyKNh = weightedDailyDose?.value ?? dailyDose?.dailyDoseKNh ?? 0;
-  const severityLabel = classifySpineSeverity(dailyKNh, maxForce || 0, gender);
+  const severityLabel = classifySpineSeverity(dailyKNh, maxForce || 0, gender as string);
 
   let text = `\n< 허리(요추) >\n`;
   text += `- 최대 압박력: ${(maxForce || 0).toLocaleString()} N | 일일 노출량: ${dailyKNh.toFixed(2)} kN·h (${severityLabel})\n`;
@@ -96,7 +104,7 @@ function buildMddmSectionSummary(calc = {}) {
   return text;
 }
 
-function buildVibrationSectionSummary(calc = {}) {
+function buildVibrationSectionSummary(calc: VibrationSectionCalc = {}): string {
   const exposureStatus = calc?.exposureStatus || 'unknown';
   if (exposureStatus !== 'present') return '';
 
@@ -113,7 +121,7 @@ function buildVibrationSectionSummary(calc = {}) {
 }
 
 // MDDM 섹션 텍스트. 'present'일 때만 출력. unknown(미평가)·none(노출없음)은 빈 문자열(공간 절약).
-function buildMddmSectionText(calc = {}) {
+function buildMddmSectionText(calc: SpineSectionCalc = {}): string {
   const mddmStatus = calc?.mddmStatus || 'present'; // 구형 calc(상태 없음)는 결과 출력
   if (mddmStatus !== 'present') return '';
 
@@ -133,7 +141,7 @@ function buildMddmSectionText(calc = {}) {
   let text = `\n< 허리(요추) >\n`;
   text += `독일의 산재보험 번호 BK2108. 장기간의 중량물 취급 또는 허리를 굽히기로 인해 발생한 요추간판 탈출증 에서 사용하는 척추 압박력 평가 모델(Mainz-Dortmund Dose Model, MDDM)을 이용하여 평가하였음.\n\n`;
 
-  const renderSpineTask = (task, index, contributions) => {
+  const renderSpineTask = (task: SpineTask, index: number, contributions: number[]) => {
     let s = `작업 ${index + 1}. ${task.name || '-'}\n`;
     s += `자세 ${task.posture || '-'} · ${task.weight || '-'}kg · ${task.frequency || 0}회/일\n`;
     s += `압박력 : ${(task.force || 0).toLocaleString()} N\n`;
@@ -166,9 +174,9 @@ function buildMddmSectionText(calc = {}) {
   text += `- 최대 압박력: ${(maxForce || 0).toLocaleString()} N\n`;
   const dailyKNh = weightedDailyDose?.value ?? dailyDose?.dailyDoseKNh ?? 0;
   const mf = maxForce || 0;
-  const severityLabel = classifySpineSeverity(dailyKNh, mf, gender);
+  const severityLabel = classifySpineSeverity(dailyKNh, mf, gender as string);
   const versionKey = formulaVersion === SPINE_FORMULA_V513 ? 'v513' : 'legacy';
-  const dailyThresholdForGender = gender ? thresholds.dailyDose[versionKey][gender] : null;
+  const dailyThresholdForGender = gender ? thresholds.dailyDose[versionKey][gender as 'male' | 'female'] : null;
   const weightedBelowThreshold = weightedDailyDose
     && weightedDailyDose.aboveThreshold
     && dailyThresholdForGender != null
@@ -192,7 +200,7 @@ function buildMddmSectionText(calc = {}) {
 }
 
 // 범위 status → 한글 라벨
-function vibStatusLabel(status) {
+function vibStatusLabel(status: string | undefined): string {
   if (status === 'danger') return '초과';
   if (status === 'warning') return '걸침';
   return '미만';
@@ -200,7 +208,7 @@ function vibStatusLabel(status) {
 
 // 전신진동(BK 2110) 섹션 텍스트 — buildSpineSectionText에서 calc.vibration으로 호출.
 // 'present'일 때만 출력. unknown(미평가)·none(노출없음)은 빈 문자열(공간 절약).
-export function buildVibrationSectionText(calc = {}) {
+export function buildVibrationSectionText(calc: VibrationSectionCalc = {}): string {
   const { jobResults, amax8, dv, comparison, validation, risk } = calc || {};
   const exposureStatus = calc?.exposureStatus || 'unknown';
 

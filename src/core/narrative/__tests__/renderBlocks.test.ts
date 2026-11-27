@@ -6,6 +6,7 @@ import '../../../modules';
 import { loadGoldenBatchPatients, loadGoldenNarrativePatients, loadGoldenPatients } from '../../fixtures/goldenPatients';
 import { useGoldenEnvironment } from '../../fixtures/goldenEnv';
 import { buildJobHistoryLines } from '../../utils/jobHistory';
+import type { JobHistoryJob } from '../../utils/jobHistory';
 import { getModule } from '../../modules/registry';
 import { renderNarrativeBlocks } from '../renderBlocks';
 
@@ -78,7 +79,7 @@ describe('소견서 ≡ EMR 4번 칸(모듈 서술)', () => {
     for (const patient of allPatients()) {
       if (!(patient.data.activeModules || []).includes(moduleId)) continue;
       const calc = manifest.computeCalc({ shared: patient.data.shared, module: patient.data.modules[moduleId] || {} });
-      const context = { jobNumberingByJobId: buildJobHistoryLines(patient.data.shared.jobs as unknown[]).numberingByJobId };
+      const context = { jobNumberingByJobId: buildJobHistoryLines(patient.data.shared.jobs as JobHistoryJob[]).numberingByJobId };
       expect(narrative.render('report', calc, context), patient.id).toBe(narrative.render('emrSection', calc, context));
       checked += 1;
     }
