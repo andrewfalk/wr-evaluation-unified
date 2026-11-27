@@ -7,7 +7,7 @@
 // 변형마다 달라지는 문구는 phrases(narrative.phrases — 문구 차이 표의 원본, P2-65a)에서 꺼내 쓴다.
 import type { ModuleNarrative, NarrativePhrases, NarrativeVariant } from '../../../core/modules/manifest';
 import { getSideText } from '../../../core/i18n/sideLabels';
-import { fillPhrase } from '../../../core/narrative/phrases';
+import { fillPhrase, OUTPUT_EMPTY_JOB_NAME } from '../../../core/narrative/phrases';
 import { NO_EVALUABLE_JOBS_NOTE } from '../../../core/utils/jobHistory';
 
 /** 서술이 읽는 상병 요약(모듈 계산의 DiagnosisSummary·합친 그룹 요약)의 모양. */
@@ -44,7 +44,7 @@ function upperLimbPhrases(heading: string) {
     heading: { report: heading, emrSection: heading, emrSummary: heading },
     temporalFlagsLead: { report: '- 공통 시간적 선후관계: ', emrSection: '- 공통 시간적 선후관계: ' },
     jobLine: { report: '- 직력{n}: {name}\n', emrSection: '- 직력{n}: {name}\n', emrSummary: '- 직력{n}: {name}\n' },
-    jobNameEmpty: { report: '직업 미입력', emrSection: '직업 미입력', emrSummary: '직업 미입력' },
+    jobNameEmpty: { report: OUTPUT_EMPTY_JOB_NAME, emrSection: OUTPUT_EMPTY_JOB_NAME, emrSummary: OUTPUT_EMPTY_JOB_NAME },
     narrativeEmpty: { report: '', emrSection: '-' },
     riskFactorLabel: { report: '      업무에 포함된 위험 요인: ', emrSection: '      업무에 포함된 위험 요인: ' },
     conclusionLead: { report: '\n      **종합평가** ', emrSection: '\n      **종합평가** ', emrSummary: '\n      **종합평가** ' },

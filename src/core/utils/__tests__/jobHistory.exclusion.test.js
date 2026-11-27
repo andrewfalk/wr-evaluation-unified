@@ -35,7 +35,7 @@ describe('buildJobHistoryLines', () => {
     const { lines, text, numberingByJobId } = buildJobHistoryLines([job('a', '용접공'), job('b', '')]);
     expect(lines).toEqual([
       '- 직력1: 용접공 | 2010-01-01 ~ 2015-01-01 (5년 0개월)',
-      '- 직력2: - | 2010-01-01 ~ 2015-01-01 (5년 0개월)',
+      '- 직력2: 직업 미입력 | 2010-01-01 ~ 2015-01-01 (5년 0개월)',
     ]);
     expect(text).toBe(`${lines[0]}\n${lines[1]}\n`);
     expect(numberingByJobId).toBeNull();
