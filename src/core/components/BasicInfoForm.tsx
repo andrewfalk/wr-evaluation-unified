@@ -1,11 +1,40 @@
-// @ts-nocheck
 import { useRef, useCallback } from 'react';
+import type { ChangeEvent } from 'react';
+import type { SharedData, SharedJob } from '@wr/contracts';
 import { calculateBMI, calculateAge } from '../utils/common';
 import { formatWorkPeriod } from '../utils/workPeriod';
 import { createSharedJob } from '../utils/data';
 import { PresetSearch } from './PresetSearch';
 
 import { hasIntranetSession } from '../../platform/dataMode';
+import type { SessionLike } from '../../platform/dataMode';
+
+type SharedPatch = Partial<SharedData>;
+// 문자열 값을 갖는 공유 필드(기준 날짜 칸이 쓰는 키).
+type SharedStringField = { [K in keyof SharedData]-?: SharedData[K] extends string ? K : never }[keyof SharedData];
+
+interface JobPreset {
+  id: string;
+  jobName: string;
+}
+
+export interface BasicInfoFormProps {
+  shared: SharedPatch;
+  onChange: (next: SharedPatch) => void;
+  errors?: Record<string, string | undefined> | null;
+  refDateField?: SharedStringField;
+  refDateLabel?: string;
+  presets?: unknown[];
+  presetMeta?: { count: number } | null;
+  presetError?: string | null;
+  onPresetSelect?: (jobId: string, preset: JobPreset) => void;
+  onSavePreset?: (jobId: string) => void;
+  onBrowsePreset?: (jobId: string) => void;
+  activeModules?: string[];
+  session?: SessionLike | null;
+  legacyExclusionBlocked?: boolean;
+}
+
 export function BasicInfoForm({
   shared,
   onChange,
@@ -21,20 +50,20 @@ export function BasicInfoForm({
   activeModules,
   session,
   legacyExclusionBlocked = false,
-}) {
-  const handleInput = (field, value) => {
+}: BasicInfoFormProps) {
+  const handleInput = (field: keyof SharedData, value: string) => {
     onChange({ ...shared, [field]: value });
   };
 
   const jobs = shared.jobs || [];
 
-  const handleJob = (i, field, value) => {
+  const handleJob = (i: number, field: keyof SharedJob, value: string | number | boolean) => {
     const updated = [...jobs];
     updated[i] = { ...updated[i], [field]: value };
     onChange({ ...shared, jobs: updated });
   };
 
-  const handlePresetSelectInternal = (i, preset) => {
+  const handlePresetSelectInternal = (i: number, preset: JobPreset) => {
     const updated = [...jobs];
     updated[i] = { ...updated[i], presetId: preset.id, jobName: preset.jobName };
     onChange({ ...shared, jobs: updated });
@@ -45,7 +74,7 @@ export function BasicInfoForm({
     onChange({ ...shared, jobs: [...jobs, createSharedJob()] });
   };
 
-  const removeJob = (i) => {
+  const removeJob = (i: number) => {
     if (jobs.length > 1) {
       onChange({ ...shared, jobs: jobs.filter((_, x) => x !== i) });
     }
@@ -185,8 +214,8 @@ export function BasicInfoForm({
                   <PresetSearch
                     presets={presets}
                     value={job.jobName}
-                    onChange={v => handleJob(i, 'jobName', v)}
-                    onSelect={p => handlePresetSelectInternal(i, p)}
+                    onChange={(v: string) => handleJob(i, 'jobName', v)}
+                    onSelect={(p: JobPreset) => handlePresetSelectInternal(i, p)}
                     session={session}
                   />
                 ) : (
@@ -248,7 +277,7 @@ export function BasicInfoForm({
                         value={yVal}
                         onChange={e => {
                           const y = parseInt(e.target.value, 10) || 0;
-                          const m = parseInt(job.workPeriodOverride?.match(/(\d+)\s*개월/)?.[1], 10) || 0;
+                          const m = parseInt(job.workPeriodOverride?.match(/(\d+)\s*개월/)?.[1] as string, 10) || 0;
                           handleJob(i, 'workPeriodOverride', (y || m) ? `${y}년 ${m}개월` : '');
                         }}
                       />
@@ -261,7 +290,7 @@ export function BasicInfoForm({
                         value={mVal}
                         onChange={e => {
                           const m = parseInt(e.target.value, 10) || 0;
-                          const y = parseInt(job.workPeriodOverride?.match(/(\d+)\s*년/)?.[1], 10) || 0;
+                          const y = parseInt(job.workPeriodOverride?.match(/(\d+)\s*년/)?.[1] as string, 10) || 0;
                           handleJob(i, 'workPeriodOverride', (y || m) ? `${y}년 ${m}개월` : '');
                         }}
                       />
@@ -290,16 +319,25 @@ export function BasicInfoForm({
   );
 }
 
-function AutoResizeTextarea({ value, onChange, placeholder, maxHeight = '50vh' }) {
-  const ref = useRef(null);
-  const handleChange = useCallback((e) => {
+// textarea의 rows는 옛 JSX 그대로 문자열("2"·"4")을 넘긴다 — React 타입은 number라 `as unknown as number`로 값만 맞춘다
+// (숫자로 바꾸면 빌드 결과의 props 값이 달라진다. DOM 속성은 같다).
+interface AutoResizeTextareaProps {
+  value: string;
+  onChange: (e: ChangeEvent<HTMLTextAreaElement>) => void;
+  placeholder?: string;
+  maxHeight?: string;
+}
+
+function AutoResizeTextarea({ value, onChange, placeholder, maxHeight = '50vh' }: AutoResizeTextareaProps) {
+  const ref = useRef<HTMLTextAreaElement | null>(null);
+  const handleChange = useCallback((e: ChangeEvent<HTMLTextAreaElement>) => {
     onChange(e);
     const el = e.target;
     el.style.height = 'auto';
     el.style.height = `${el.scrollHeight}px`;
   }, [onChange]);
 
-  const handleRef = useCallback((el) => {
+  const handleRef = useCallback((el: HTMLTextAreaElement | null) => {
     ref.current = el;
     if (el) {
       el.style.height = 'auto';
@@ -313,14 +351,20 @@ function AutoResizeTextarea({ value, onChange, placeholder, maxHeight = '50vh' }
       value={value}
       onChange={handleChange}
       placeholder={placeholder}
-      rows="2"
+      rows={"2" as unknown as number}
       style={{ resize: 'none', maxHeight, overflowY: 'auto' }}
     />
   );
 }
 
-export function BasicInfoSidePanel({ shared, onChange, session }) {
-  const handleInput = (field, value) => {
+export interface BasicInfoSidePanelProps {
+  shared: SharedPatch;
+  onChange: (next: SharedPatch) => void;
+  session?: SessionLike | null;
+}
+
+export function BasicInfoSidePanel({ shared, onChange, session }: BasicInfoSidePanelProps) {
+  const handleInput = (field: keyof SharedData, value: string) => {
     onChange({ ...shared, [field]: value });
   };
 
@@ -453,7 +497,7 @@ export function BasicInfoSidePanel({ shared, onChange, session }) {
         </div>
         <div className="form-group">
           <textarea
-            rows="4"
+            rows={"4" as unknown as number}
             value={shared.specialNotes}
             onChange={e => handleInput('specialNotes', e.target.value)}
             placeholder="산재 이력, 현재 상태 등을 입력하세요"

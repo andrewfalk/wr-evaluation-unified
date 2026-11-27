@@ -4,7 +4,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { useState } from 'react';
-import { BasicInfoForm } from '../BasicInfoForm.jsx';
+import { BasicInfoForm } from '../BasicInfoForm';
 
 afterEach(cleanup);
 
