@@ -1,6 +1,60 @@
 import { resolveDiagnosisModule } from '../../../core/utils/diagnosisMapping';
 import { stableStringify } from '../../../core/utils/common';
 
+/** 상병(공용 shared.diagnoses 항목) 가운데 이 파일이 읽는 필드. */
+export interface ElbowDiagnosisLike {
+  id?: string;
+  code?: string;
+  name?: string;
+  moduleId?: string | null;
+}
+
+/** 직력(shared.jobs 항목) 가운데 이 파일이 읽는 필드. */
+export interface ElbowJobLike {
+  id: string;
+}
+
+/** 직력 × 상병 한 칸의 입력값(createElbowDiagnosisEntry의 모양 + 옛 데이터·자동 복사가 더하는 필드). */
+export interface ElbowDiagnosisEntry {
+  diagnosisId: string;
+  selectedBkType: string;
+  bkSelectionMode: string;
+  bkAutoSyncedFrom?: string;
+  exposure_types: string[];
+  bk2103_tool_pressing: string;
+  bk2103_frequent_high_force_grip: string;
+  [field: string]: unknown;
+}
+
+export interface ElbowTemporalSequence {
+  recent_task_change: string;
+  task_change_date: string;
+  symptom_onset_interval: string;
+  improves_with_rest: string;
+}
+
+export interface ElbowJobEvaluation {
+  sharedJobId: string;
+  diagnosisEntries: ElbowDiagnosisEntry[];
+  _pendingPreset?: Record<string, unknown>;
+  [field: string]: unknown;
+}
+
+/** 저장된 모듈 데이터(옛 형식 포함 — temporalRelation·diagnosisEvaluations). */
+export interface ElbowModuleDataInput {
+  returnConsiderations?: string;
+  temporalSequence?: Partial<ElbowTemporalSequence>;
+  temporalRelation?: Partial<ElbowTemporalSequence>;
+  jobEvaluations?: ElbowJobEvaluation[];
+  diagnosisEvaluations?: Array<Partial<ElbowDiagnosisEntry> & { diagnosisId: string; linkedJobId?: string }>;
+}
+
+export interface ElbowModuleData {
+  returnConsiderations: string;
+  temporalSequence: ElbowTemporalSequence;
+  jobEvaluations: ElbowJobEvaluation[];
+}
+
 export const BK_TYPE_OPTIONS = [
   { value: '', label: '선택' },
   { value: 'BK2101', label: 'BK2101 상과병변/부착부 건병증' },
@@ -81,11 +135,11 @@ export const ELBOW_BRANCH_FIELDS = {
   ],
 };
 
-function serialize(value) {
+function serialize(value: unknown) {
   return stableStringify(value || null);
 }
 
-export function createElbowTemporalSequence() {
+export function createElbowTemporalSequence(): ElbowTemporalSequence {
   return {
     recent_task_change: '',
     task_change_date: '',
@@ -98,7 +152,7 @@ export function createElbowTemporalRelation() {
   return createElbowTemporalSequence();
 }
 
-export function inferElbowBkTypeFromDiagnosis(diagnosis = {}) {
+export function inferElbowBkTypeFromDiagnosis(diagnosis: ElbowDiagnosisLike = {}): string {
   const code = String(diagnosis.code || '').trim().toUpperCase();
   const name = String(diagnosis.name || '').trim();
 
@@ -113,7 +167,7 @@ export function inferElbowBkTypeFromDiagnosis(diagnosis = {}) {
   return '';
 }
 
-export function createElbowDiagnosisEntry(diagnosis = {}) {
+export function createElbowDiagnosisEntry(diagnosis: ElbowDiagnosisLike = {}): ElbowDiagnosisEntry {
   const inferredBkType = inferElbowBkTypeFromDiagnosis(diagnosis);
 
   return {
@@ -154,18 +208,18 @@ export function createElbowDiagnosisEntry(diagnosis = {}) {
   };
 }
 
-export function createElbowDiagnosisEvaluation(diagnosisId = '') {
+export function createElbowDiagnosisEvaluation(diagnosisId = ''): ElbowDiagnosisEntry {
   return createElbowDiagnosisEntry({ id: diagnosisId });
 }
 
-export function createElbowJobEvaluation(sharedJobId = '') {
+export function createElbowJobEvaluation(sharedJobId = ''): ElbowJobEvaluation {
   return {
     sharedJobId,
     diagnosisEntries: [],
   };
 }
 
-export function createElbowModuleData() {
+export function createElbowModuleData(): ElbowModuleData {
   return {
     returnConsiderations: '',
     temporalSequence: createElbowTemporalSequence(),
@@ -173,12 +227,12 @@ export function createElbowModuleData() {
   };
 }
 
-export function isElbowDiagnosis(diag, activeModules = []) {
+export function isElbowDiagnosis(diag: ElbowDiagnosisLike, activeModules: string[] = []): boolean {
   return resolveDiagnosisModule(diag, activeModules)?.moduleId === 'elbow';
 }
 
-export function resetElbowBranchFields(entry = {}, nextBkType = '') {
-  const nextEntry = { ...entry, selectedBkType: nextBkType };
+export function resetElbowBranchFields(entry: Partial<ElbowDiagnosisEntry> = {}, nextBkType = ''): Partial<ElbowDiagnosisEntry> {
+  const nextEntry: Partial<ElbowDiagnosisEntry> = { ...entry, selectedBkType: nextBkType };
 
   Object.values(ELBOW_BRANCH_FIELDS).flat().forEach(fieldName => {
     nextEntry[fieldName] = Array.isArray(nextEntry[fieldName]) ? [] : '';
@@ -187,15 +241,15 @@ export function resetElbowBranchFields(entry = {}, nextBkType = '') {
   return nextEntry;
 }
 
-function normalizeTemporalSequence(moduleData = {}) {
+function normalizeTemporalSequence(moduleData: ElbowModuleDataInput = {}): ElbowTemporalSequence {
   return {
     ...createElbowTemporalSequence(),
     ...(moduleData.temporalSequence || moduleData.temporalRelation || {}),
   };
 }
 
-function buildLegacyEntryMap(moduleData = {}, jobs = [], diagnoses = []) {
-  const legacyMap = new Map();
+function buildLegacyEntryMap(moduleData: ElbowModuleDataInput = {}, jobs: ElbowJobLike[] = [], diagnoses: ElbowDiagnosisLike[] = []) {
+  const legacyMap = new Map<string, ElbowDiagnosisEntry>();
   const firstJobId = jobs[0]?.id || '';
   const legacyDiagnoses = Array.isArray(moduleData.diagnosisEvaluations)
     ? moduleData.diagnosisEvaluations
@@ -206,7 +260,7 @@ function buildLegacyEntryMap(moduleData = {}, jobs = [], diagnoses = []) {
     const sharedJobId = legacyEntry.linkedJobId || firstJobId;
     if (!sharedJobId || !legacyEntry.diagnosisId) return;
 
-    const nextEntry = {
+    const nextEntry: ElbowDiagnosisEntry = {
       ...createElbowDiagnosisEntry(diagnosis),
       ...legacyEntry,
       diagnosisId: legacyEntry.diagnosisId,
@@ -218,8 +272,8 @@ function buildLegacyEntryMap(moduleData = {}, jobs = [], diagnoses = []) {
   return legacyMap;
 }
 
-function normalizeDiagnosisEntry(existingEntry, diagnosis) {
-  const baseEntry = {
+function normalizeDiagnosisEntry(existingEntry: ElbowDiagnosisEntry | undefined, diagnosis: ElbowDiagnosisLike & { id: string }): ElbowDiagnosisEntry {
+  const baseEntry: ElbowDiagnosisEntry = {
     ...createElbowDiagnosisEntry(diagnosis),
     ...(existingEntry || {}),
     diagnosisId: diagnosis.id,
@@ -254,7 +308,7 @@ function normalizeDiagnosisEntry(existingEntry, diagnosis) {
 
 const BK_GROUP_META_FIELDS = new Set(['diagnosisId', 'selectedBkType', 'bkSelectionMode', 'bkAutoSyncedFrom']);
 
-function scoreDiagnosisEntry(entry) {
+function scoreDiagnosisEntry(entry: ElbowDiagnosisEntry | undefined): number {
   if (!entry) return 0;
   return Object.entries(entry).filter(([key, value]) =>
     !BK_GROUP_META_FIELDS.has(key) &&
@@ -263,18 +317,23 @@ function scoreDiagnosisEntry(entry) {
   ).length;
 }
 
-export function syncElbowModuleData(moduleData = {}, jobs = [], diagnoses = [], activeModules = []) {
+export function syncElbowModuleData(
+  moduleData: ElbowModuleDataInput = {},
+  jobs: ElbowJobLike[] = [],
+  diagnoses: Array<ElbowDiagnosisLike & { id: string }> | null = [],
+  activeModules: string[] = [],
+) {
   const elbowDiagnoses = (diagnoses || []).filter(diag => isElbowDiagnosis(diag, activeModules));
   const temporalSequence = normalizeTemporalSequence(moduleData);
   const legacyEntryMap = buildLegacyEntryMap(moduleData, jobs, elbowDiagnoses);
-  const existingJobMap = new Map(
+  const existingJobMap = new Map<string, ElbowJobEvaluation>(
     (moduleData.jobEvaluations || []).map(jobEvaluation => [jobEvaluation.sharedJobId, jobEvaluation])
   );
 
   const nextJobEvaluations = (jobs || []).map(job => {
     const existingJobEvaluation = existingJobMap.get(job.id);
     const pendingPreset = existingJobEvaluation?._pendingPreset;
-    const existingEntryMap = new Map(
+    const existingEntryMap = new Map<string, ElbowDiagnosisEntry>(
       (existingJobEvaluation?.diagnosisEntries || []).map(entry => [entry.diagnosisId, entry])
     );
 
@@ -298,7 +357,7 @@ export function syncElbowModuleData(moduleData = {}, jobs = [], diagnoses = [], 
     // (화면엔 대표값이 채워진 것처럼 보이지만 실제 저장값은 비어있는 상태를 방지하기 위해) 대표값을 즉시 복사한다.
     diagnosisEntries.forEach(({ entry, autoSyncEligible }) => {
       if (!autoSyncEligible || !entry.selectedBkType || scoreDiagnosisEntry(entry) > 0) return;
-      const donor = diagnosisEntries.reduce((best, other) => {
+      const donor = diagnosisEntries.reduce<(typeof diagnosisEntries)[number] | null>((best, other) => {
         if (other.entry === entry || other.entry.selectedBkType !== entry.selectedBkType) return best;
         const score = scoreDiagnosisEntry(other.entry);
         if (score === 0) return best;
@@ -313,7 +372,7 @@ export function syncElbowModuleData(moduleData = {}, jobs = [], diagnoses = [], 
       entry.bkAutoSyncedFrom = donor.entry.diagnosisId;
     });
 
-    const { _pendingPreset, ...restJobEval } = (existingJobEvaluation || {});
+    const { _pendingPreset, ...restJobEval } = (existingJobEvaluation || {}) as Partial<ElbowJobEvaluation>;
     return {
       ...createElbowJobEvaluation(job.id),
       ...restJobEval,
@@ -322,7 +381,7 @@ export function syncElbowModuleData(moduleData = {}, jobs = [], diagnoses = [], 
     };
   });
 
-  const nextModuleData = {
+  const nextModuleData: ElbowModuleData = {
     returnConsiderations: moduleData?.returnConsiderations || '',
     temporalSequence,
     jobEvaluations: nextJobEvaluations,
