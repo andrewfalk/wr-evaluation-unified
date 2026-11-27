@@ -4,10 +4,27 @@ import { ElbowResultPanel } from './components/ElbowResultPanel';
 import { createElbowTemporalSequence, syncElbowModuleData } from './utils/data';
 import { NoEvaluableJobsNotice } from '../../core/components/NoEvaluableJobsNotice';
 import { hasNoEvaluableJobs, isJobIdExcluded } from '@wr/analytics-core/jobScope';
+import type { ElbowCalcResult } from '@wr/analytics-core/modules/elbow/index';
+import type { ElbowDiagnosisLike, ElbowJobLike, ElbowModuleDataInput, ElbowTemporalSequence } from './utils/data';
 
-export function ElbowEvaluation({ patient, calc, updateModule, errors }) {
-  const shared = patient.data.shared || {};
-  const mod = patient.data.module || {};
+type ElbowJob = ElbowJobLike & { jobName?: string; excludeFromAnalysis?: boolean };
+
+export interface ElbowEvaluationProps {
+  patient: {
+    data: {
+      shared?: { diagnoses?: Array<ElbowDiagnosisLike & { id: string }>; jobs?: ElbowJob[] };
+      module?: ElbowModuleDataInput;
+      activeModules?: string[];
+    };
+  };
+  calc: ElbowCalcResult | null | undefined;
+  updateModule: (updater: (current: ElbowModuleDataInput) => unknown) => void;
+  errors?: { jobs?: string } | null;
+}
+
+export function ElbowEvaluation({ patient, calc, updateModule, errors }: ElbowEvaluationProps) {
+  const shared: NonNullable<ElbowEvaluationProps['patient']['data']['shared']> = patient.data.shared || {};
+  const mod: ElbowModuleDataInput = patient.data.module || {};
   const diagnoses = shared.diagnoses || [];
   const activeModules = patient.data.activeModules || [];
   const sharedJobs = shared.jobs || [];
@@ -27,7 +44,7 @@ export function ElbowEvaluation({ patient, calc, updateModule, errors }) {
   // 미포함 직력의 jobEvaluations 입력값을 보존한다(다시 '포함'으로 바꾸면 그대로 돌아와야 함).
   const evaluatedJobEvaluations = jobEvaluations.filter(jobEvaluation => !isJobIdExcluded(sharedJobs, jobEvaluation.sharedJobId));
 
-  const updateTemporalSequence = (field, value) => {
+  const updateTemporalSequence = (field: keyof ElbowTemporalSequence, value: string) => {
     updateModule(current => {
       const normalized = syncElbowModuleData(current, sharedJobs, diagnoses, activeModules).moduleData;
       return {
@@ -41,7 +58,7 @@ export function ElbowEvaluation({ patient, calc, updateModule, errors }) {
     });
   };
 
-  const updateDiagnosisEntry = (sharedJobId, diagnosisId, patch) => {
+  const updateDiagnosisEntry = (sharedJobId: string, diagnosisId: string | undefined, patch: Record<string, unknown>) => {
     updateModule(current => {
       const normalized = syncElbowModuleData(current, sharedJobs, diagnoses, activeModules).moduleData;
       return {
