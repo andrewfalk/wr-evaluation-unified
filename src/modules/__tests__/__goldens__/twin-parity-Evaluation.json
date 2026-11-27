@@ -1,0 +1,97 @@
+[
+  {
+    "elbow": [
+      "import { createTwinTemporalSequence, syncTwinModuleData } from './utils/data';"
+    ],
+    "wrist": [
+      "import { syncTwinModuleData } from './utils/data';"
+    ]
+  },
+  {
+    "elbow": [
+      "  const twinDiagnoses = synced.twinDiagnoses;",
+      "  const temporalSequence = synced.moduleData.temporalSequence || createTwinTemporalSequence();"
+    ],
+    "wrist": [
+      "  if (synced.twinDiagnoses.length === 0) {",
+      "    return (",
+      "      <div className=\"panel\">",
+      "        <div className=\"evaluation-empty-state\">",
+      "          손목/손가락으로 분류되는 상병이 없습니다. 진단명 또는 코드에 맞는 손목/손가락 상병을 입력하면 이 모듈을 활용할 수 있습니다.",
+      "        </div>",
+      "      </div>",
+      "    );",
+      "  }",
+      "",
+      "  if (sharedJobs.length === 0) {",
+      "    return (",
+      "      <div className=\"panel\">",
+      "        <div className=\"evaluation-empty-state\">",
+      "          기본정보에서 직업력을 먼저 입력해 주세요. 손목 모듈은 직업별 노출 평가 구조를 사용합니다.",
+      "        </div>",
+      "      </div>",
+      "    );",
+      "  }",
+      "",
+      "  const temporalSequence = synced.moduleData.temporalSequence;"
+    ]
+  },
+  {
+    "elbow": [
+      "          ...createTwinTemporalSequence(),",
+      "          ...(normalized.temporalSequence || {}),"
+    ],
+    "wrist": [
+      "          ...normalized.temporalSequence,"
+    ]
+  },
+  {
+    "elbow": [
+      "  if (twinDiagnoses.length === 0) {",
+      "    return (",
+      "      <div className=\"panel\">",
+      "        <div className=\"evaluation-empty-state\">",
+      "          팔꿈치로 분류된 상병이 없습니다. 진단명 또는 코드에 맞는 팔꿈치 상병을 입력하면 이 모듈을 활용할 수 있습니다.",
+      "        </div>",
+      "      </div>",
+      "    );",
+      "  }",
+      "",
+      "  if (sharedJobs.length === 0) {",
+      "    return (",
+      "      <div className=\"panel\">",
+      "        <div className=\"evaluation-empty-state\">",
+      "          기본정보 탭에서 직업을 먼저 입력하세요. 팔꿈치 평가는 직업별로 정리됩니다.",
+      "        </div>",
+      "      </div>",
+      "    );",
+      "  }",
+      ""
+    ],
+    "wrist": []
+  },
+  {
+    "elbow": [
+      "              <h2 className=\"section-title\"><span className=\"section-icon\">&#x1F4AA;</span>직업별 팔꿈치 신체부담 평가</h2>",
+      "              <p className=\"section-description\">기본정보에서 입력한 직업 순서대로 팔꿈치 상병의 노출 특성을 정리합니다.</p>"
+    ],
+    "wrist": [
+      "              <h2 className=\"section-title\"><span className=\"section-icon\">&#x270B;</span>직업별 손목/손가락 노출평가</h2>",
+      "              <p className=\"section-description\">기본정보에서 입력한 직업 순서대로 손목 관련 상병의 노출 특성을 입력합니다.</p>"
+    ]
+  },
+  {
+    "elbow": [
+      "                twinDiagnoses={twinDiagnoses}"
+    ],
+    "wrist": [
+      "                twinDiagnoses={synced.twinDiagnoses}"
+    ]
+  },
+  {
+    "elbow": [],
+    "wrist": [
+      ""
+    ]
+  }
+]

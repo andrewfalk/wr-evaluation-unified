@@ -1,0 +1,110 @@
+[
+  {
+    "elbow": [
+      "  const showBk2105PressureSource = evaluation.direct_pressure_level && evaluation.direct_pressure_level !== 'none';"
+    ],
+    "wrist": []
+  },
+  {
+    "elbow": [],
+    "wrist": [
+      "  if (selectedBkType === 'BK2113') {",
+      "    return (",
+      "      <>",
+      "        <RadioField",
+      "          label=\"반복적인 손목 굴신 동작\"",
+      "          name={`bk2113_repetitive_wrist_motion_${diagnosisId}`}",
+      "          value={evaluation.bk2113_repetitive_wrist_motion}",
+      "          options={YES_NO_OPTIONS}",
+      "          onChange={value => onChange('bk2113_repetitive_wrist_motion', value)}",
+      "          groupClassName={branchRadioGroupClass}",
+      "          labelClassName={branchRadioLabelClass}",
+      "        />",
+      "        <div className=\"result-section-caption\">",
+      "          CTS는 공통 입력의 반복, 힘 사용, 진동 항목과 함께 해석됩니다.",
+      "        </div>",
+      "      </>",
+      "    );",
+      "  }",
+      ""
+    ]
+  },
+  {
+    "elbow": [
+      "            <div className=\"result-section-caption\">3600 ÷ 주기(초) 기준으로 자동 계산됩니다.</div>"
+    ],
+    "wrist": [
+      "            <div className=\"result-section-caption\">3600초를 주기로 나누어 자동 계산합니다.</div>"
+    ]
+  },
+  {
+    "elbow": [
+      "          label=\"단조로운 반복패턴 여부\""
+    ],
+    "wrist": [
+      "          label=\"단조로운 반복 패턴 여부\""
+    ]
+  },
+  {
+    "elbow": [
+      "            label=\"강제적 손 배측굴곡\""
+    ],
+    "wrist": [
+      "            label=\"강제 손목 배굴\""
+    ]
+  },
+  {
+    "elbow": [
+      "            label=\"반복적/급작스러운 회내·회외\""
+    ],
+    "wrist": [
+      "            label=\"반복 회내/회외\""
+    ]
+  },
+  {
+    "elbow": [
+      "            label=\"공구를 강하게 쥐거나 누르면서 사용하는 작업\""
+    ],
+    "wrist": [
+      "            label=\"공구를 강하게 쥐거나 누르며 사용하는 작업\""
+    ]
+  },
+  {
+    "elbow": [
+      "  if (selectedBkType === 'BK2105') {",
+      "    return (",
+      "      <>",
+      "        <RadioField",
+      "          label=\"직접 압박/마찰/충격\"",
+      "          name={`direct_pressure_level_${diagnosisId}`}",
+      "          value={evaluation.direct_pressure_level}",
+      "          options={FREQUENCY_OPTIONS}",
+      "          onChange={value => onChange('direct_pressure_level', value)}",
+      "          groupClassName={branchRadioGroupClass}",
+      "          labelClassName={branchRadioLabelClass}",
+      "        />",
+      "        <RadioField",
+      "          label=\"팔꿈치를 대고 버티는 작업\"",
+      "          name={`bk2105_elbow_leaning_${diagnosisId}`}",
+      "          value={evaluation.bk2105_elbow_leaning}",
+      "          options={YES_NO_OPTIONS}",
+      "          onChange={value => onChange('bk2105_elbow_leaning', value)}",
+      "          groupClassName={branchRadioGroupClass}",
+      "          labelClassName={branchRadioLabelClass}",
+      "        />",
+      "        {showBk2105PressureSource && (",
+      "          <CheckboxGroup",
+      "            label=\"압박 원인\"",
+      "            values={evaluation.bk2105_pressure_source}",
+      "            options={PRESSURE_SOURCE_OPTIONS}",
+      "            onToggle={value => onToggleMultiValue('bk2105_pressure_source', value)}",
+      "          />",
+      "        )}",
+      "      </>",
+      "    );",
+      "  }",
+      ""
+    ],
+    "wrist": []
+  }
+]
