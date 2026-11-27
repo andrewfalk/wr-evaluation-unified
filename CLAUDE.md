@@ -44,7 +44,7 @@ api/analyze.js            # Vercel 서버리스(AI 프록시)
 
 ## 모듈 추가 방법
 
-`src/modules/<name>/index.js`에서 `registerModule()` 호출:
+`src/modules/<name>/index.ts`에서 `registerModule()` 호출:
 
 ```javascript
 import { registerModule } from '../../core/moduleRegistry';
