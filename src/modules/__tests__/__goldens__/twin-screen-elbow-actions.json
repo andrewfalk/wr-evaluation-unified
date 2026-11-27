@@ -1,0 +1,913 @@
+{
+  "entryBkChangeWithDonor": {
+    "updates": 1,
+    "changed": {
+      "entries": {
+        "job-a:dx-e2105": {
+          "diagnosisId": "dx-e2105",
+          "selectedBkType": "BK2101",
+          "bkSelectionMode": "manual",
+          "main_task_name": "배관 용접",
+          "direct_anatomic_link": "yes",
+          "exposure_types": [
+            "repetition",
+            "force"
+          ],
+          "repetition_level": "frequent",
+          "daily_exposure_hours": "4.5",
+          "shift_share_percent": "60",
+          "days_per_week": "5",
+          "work_pattern": "continuous",
+          "rest_distribution": "insufficient",
+          "force_level": "high",
+          "awkward_posture_level": "occasional",
+          "static_holding_level": "frequent",
+          "direct_pressure_level": "",
+          "vibration_exposure": "",
+          "bk2101_cycle_seconds": "20",
+          "bk2101_repetition_per_hour": "",
+          "bk2101_monotony": "yes",
+          "bk2101_forced_dorsal_extension": "frequent",
+          "bk2101_prosupination": "occasional",
+          "bk2105_elbow_leaning": "",
+          "bk2105_repeated_friction_impact": "",
+          "bk2105_pressure_source": [],
+          "bk2106_repeated_mechanical_exposure": "",
+          "bk2106_noncorrectable_posture": "",
+          "bk2106_prolonged_joint_position": "",
+          "bk2106_pressure_source": [],
+          "bk2103_vibration_tool_type": [],
+          "bk2103_daily_vibration_hours": "",
+          "bk2103_handheld_or_guided": "",
+          "bk2103_tool_pressing": "",
+          "bk2103_frequent_high_force_grip": "",
+          "bkAutoSyncedFrom": "dx-e2101a"
+        }
+      }
+    }
+  },
+  "entryBkChangeWithoutDonor": {
+    "updates": 1,
+    "changed": {
+      "entries": {
+        "job-a:dx-e2105": {
+          "diagnosisId": "dx-e2105",
+          "selectedBkType": "BK2106",
+          "bkSelectionMode": "manual",
+          "main_task_name": "",
+          "direct_anatomic_link": "",
+          "exposure_types": [],
+          "repetition_level": "",
+          "daily_exposure_hours": "",
+          "shift_share_percent": "",
+          "days_per_week": "",
+          "work_pattern": "",
+          "rest_distribution": "",
+          "force_level": "",
+          "awkward_posture_level": "",
+          "static_holding_level": "",
+          "direct_pressure_level": "",
+          "vibration_exposure": "",
+          "bk2101_cycle_seconds": "",
+          "bk2101_repetition_per_hour": "",
+          "bk2101_monotony": "",
+          "bk2101_forced_dorsal_extension": "",
+          "bk2101_prosupination": "",
+          "bk2105_elbow_leaning": "",
+          "bk2105_repeated_friction_impact": "",
+          "bk2105_pressure_source": [],
+          "bk2106_repeated_mechanical_exposure": "",
+          "bk2106_noncorrectable_posture": "",
+          "bk2106_prolonged_joint_position": "",
+          "bk2106_pressure_source": [],
+          "bk2103_vibration_tool_type": [],
+          "bk2103_daily_vibration_hours": "",
+          "bk2103_handheld_or_guided": "",
+          "bk2103_tool_pressing": "",
+          "bk2103_frequent_high_force_grip": ""
+        }
+      }
+    }
+  },
+  "entryBkClear": {
+    "updates": 2,
+    "changed": {
+      "entries": {
+        "job-a:dx-e2103": {
+          "diagnosisId": "dx-e2103",
+          "selectedBkType": "BK2103",
+          "bkSelectionMode": "auto",
+          "main_task_name": "배관 용접",
+          "direct_anatomic_link": "yes",
+          "exposure_types": [
+            "repetition",
+            "force"
+          ],
+          "repetition_level": "frequent",
+          "daily_exposure_hours": "4.5",
+          "shift_share_percent": "60",
+          "days_per_week": "5",
+          "work_pattern": "continuous",
+          "rest_distribution": "insufficient",
+          "force_level": "high",
+          "awkward_posture_level": "occasional",
+          "static_holding_level": "",
+          "direct_pressure_level": "",
+          "vibration_exposure": "",
+          "bk2101_cycle_seconds": "",
+          "bk2101_repetition_per_hour": "",
+          "bk2101_monotony": "",
+          "bk2101_forced_dorsal_extension": "",
+          "bk2101_prosupination": "",
+          "bk2105_elbow_leaning": "",
+          "bk2105_repeated_friction_impact": "",
+          "bk2105_pressure_source": [],
+          "bk2106_repeated_mechanical_exposure": "",
+          "bk2106_noncorrectable_posture": "",
+          "bk2106_prolonged_joint_position": "",
+          "bk2106_pressure_source": [],
+          "bk2103_vibration_tool_type": [],
+          "bk2103_daily_vibration_hours": "",
+          "bk2103_handheld_or_guided": "",
+          "bk2103_tool_pressing": "",
+          "bk2103_frequent_high_force_grip": ""
+        }
+      }
+    }
+  },
+  "groupBkChangeWithDonor": {
+    "updates": 2,
+    "changed": {
+      "entries": {
+        "job-a:dx-e2101a": {
+          "diagnosisId": "dx-e2101a",
+          "selectedBkType": "BK2103",
+          "bkSelectionMode": "manual",
+          "main_task_name": "배관 용접",
+          "direct_anatomic_link": "yes",
+          "exposure_types": [
+            "repetition",
+            "force"
+          ],
+          "repetition_level": "frequent",
+          "daily_exposure_hours": "4.5",
+          "shift_share_percent": "60",
+          "days_per_week": "5",
+          "work_pattern": "continuous",
+          "rest_distribution": "insufficient",
+          "force_level": "high",
+          "awkward_posture_level": "occasional",
+          "static_holding_level": "",
+          "direct_pressure_level": "",
+          "vibration_exposure": "present",
+          "bk2101_cycle_seconds": "",
+          "bk2101_repetition_per_hour": "",
+          "bk2101_monotony": "",
+          "bk2101_forced_dorsal_extension": "",
+          "bk2101_prosupination": "",
+          "bk2105_elbow_leaning": "",
+          "bk2105_repeated_friction_impact": "",
+          "bk2105_pressure_source": [],
+          "bk2106_repeated_mechanical_exposure": "",
+          "bk2106_noncorrectable_posture": "",
+          "bk2106_prolonged_joint_position": "",
+          "bk2106_pressure_source": [],
+          "bk2103_vibration_tool_type": [
+            "grinder",
+            "jackhammer",
+            "impact_wrench",
+            "other"
+          ],
+          "bk2103_daily_vibration_hours": "2.5",
+          "bk2103_handheld_or_guided": "",
+          "bk2103_tool_pressing": "yes",
+          "bk2103_frequent_high_force_grip": "",
+          "bkAutoSyncedFrom": "dx-e2103"
+        },
+        "job-a:dx-e2101b": {
+          "diagnosisId": "dx-e2101b",
+          "selectedBkType": "BK2103",
+          "bkSelectionMode": "manual",
+          "main_task_name": "배관 용접",
+          "direct_anatomic_link": "yes",
+          "exposure_types": [
+            "repetition",
+            "force"
+          ],
+          "repetition_level": "frequent",
+          "daily_exposure_hours": "4.5",
+          "shift_share_percent": "60",
+          "days_per_week": "5",
+          "work_pattern": "continuous",
+          "rest_distribution": "insufficient",
+          "force_level": "high",
+          "awkward_posture_level": "occasional",
+          "static_holding_level": "",
+          "direct_pressure_level": "",
+          "vibration_exposure": "present",
+          "bk2101_cycle_seconds": "",
+          "bk2101_repetition_per_hour": "",
+          "bk2101_monotony": "",
+          "bk2101_forced_dorsal_extension": "",
+          "bk2101_prosupination": "",
+          "bk2105_elbow_leaning": "",
+          "bk2105_repeated_friction_impact": "",
+          "bk2105_pressure_source": [],
+          "bk2106_repeated_mechanical_exposure": "",
+          "bk2106_noncorrectable_posture": "",
+          "bk2106_prolonged_joint_position": "",
+          "bk2106_pressure_source": [],
+          "bk2103_vibration_tool_type": [
+            "grinder",
+            "jackhammer",
+            "impact_wrench",
+            "other"
+          ],
+          "bk2103_daily_vibration_hours": "2.5",
+          "bk2103_handheld_or_guided": "",
+          "bk2103_tool_pressing": "yes",
+          "bk2103_frequent_high_force_grip": "",
+          "bkAutoSyncedFrom": "dx-e2103"
+        }
+      }
+    }
+  },
+  "groupBkChangeWithoutDonor": {
+    "updates": 2,
+    "changed": {
+      "entries": {
+        "job-a:dx-e2101a": {
+          "diagnosisId": "dx-e2101a",
+          "selectedBkType": "BK2106",
+          "bkSelectionMode": "manual",
+          "main_task_name": "배관 용접",
+          "direct_anatomic_link": "yes",
+          "exposure_types": [
+            "repetition",
+            "force"
+          ],
+          "repetition_level": "frequent",
+          "daily_exposure_hours": "4.5",
+          "shift_share_percent": "60",
+          "days_per_week": "5",
+          "work_pattern": "continuous",
+          "rest_distribution": "insufficient",
+          "force_level": "high",
+          "awkward_posture_level": "occasional",
+          "static_holding_level": "",
+          "direct_pressure_level": "",
+          "vibration_exposure": "",
+          "bk2101_cycle_seconds": "",
+          "bk2101_repetition_per_hour": "",
+          "bk2101_monotony": "",
+          "bk2101_forced_dorsal_extension": "",
+          "bk2101_prosupination": "",
+          "bk2105_elbow_leaning": "",
+          "bk2105_repeated_friction_impact": "",
+          "bk2105_pressure_source": [],
+          "bk2106_repeated_mechanical_exposure": "",
+          "bk2106_noncorrectable_posture": "",
+          "bk2106_prolonged_joint_position": "",
+          "bk2106_pressure_source": [],
+          "bk2103_vibration_tool_type": [],
+          "bk2103_daily_vibration_hours": "",
+          "bk2103_handheld_or_guided": "",
+          "bk2103_tool_pressing": "",
+          "bk2103_frequent_high_force_grip": ""
+        },
+        "job-a:dx-e2101b": {
+          "diagnosisId": "dx-e2101b",
+          "selectedBkType": "BK2106",
+          "bkSelectionMode": "manual",
+          "main_task_name": "다른 작업",
+          "direct_anatomic_link": "yes",
+          "exposure_types": [
+            "repetition",
+            "force"
+          ],
+          "repetition_level": "frequent",
+          "daily_exposure_hours": "4.5",
+          "shift_share_percent": "60",
+          "days_per_week": "5",
+          "work_pattern": "continuous",
+          "rest_distribution": "insufficient",
+          "force_level": "high",
+          "awkward_posture_level": "occasional",
+          "static_holding_level": "",
+          "direct_pressure_level": "",
+          "vibration_exposure": "",
+          "bk2101_cycle_seconds": "",
+          "bk2101_repetition_per_hour": "",
+          "bk2101_monotony": "",
+          "bk2101_forced_dorsal_extension": "",
+          "bk2101_prosupination": "",
+          "bk2105_elbow_leaning": "",
+          "bk2105_repeated_friction_impact": "",
+          "bk2105_pressure_source": [],
+          "bk2106_repeated_mechanical_exposure": "",
+          "bk2106_noncorrectable_posture": "",
+          "bk2106_prolonged_joint_position": "",
+          "bk2106_pressure_source": [],
+          "bk2103_vibration_tool_type": [],
+          "bk2103_daily_vibration_hours": "",
+          "bk2103_handheld_or_guided": "",
+          "bk2103_tool_pressing": "",
+          "bk2103_frequent_high_force_grip": ""
+        }
+      }
+    }
+  },
+  "groupApplyRepresentative": {
+    "updates": 2,
+    "changed": {
+      "entries": {
+        "job-a:dx-e2101b": {
+          "diagnosisId": "dx-e2101b",
+          "selectedBkType": "BK2101",
+          "bkSelectionMode": "auto",
+          "main_task_name": "배관 용접",
+          "direct_anatomic_link": "yes",
+          "exposure_types": [
+            "repetition",
+            "force"
+          ],
+          "repetition_level": "frequent",
+          "daily_exposure_hours": "4.5",
+          "shift_share_percent": "60",
+          "days_per_week": "5",
+          "work_pattern": "continuous",
+          "rest_distribution": "insufficient",
+          "force_level": "high",
+          "awkward_posture_level": "occasional",
+          "static_holding_level": "frequent",
+          "direct_pressure_level": "",
+          "vibration_exposure": "",
+          "bk2101_cycle_seconds": "20",
+          "bk2101_repetition_per_hour": "",
+          "bk2101_monotony": "yes",
+          "bk2101_forced_dorsal_extension": "frequent",
+          "bk2101_prosupination": "occasional",
+          "bk2105_elbow_leaning": "",
+          "bk2105_repeated_friction_impact": "",
+          "bk2105_pressure_source": [],
+          "bk2106_repeated_mechanical_exposure": "",
+          "bk2106_noncorrectable_posture": "",
+          "bk2106_prolonged_joint_position": "",
+          "bk2106_pressure_source": [],
+          "bk2103_vibration_tool_type": [],
+          "bk2103_daily_vibration_hours": "",
+          "bk2103_handheld_or_guided": "",
+          "bk2103_tool_pressing": "",
+          "bk2103_frequent_high_force_grip": ""
+        }
+      }
+    }
+  },
+  "entryExposureToggleOff": {
+    "updates": 1,
+    "changed": {
+      "entries": {
+        "job-a:dx-e2103": {
+          "diagnosisId": "dx-e2103",
+          "selectedBkType": "BK2103",
+          "bkSelectionMode": "manual",
+          "main_task_name": "배관 용접",
+          "direct_anatomic_link": "yes",
+          "exposure_types": [
+            "repetition"
+          ],
+          "repetition_level": "frequent",
+          "daily_exposure_hours": "4.5",
+          "shift_share_percent": "60",
+          "days_per_week": "5",
+          "work_pattern": "continuous",
+          "rest_distribution": "insufficient",
+          "force_level": "",
+          "awkward_posture_level": "occasional",
+          "static_holding_level": "",
+          "direct_pressure_level": "",
+          "vibration_exposure": "present",
+          "bk2101_cycle_seconds": "",
+          "bk2101_repetition_per_hour": "",
+          "bk2101_monotony": "",
+          "bk2101_forced_dorsal_extension": "",
+          "bk2101_prosupination": "",
+          "bk2105_elbow_leaning": "",
+          "bk2105_repeated_friction_impact": "",
+          "bk2105_pressure_source": [],
+          "bk2106_repeated_mechanical_exposure": "",
+          "bk2106_noncorrectable_posture": "",
+          "bk2106_prolonged_joint_position": "",
+          "bk2106_pressure_source": [],
+          "bk2103_vibration_tool_type": [
+            "grinder",
+            "jackhammer",
+            "impact_wrench",
+            "other"
+          ],
+          "bk2103_daily_vibration_hours": "2.5",
+          "bk2103_handheld_or_guided": "",
+          "bk2103_tool_pressing": "yes",
+          "bk2103_frequent_high_force_grip": ""
+        }
+      }
+    }
+  },
+  "entryExposureToggleOn": {
+    "updates": 1,
+    "changed": {
+      "entries": {
+        "job-a:dx-e2103": {
+          "diagnosisId": "dx-e2103",
+          "selectedBkType": "BK2103",
+          "bkSelectionMode": "manual",
+          "main_task_name": "배관 용접",
+          "direct_anatomic_link": "yes",
+          "exposure_types": [
+            "repetition",
+            "force",
+            "awkward_posture"
+          ],
+          "repetition_level": "frequent",
+          "daily_exposure_hours": "4.5",
+          "shift_share_percent": "60",
+          "days_per_week": "5",
+          "work_pattern": "continuous",
+          "rest_distribution": "insufficient",
+          "force_level": "high",
+          "awkward_posture_level": "occasional",
+          "static_holding_level": "",
+          "direct_pressure_level": "",
+          "vibration_exposure": "present",
+          "bk2101_cycle_seconds": "",
+          "bk2101_repetition_per_hour": "",
+          "bk2101_monotony": "",
+          "bk2101_forced_dorsal_extension": "",
+          "bk2101_prosupination": "",
+          "bk2105_elbow_leaning": "",
+          "bk2105_repeated_friction_impact": "",
+          "bk2105_pressure_source": [],
+          "bk2106_repeated_mechanical_exposure": "",
+          "bk2106_noncorrectable_posture": "",
+          "bk2106_prolonged_joint_position": "",
+          "bk2106_pressure_source": [],
+          "bk2103_vibration_tool_type": [
+            "grinder",
+            "jackhammer",
+            "impact_wrench",
+            "other"
+          ],
+          "bk2103_daily_vibration_hours": "2.5",
+          "bk2103_handheld_or_guided": "",
+          "bk2103_tool_pressing": "yes",
+          "bk2103_frequent_high_force_grip": ""
+        }
+      }
+    }
+  },
+  "groupExposureToggleOff": {
+    "updates": 2,
+    "changed": {
+      "entries": {
+        "job-a:dx-e2101a": {
+          "diagnosisId": "dx-e2101a",
+          "selectedBkType": "BK2101",
+          "bkSelectionMode": "auto",
+          "main_task_name": "배관 용접",
+          "direct_anatomic_link": "yes",
+          "exposure_types": [
+            "force"
+          ],
+          "repetition_level": "",
+          "daily_exposure_hours": "4.5",
+          "shift_share_percent": "60",
+          "days_per_week": "5",
+          "work_pattern": "continuous",
+          "rest_distribution": "insufficient",
+          "force_level": "high",
+          "awkward_posture_level": "occasional",
+          "static_holding_level": "frequent",
+          "direct_pressure_level": "",
+          "vibration_exposure": "",
+          "bk2101_cycle_seconds": "20",
+          "bk2101_repetition_per_hour": "",
+          "bk2101_monotony": "yes",
+          "bk2101_forced_dorsal_extension": "frequent",
+          "bk2101_prosupination": "occasional",
+          "bk2105_elbow_leaning": "",
+          "bk2105_repeated_friction_impact": "",
+          "bk2105_pressure_source": [],
+          "bk2106_repeated_mechanical_exposure": "",
+          "bk2106_noncorrectable_posture": "",
+          "bk2106_prolonged_joint_position": "",
+          "bk2106_pressure_source": [],
+          "bk2103_vibration_tool_type": [],
+          "bk2103_daily_vibration_hours": "",
+          "bk2103_handheld_or_guided": "",
+          "bk2103_tool_pressing": "",
+          "bk2103_frequent_high_force_grip": ""
+        },
+        "job-a:dx-e2101b": {
+          "diagnosisId": "dx-e2101b",
+          "selectedBkType": "BK2101",
+          "bkSelectionMode": "auto",
+          "main_task_name": "다른 작업",
+          "direct_anatomic_link": "yes",
+          "exposure_types": [
+            "force"
+          ],
+          "repetition_level": "",
+          "daily_exposure_hours": "4.5",
+          "shift_share_percent": "60",
+          "days_per_week": "5",
+          "work_pattern": "continuous",
+          "rest_distribution": "insufficient",
+          "force_level": "high",
+          "awkward_posture_level": "occasional",
+          "static_holding_level": "frequent",
+          "direct_pressure_level": "",
+          "vibration_exposure": "",
+          "bk2101_cycle_seconds": "20",
+          "bk2101_repetition_per_hour": "",
+          "bk2101_monotony": "yes",
+          "bk2101_forced_dorsal_extension": "frequent",
+          "bk2101_prosupination": "occasional",
+          "bk2105_elbow_leaning": "",
+          "bk2105_repeated_friction_impact": "",
+          "bk2105_pressure_source": [],
+          "bk2106_repeated_mechanical_exposure": "",
+          "bk2106_noncorrectable_posture": "",
+          "bk2106_prolonged_joint_position": "",
+          "bk2106_pressure_source": [],
+          "bk2103_vibration_tool_type": [],
+          "bk2103_daily_vibration_hours": "",
+          "bk2103_handheld_or_guided": "",
+          "bk2103_tool_pressing": "",
+          "bk2103_frequent_high_force_grip": ""
+        }
+      }
+    }
+  },
+  "entryDirectLinkNo": {
+    "updates": 1,
+    "changed": {
+      "entries": {
+        "job-a:dx-e2103": {
+          "diagnosisId": "dx-e2103",
+          "selectedBkType": "BK2103",
+          "bkSelectionMode": "manual",
+          "main_task_name": "배관 용접",
+          "direct_anatomic_link": "no",
+          "exposure_types": [
+            "repetition",
+            "force"
+          ],
+          "repetition_level": "frequent",
+          "daily_exposure_hours": "4.5",
+          "shift_share_percent": "60",
+          "days_per_week": "5",
+          "work_pattern": "continuous",
+          "rest_distribution": "insufficient",
+          "force_level": "high",
+          "awkward_posture_level": "occasional",
+          "static_holding_level": "",
+          "direct_pressure_level": "",
+          "vibration_exposure": "present",
+          "bk2101_cycle_seconds": "",
+          "bk2101_repetition_per_hour": "",
+          "bk2101_monotony": "",
+          "bk2101_forced_dorsal_extension": "",
+          "bk2101_prosupination": "",
+          "bk2105_elbow_leaning": "",
+          "bk2105_repeated_friction_impact": "",
+          "bk2105_pressure_source": [],
+          "bk2106_repeated_mechanical_exposure": "",
+          "bk2106_noncorrectable_posture": "",
+          "bk2106_prolonged_joint_position": "",
+          "bk2106_pressure_source": [],
+          "bk2103_vibration_tool_type": [
+            "grinder",
+            "jackhammer",
+            "impact_wrench",
+            "other"
+          ],
+          "bk2103_daily_vibration_hours": "2.5",
+          "bk2103_handheld_or_guided": "",
+          "bk2103_tool_pressing": "yes",
+          "bk2103_frequent_high_force_grip": ""
+        }
+      }
+    }
+  },
+  "entryForceLevelMild": {
+    "updates": 1,
+    "changed": {
+      "entries": {
+        "job-a:dx-e2103": {
+          "diagnosisId": "dx-e2103",
+          "selectedBkType": "BK2103",
+          "bkSelectionMode": "manual",
+          "main_task_name": "배관 용접",
+          "direct_anatomic_link": "yes",
+          "exposure_types": [
+            "repetition",
+            "force"
+          ],
+          "repetition_level": "frequent",
+          "daily_exposure_hours": "4.5",
+          "shift_share_percent": "60",
+          "days_per_week": "5",
+          "work_pattern": "continuous",
+          "rest_distribution": "insufficient",
+          "force_level": "mild",
+          "awkward_posture_level": "occasional",
+          "static_holding_level": "",
+          "direct_pressure_level": "",
+          "vibration_exposure": "present",
+          "bk2101_cycle_seconds": "",
+          "bk2101_repetition_per_hour": "",
+          "bk2101_monotony": "",
+          "bk2101_forced_dorsal_extension": "",
+          "bk2101_prosupination": "",
+          "bk2105_elbow_leaning": "",
+          "bk2105_repeated_friction_impact": "",
+          "bk2105_pressure_source": [],
+          "bk2106_repeated_mechanical_exposure": "",
+          "bk2106_noncorrectable_posture": "",
+          "bk2106_prolonged_joint_position": "",
+          "bk2106_pressure_source": [],
+          "bk2103_vibration_tool_type": [
+            "grinder",
+            "jackhammer",
+            "impact_wrench",
+            "other"
+          ],
+          "bk2103_daily_vibration_hours": "2.5",
+          "bk2103_handheld_or_guided": "",
+          "bk2103_tool_pressing": "yes",
+          "bk2103_frequent_high_force_grip": ""
+        }
+      }
+    }
+  },
+  "entryDailyHours": {
+    "updates": 1,
+    "changed": {
+      "entries": {
+        "job-a:dx-e2103": {
+          "diagnosisId": "dx-e2103",
+          "selectedBkType": "BK2103",
+          "bkSelectionMode": "manual",
+          "main_task_name": "배관 용접",
+          "direct_anatomic_link": "yes",
+          "exposure_types": [
+            "repetition",
+            "force"
+          ],
+          "repetition_level": "frequent",
+          "daily_exposure_hours": "7",
+          "shift_share_percent": "60",
+          "days_per_week": "5",
+          "work_pattern": "continuous",
+          "rest_distribution": "insufficient",
+          "force_level": "high",
+          "awkward_posture_level": "occasional",
+          "static_holding_level": "",
+          "direct_pressure_level": "",
+          "vibration_exposure": "present",
+          "bk2101_cycle_seconds": "",
+          "bk2101_repetition_per_hour": "",
+          "bk2101_monotony": "",
+          "bk2101_forced_dorsal_extension": "",
+          "bk2101_prosupination": "",
+          "bk2105_elbow_leaning": "",
+          "bk2105_repeated_friction_impact": "",
+          "bk2105_pressure_source": [],
+          "bk2106_repeated_mechanical_exposure": "",
+          "bk2106_noncorrectable_posture": "",
+          "bk2106_prolonged_joint_position": "",
+          "bk2106_pressure_source": [],
+          "bk2103_vibration_tool_type": [
+            "grinder",
+            "jackhammer",
+            "impact_wrench",
+            "other"
+          ],
+          "bk2103_daily_vibration_hours": "2.5",
+          "bk2103_handheld_or_guided": "",
+          "bk2103_tool_pressing": "yes",
+          "bk2103_frequent_high_force_grip": ""
+        }
+      }
+    }
+  },
+  "groupTaskName": {
+    "updates": 2,
+    "changed": {
+      "entries": {
+        "job-a:dx-e2101a": {
+          "diagnosisId": "dx-e2101a",
+          "selectedBkType": "BK2101",
+          "bkSelectionMode": "auto",
+          "main_task_name": "새 작업명",
+          "direct_anatomic_link": "yes",
+          "exposure_types": [
+            "repetition",
+            "force"
+          ],
+          "repetition_level": "frequent",
+          "daily_exposure_hours": "4.5",
+          "shift_share_percent": "60",
+          "days_per_week": "5",
+          "work_pattern": "continuous",
+          "rest_distribution": "insufficient",
+          "force_level": "high",
+          "awkward_posture_level": "occasional",
+          "static_holding_level": "frequent",
+          "direct_pressure_level": "",
+          "vibration_exposure": "",
+          "bk2101_cycle_seconds": "20",
+          "bk2101_repetition_per_hour": "",
+          "bk2101_monotony": "yes",
+          "bk2101_forced_dorsal_extension": "frequent",
+          "bk2101_prosupination": "occasional",
+          "bk2105_elbow_leaning": "",
+          "bk2105_repeated_friction_impact": "",
+          "bk2105_pressure_source": [],
+          "bk2106_repeated_mechanical_exposure": "",
+          "bk2106_noncorrectable_posture": "",
+          "bk2106_prolonged_joint_position": "",
+          "bk2106_pressure_source": [],
+          "bk2103_vibration_tool_type": [],
+          "bk2103_daily_vibration_hours": "",
+          "bk2103_handheld_or_guided": "",
+          "bk2103_tool_pressing": "",
+          "bk2103_frequent_high_force_grip": ""
+        },
+        "job-a:dx-e2101b": {
+          "diagnosisId": "dx-e2101b",
+          "selectedBkType": "BK2101",
+          "bkSelectionMode": "auto",
+          "main_task_name": "새 작업명",
+          "direct_anatomic_link": "yes",
+          "exposure_types": [
+            "repetition",
+            "force"
+          ],
+          "repetition_level": "frequent",
+          "daily_exposure_hours": "4.5",
+          "shift_share_percent": "60",
+          "days_per_week": "5",
+          "work_pattern": "continuous",
+          "rest_distribution": "insufficient",
+          "force_level": "high",
+          "awkward_posture_level": "occasional",
+          "static_holding_level": "frequent",
+          "direct_pressure_level": "",
+          "vibration_exposure": "",
+          "bk2101_cycle_seconds": "20",
+          "bk2101_repetition_per_hour": "",
+          "bk2101_monotony": "yes",
+          "bk2101_forced_dorsal_extension": "frequent",
+          "bk2101_prosupination": "occasional",
+          "bk2105_elbow_leaning": "",
+          "bk2105_repeated_friction_impact": "",
+          "bk2105_pressure_source": [],
+          "bk2106_repeated_mechanical_exposure": "",
+          "bk2106_noncorrectable_posture": "",
+          "bk2106_prolonged_joint_position": "",
+          "bk2106_pressure_source": [],
+          "bk2103_vibration_tool_type": [],
+          "bk2103_daily_vibration_hours": "",
+          "bk2103_handheld_or_guided": "",
+          "bk2103_tool_pressing": "",
+          "bk2103_frequent_high_force_grip": ""
+        }
+      }
+    }
+  },
+  "entryMultiToggleOff": {
+    "updates": 1,
+    "changed": {
+      "entries": {
+        "job-a:dx-e2103": {
+          "diagnosisId": "dx-e2103",
+          "selectedBkType": "BK2103",
+          "bkSelectionMode": "manual",
+          "main_task_name": "배관 용접",
+          "direct_anatomic_link": "yes",
+          "exposure_types": [
+            "repetition",
+            "force"
+          ],
+          "repetition_level": "frequent",
+          "daily_exposure_hours": "4.5",
+          "shift_share_percent": "60",
+          "days_per_week": "5",
+          "work_pattern": "continuous",
+          "rest_distribution": "insufficient",
+          "force_level": "high",
+          "awkward_posture_level": "occasional",
+          "static_holding_level": "",
+          "direct_pressure_level": "",
+          "vibration_exposure": "present",
+          "bk2101_cycle_seconds": "",
+          "bk2101_repetition_per_hour": "",
+          "bk2101_monotony": "",
+          "bk2101_forced_dorsal_extension": "",
+          "bk2101_prosupination": "",
+          "bk2105_elbow_leaning": "",
+          "bk2105_repeated_friction_impact": "",
+          "bk2105_pressure_source": [],
+          "bk2106_repeated_mechanical_exposure": "",
+          "bk2106_noncorrectable_posture": "",
+          "bk2106_prolonged_joint_position": "",
+          "bk2106_pressure_source": [],
+          "bk2103_vibration_tool_type": [
+            "jackhammer",
+            "impact_wrench",
+            "other"
+          ],
+          "bk2103_daily_vibration_hours": "2.5",
+          "bk2103_handheld_or_guided": "",
+          "bk2103_tool_pressing": "yes",
+          "bk2103_frequent_high_force_grip": ""
+        }
+      }
+    }
+  },
+  "entryMultiToggleOn": {
+    "updates": 1,
+    "changed": {
+      "entries": {
+        "job-a:dx-e2103": {
+          "diagnosisId": "dx-e2103",
+          "selectedBkType": "BK2103",
+          "bkSelectionMode": "manual",
+          "main_task_name": "배관 용접",
+          "direct_anatomic_link": "yes",
+          "exposure_types": [
+            "repetition",
+            "force"
+          ],
+          "repetition_level": "frequent",
+          "daily_exposure_hours": "4.5",
+          "shift_share_percent": "60",
+          "days_per_week": "5",
+          "work_pattern": "continuous",
+          "rest_distribution": "insufficient",
+          "force_level": "high",
+          "awkward_posture_level": "occasional",
+          "static_holding_level": "",
+          "direct_pressure_level": "",
+          "vibration_exposure": "present",
+          "bk2101_cycle_seconds": "",
+          "bk2101_repetition_per_hour": "",
+          "bk2101_monotony": "",
+          "bk2101_forced_dorsal_extension": "",
+          "bk2101_prosupination": "",
+          "bk2105_elbow_leaning": "",
+          "bk2105_repeated_friction_impact": "",
+          "bk2105_pressure_source": [],
+          "bk2106_repeated_mechanical_exposure": "",
+          "bk2106_noncorrectable_posture": "",
+          "bk2106_prolonged_joint_position": "",
+          "bk2106_pressure_source": [],
+          "bk2103_vibration_tool_type": [
+            "grinder",
+            "jackhammer",
+            "impact_wrench"
+          ],
+          "bk2103_daily_vibration_hours": "2.5",
+          "bk2103_handheld_or_guided": "",
+          "bk2103_tool_pressing": "yes",
+          "bk2103_frequent_high_force_grip": ""
+        }
+      }
+    }
+  },
+  "temporalRecentTaskChange": {
+    "updates": 1,
+    "changed": {
+      "temporalSequence": {
+        "recent_task_change": "new_task",
+        "task_change_date": "2015-03-01",
+        "symptom_onset_interval": "",
+        "improves_with_rest": "yes"
+      },
+      "entries": {}
+    }
+  },
+  "temporalTaskChangeDate": {
+    "updates": 1,
+    "changed": {
+      "temporalSequence": {
+        "recent_task_change": "increased_load",
+        "task_change_date": "2016-07-01",
+        "symptom_onset_interval": "",
+        "improves_with_rest": "yes"
+      },
+      "entries": {}
+    }
+  }
+}
