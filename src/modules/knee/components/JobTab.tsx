@@ -2,6 +2,7 @@ import type { SharedJob } from '@wr/contracts';
 import { calculatePhysicalBurden } from '../utils/calculations';
 import { createKneeJobExtras } from '../utils/data';
 import { upsertJobExtra } from '../../../core/utils/jobExtras';
+import { formatJobTitle } from '../../../core/utils/jobLabels';
 
 type KneeCheckKey = 'stairs' | 'kneeTwist' | 'startStop' | 'tightSpace' | 'kneeContact' | 'jumpDown';
 
@@ -47,7 +48,7 @@ export function JobTab({ sharedJobs, jobExtras, onChange, errors }: JobTabProps)
           <div key={job.id} className="job-card">
             <div className="job-card-header">
               <div className="card-title-stack">
-                <span className="job-card-title">직력 {i + 1}: {job.jobName || '(미입력)'}</span>
+                <span className="job-card-title">{formatJobTitle(i + 1, job.jobName)}</span>
                 <span className="job-meta-line">직종별 하중과 자세 부담을 따로 기록합니다.</span>
               </div>
               <span className={`job-badge ${bc}`}>{b.level} ({b.minScore}~{b.maxScore})</span>

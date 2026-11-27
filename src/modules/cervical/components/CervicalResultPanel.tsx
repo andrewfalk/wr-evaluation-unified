@@ -1,4 +1,5 @@
 import type { CervicalCalcResult, FlagItem, JobSummary } from '@wr/analytics-core/modules/cervical/index';
+import { jobNameOrEmpty } from '../../../core/utils/jobLabels';
 
 function FlagPill({ flag }: { flag: FlagItem }) {
   return (
@@ -25,7 +26,7 @@ function SummaryCard({ summary }: { summary: JobSummary }) {
 
   return (
     <div className="result-detail-card">
-      <div className="result-card-title">{summary.jobName || '직업 미입력'}</div>
+      <div className="result-card-title">{jobNameOrEmpty(summary.jobName)}</div>
       <div className="result-card-meta">
         완료 작업 {summary.completedTaskCount}/{summary.totalTaskCount}
       </div>

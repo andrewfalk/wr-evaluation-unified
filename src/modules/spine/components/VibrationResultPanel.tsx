@@ -1,4 +1,5 @@
 import { WBV_FORMULA_LABEL, WBV_FORMULA_TITLE } from '../utils/formulaVersion';
+import { formatJobTitle, formatPeriodYears } from '../../../core/utils/jobLabels';
 import type { VibrationCalcResult } from '@wr/analytics-core/modules/spine/index';
 
 const riskIcon = { danger: '⛔', warning: '⚠️', safe: '✅' };
@@ -115,7 +116,7 @@ export function VibrationResultPanel({ calc }: VibrationResultPanelProps) {
               {jobResults.map((jr, i) => (
                 (jr.intervals || []).length > 0 && (
                   <div key={jr.jobId} className="result-detail-card">
-                    <div className="result-card-title">직력{i + 1}: {jr.jobName} ({jr.periodYears.toFixed(1)}년)</div>
+                    <div className="result-card-title">{formatJobTitle(i + 1, jr.jobName)} ({formatPeriodYears(jr.periodYears)})</div>
                     <div className="result-metric-list result-metric-list-spaced">
                       <div className="result-metric-row"><span>일일 Amax(8)</span><strong>{fmt(jr.amax8.min)} ~ {fmt(jr.amax8.max)} m/s²</strong></div>
                       <div className="result-metric-row"><span>평생 DV</span><strong>{fmt(jr.dv.min, 0)} ~ {fmt(jr.dv.max, 0)} (m/s²)²</strong></div>

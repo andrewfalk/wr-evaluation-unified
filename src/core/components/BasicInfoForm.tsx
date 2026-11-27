@@ -4,6 +4,7 @@ import type { SharedData, SharedJob } from '@wr/contracts';
 import { calculateBMI, calculateAge } from '../utils/common';
 import { formatWorkPeriod } from '../utils/workPeriod';
 import { createSharedJob } from '../utils/data';
+import { formatJobNumber } from '../utils/jobLabels';
 import { PresetSearch } from './PresetSearch';
 
 import { hasIntranetSession } from '../../platform/dataMode';
@@ -196,7 +197,7 @@ export function BasicInfoForm({
             <div className="job-card-header">
               <div className="card-title-stack">
                 <span className="job-card-title">
-                  직력 {i + 1}
+                  {formatJobNumber(i + 1)}
                   {job.excludeFromAnalysis === true && <span className="job-badge badge-medium-high job-excluded-badge">신체부담평가 미포함</span>}
                 </span>
                 <span className="job-card-subtitle">해당 직무의 기간과 근무 조건을 입력합니다.</span>

@@ -1,4 +1,5 @@
 import { NoEvaluableJobsNotice } from '../../../core/components/NoEvaluableJobsNotice';
+import { formatJobTitle, formatPeriodYears } from '../../../core/utils/jobLabels';
 import type { ShoulderCalcResult } from '@wr/analytics-core/modules/shoulder/index';
 
 function RatioBar({ ratio }: { ratio: number }) {
@@ -89,10 +90,10 @@ export function ShoulderResultPanel({ calc }: ShoulderResultPanelProps) {
               {jobsWithData.map((j, idx) => (
                 <div key={j.id} className="result-detail-card">
                   <div className="result-card-title">
-                    직력 {idx + 1}: {j.jobName as string}
+                    {formatJobTitle(idx + 1, j.jobName as string)}
                   </div>
                   <div className="result-card-meta">
-                    {j.periodYears > 0 ? `${j.periodYears.toFixed(1)}년` : '-'} · {j.workDaysPerYear}일/년
+                    {formatPeriodYears(j.periodYears)} · {j.workDaysPerYear}일/년
                   </div>
                   <div className="result-table-wrap result-table-wrap-spaced">
                     <table className="result-table">
