@@ -1,6 +1,7 @@
 import type { SharedJob } from '@wr/contracts';
 import { createShoulderJobExtras } from '../utils/data';
 import { upsertJobExtra } from '../../../core/utils/jobExtras';
+import { formatJobTitle } from '../../../core/utils/jobLabels';
 
 type ShoulderHourKey = 'overheadHours' | 'repetitiveMediumHours' | 'repetitiveFastHours' | 'vibrationHours';
 
@@ -52,7 +53,7 @@ export function JobTab({ sharedJobs, jobExtras, onChange, errors }: JobTabProps)
           <div key={job.id} className="job-card">
             <div className="job-card-header">
               <div className="card-title-stack">
-                <span className="job-card-title">직력 {i + 1}: {job.jobName || '(미입력)'}</span>
+                <span className="job-card-title">{formatJobTitle(i + 1, job.jobName)}</span>
                 <span className="job-meta-line">시간 기반 노출과 중량물 취급 빈도를 함께 기록합니다.</span>
               </div>
               {!hasInput && (

@@ -3,6 +3,7 @@
 // 두 결과 패널에서 라벨과 className 접두만 다른 같은 코드였다. 모듈마다 다른 것은 config로 받는다 — className 접두
 // (`elbow`·`wrist` — 지금과 같은 className을 낸다, `.ul-` 통합은 C10), 빈 상병 이름, 지표·위험 요인 라벨, BK 유형 라벨,
 // 공통 노출 유형 문구·그룹 합치기(모듈 계산의 함수). 결과 패널 본문(시간적 선후관계·직업별 묶음)은 두 벌로 남는다.
+import { jobNameOrEmpty } from '../../../core/utils/jobLabels';
 
 /** 카드가 읽는 표시 신호의 모양(모듈 계산의 FlagItem). */
 export interface UpperLimbFlagLike {
@@ -82,7 +83,7 @@ export function SummaryCard<S extends UpperLimbResultSummary>({ summary, config 
     <div className={`result-detail-card ${p}-summary-card`}>
       <div className="result-card-title">{diag.code || '-'} {diag.name || config.emptyDiagnosisName}</div>
       <div className="result-card-meta">
-        {summary.jobName || '직업 미입력'}
+        {jobNameOrEmpty(summary.jobName)}
         {' · '}
         {config.getSideText(diag.side)}
         {' · '}

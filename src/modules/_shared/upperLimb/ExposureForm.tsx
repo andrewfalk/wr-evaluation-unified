@@ -10,6 +10,7 @@
 // vi.mock('../components/ExposureForm')가 그대로 듣게).
 import type { ComponentType } from 'react';
 import { getSideText } from '../../../core/i18n/sideLabels';
+import { formatJobTitle } from '../../../core/utils/jobLabels';
 
 /** 화면이 다루는 엔트리(두 모듈 계산 타입의 공통 모양 + 필드 이름으로 읽고 쓰는 칸). */
 export interface UpperLimbFormEntry {
@@ -665,7 +666,7 @@ export function UpperLimbExposureForm({
     <div className={`job-card ${p}-job-card`}>
       <div className="job-card-header">
         <div className="card-title-stack">
-          <span className="job-card-title">직력 {jobIndex + 1}: {job.jobName || '(미입력)'}</span>
+          <span className="job-card-title">{formatJobTitle(jobIndex + 1, job.jobName)}</span>
           <span className="job-card-subtitle">{config.labels.jobCardSubtitle}</span>
         </div>
         <span className="job-badge badge-low">{groupCount}개 항목 / {diagnoses.length}개 상병</span>

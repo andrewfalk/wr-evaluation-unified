@@ -1,6 +1,7 @@
 import { BK_TYPE_LABELS } from '../utils/data';
 import { formatCommonExposureTypeText, groupSummariesByBkType, mergeBkGroupSummaries } from '../utils/calculations';
 import { getSideText } from '../../../core/i18n/sideLabels';
+import { jobNameOrEmpty } from '../../../core/utils/jobLabels';
 import type { DiagnosisSummary, ElbowCalcResult } from '@wr/analytics-core/modules/elbow/index';
 import { BkGroupSummaryCard, MissingList, SummaryCard } from '../../_shared/upperLimb/ResultCards';
 import type { UpperLimbResultCardConfig } from '../../_shared/upperLimb/ResultCards';
@@ -137,7 +138,7 @@ export function ElbowResultPanel({ calc, temporalSequence, onTemporalChange }: E
         <div className="result-detail-stack">
           {(calc.jobSummaries || []).map(jobSummary => (
             <div key={jobSummary.sharedJobId} className="result-detail-card">
-              <div className="result-card-title">{jobSummary.jobName || '직업 미입력'}</div>
+              <div className="result-card-title">{jobNameOrEmpty(jobSummary.jobName)}</div>
               <div className="result-card-meta">
                 완료 {jobSummary.completedCount}/{jobSummary.diagnosisSummaries.length}
                 {' · '}

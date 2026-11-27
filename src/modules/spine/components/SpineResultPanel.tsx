@@ -3,6 +3,7 @@ import { thresholds } from '../utils/thresholds';
 import { convertTimeToSeconds, classifySpineSeverity } from '../utils/calculations';
 import { getSpineInterpretation } from '../utils/sectionText';
 import { SPINE_FORMULA_V513 } from '../utils/formulaVersion';
+import { formatJobTitle, formatPeriodYears } from '../../../core/utils/jobLabels';
 import type { MddmJobResult, SpineCalcResult, SpineTask } from '@wr/analytics-core/modules/spine/index';
 
 // 계산(analytics-core mddm.ts)이 작업마다 force를 숫자로 채운다 — 패널은 계산이 끝난 작업만 그린다.
@@ -161,7 +162,7 @@ export function SpineResultPanel({ calc }: SpineResultPanelProps) {
           <div className="result-detail-stack">
           {jobResults.map((jr, i) => (
             <div key={jr.jobId} className="result-detail-card">
-              <div className="result-card-title">직력{i + 1}: {jr.jobName} ({jr.periodYears.toFixed(1)}년)</div>
+              <div className="result-card-title">{formatJobTitle(i + 1, jr.jobName)} ({formatPeriodYears(jr.periodYears)})</div>
               <div className="result-metric-list result-metric-list-spaced">
                 <div className="result-metric-row"><span>일일선량</span><strong>{jr.dailyDose.dailyDoseKNh.toFixed(2)} kN{'\xB7'}h</strong></div>
                 <div className="result-metric-row">
