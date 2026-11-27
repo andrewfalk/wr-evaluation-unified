@@ -52,7 +52,5 @@
   "src/core/utils/patientScope.js",
   "src/core/utils/workspaceAutosavePolicy.js",
   "src/modules/cervical/components/TaskEditor.jsx",
-  "src/modules/elbow/components/ExposureForm.jsx",
-  "src/modules/spine/components/SpineResultPanel.jsx",
-  "src/modules/wrist/components/ExposureForm.jsx"
+  "src/modules/spine/components/SpineResultPanel.jsx"
 ]
