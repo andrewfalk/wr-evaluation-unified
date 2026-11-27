@@ -1,24 +1,42 @@
+import type { SharedJob } from '@wr/contracts';
 import { createShoulderJobExtras } from '../utils/data';
 
-const GENERIC_FIELDS = [
+type ShoulderHourKey = 'overheadHours' | 'repetitiveMediumHours' | 'repetitiveFastHours' | 'vibrationHours';
+
+/** 직력별 어깨 입력(createShoulderJobExtras의 모양 — JS 팩토리의 추론 타입은 evidenceSources가 never[]라 따로 적는다). */
+export interface ShoulderJobExtras extends Record<ShoulderHourKey, string> {
+  sharedJobId: string;
+  heavyLoadCount: string;
+  heavyLoadSeconds: string;
+  evidenceSources: unknown[];
+}
+
+const GENERIC_FIELDS: Array<{ key: ShoulderHourKey; label: string; unit: string }> = [
   { key: 'overheadHours',        label: '오버헤드/어깨높이 이상 작업', unit: '시간/일' },
   { key: 'repetitiveMediumHours', label: '반복동작 중간속도 (4~14회/분)', unit: '시간/일' },
   { key: 'repetitiveFastHours',  label: '반복동작 고도 (≥15회/분)',     unit: '시간/일' },
   { key: 'vibrationHours',       label: '손-팔 진동 (≥3 m/s²)',        unit: '시간/일' },
 ];
 
-export function JobTab({ sharedJobs, jobExtras, onChange, errors }) {
-  const getExtras = (sharedJobId) =>
+export interface JobTabProps {
+  sharedJobs: Array<Pick<SharedJob, 'id' | 'jobName'>>;
+  jobExtras: ShoulderJobExtras[];
+  onChange: (extras: ShoulderJobExtras[]) => void;
+  errors?: { jobs?: string } | null;
+}
+
+export function JobTab({ sharedJobs, jobExtras, onChange, errors }: JobTabProps) {
+  const getExtras = (sharedJobId: string) =>
     jobExtras.find(e => e.sharedJobId === sharedJobId);
 
-  const handleExtra = (sharedJobId, field, value) => {
+  const handleExtra = (sharedJobId: string, field: keyof ShoulderJobExtras, value: string) => {
     const updated = [...jobExtras];
     const idx = updated.findIndex(e => e.sharedJobId === sharedJobId);
     if (idx >= 0) {
       updated[idx] = { ...updated[idx], [field]: value };
     } else {
       const newExtra = createShoulderJobExtras(sharedJobId);
-      newExtra[field] = value;
+      (newExtra as Record<keyof ShoulderJobExtras, unknown>)[field] = value;
       updated.push(newExtra);
     }
     onChange(updated);
