@@ -253,7 +253,8 @@ describe('P2-67b — 팔꿈치·손목 평가 화면', () => {
       const mountUpdates = view.updates.length;
       act(() => action(view.container, cfg));
       const after = view.current();
-      result[name] = { updates: view.updates.length - mountUpdates, changed: changedParts(before, after) };
+      // 조작 뒤 다시 그린 화면의 폼 상태도 적는다 — 데이터는 맞게 바뀌었는데 화면이 옛 선택값을 보이는 회귀를 잡는다(Codex 2회차 권고).
+      result[name] = { updates: view.updates.length - mountUpdates, changed: changedParts(before, after), formAfter: formState(view.container) };
       view.unmount();
     }
     await expect(goldenJson(result)).toMatchFileSnapshot(`./__goldens__/twin-screen-${cfg.id}-actions.json`);
