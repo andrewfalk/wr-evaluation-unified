@@ -1,0 +1,88 @@
+[
+  {
+    "elbow": [
+      "  { value: 'increased_load', label: '부하 증가' },"
+    ],
+    "wrist": [
+      "  { value: 'increased_load', label: '부담 증가' },"
+    ]
+  },
+  {
+    "elbow": [
+      "          <p className=\"section-description\">작업 변화와 증상 발생 순서를 팔꿈치 모듈 전체에 공통으로 한 번 입력합니다.</p>"
+    ],
+    "wrist": [
+      "          <p className=\"section-description\">작업 변화와 증상 발생의 시간 흐름을 손목 모듈 전체에 공통으로 입력합니다.</p>"
+    ]
+  },
+  {
+    "elbow": [
+      "          <label>휴가/업무중단 시 호전</label>"
+    ],
+    "wrist": [
+      "          <label>휴식/업무중단 시 호전</label>"
+    ]
+  },
+  {
+    "elbow": [
+      "  emptyDiagnosisName: '팔꿈치 상병',",
+      "  labels: { exposureTypes: '공통 핵심 노출유형', shiftShare: '하루 작업 비중', riskFactors: '업무에 포함된 위험 요인:' },"
+    ],
+    "wrist": [
+      "  emptyDiagnosisName: '손목 상병',",
+      "  labels: { exposureTypes: '공통 노출 유형', shiftShare: '근무시간 비중', riskFactors: '업무관련성 위험 요인:' },"
+    ]
+  },
+  {
+    "elbow": [
+      "          <h2 className=\"section-title\"><span className=\"section-icon\">&#x1F4CA;</span>팔꿈치 신체부담 분석</h2>"
+    ],
+    "wrist": [
+      "          <h2 className=\"section-title\"><span className=\"section-icon\">&#x1F4CA;</span>손목/손가락 부담 분석</h2>"
+    ]
+  },
+  {
+    "elbow": [
+      "        {/* 시간적 선후관계 표시(P2-74c, 결정 3나) — 손목 결과와 같은 마크업. 칸은 항상 그리고, 표시가 없으면 '선후관계 확인되지 않음'. */}"
+    ],
+    "wrist": []
+  },
+  {
+    "elbow": [
+      "                <span key={flag.key} className={`twin-flag-pill tone-${flag.tone || 'neutral'}`} title={flag.description || ''}>"
+    ],
+    "wrist": [
+      "                <span key={flag.key} className={`elbow-flag-pill tone-${flag.tone || 'neutral'}`} title={flag.description || ''}>"
+    ]
+  },
+  {
+    "elbow": [
+      "            <MissingList classPrefix=\"twin\" title=\"공통 시간적 선후관계 입력 누락\" items={calc.missingCommonFields} />"
+    ],
+    "wrist": [
+      "            <MissingList classPrefix=\"twin\" title=\"시간적 선후관계 입력 누락\" items={calc.missingCommonFields} />"
+    ]
+  },
+  {
+    "elbow": [
+      "                활성 신호 {jobSummary.flagCount}개"
+    ],
+    "wrist": [
+      "                표시 신호 {jobSummary.flagCount}개"
+    ]
+  },
+  {
+    "elbow": [
+      "          <div className=\"evaluation-empty-state\">직업 또는 팔꿈치 상병이 없어 결과를 표시할 수 없습니다.</div>"
+    ],
+    "wrist": [
+      "          <div className=\"evaluation-empty-state\">직업 또는 손목 상병이 없어 결과를 표시할 수 없습니다.</div>"
+    ]
+  },
+  {
+    "elbow": [
+      ""
+    ],
+    "wrist": []
+  }
+]
