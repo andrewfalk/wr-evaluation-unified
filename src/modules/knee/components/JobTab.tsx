@@ -1,6 +1,7 @@
 import type { SharedJob } from '@wr/contracts';
 import { calculatePhysicalBurden } from '../utils/calculations';
 import { createKneeJobExtras } from '../utils/data';
+import { upsertJobExtra } from '../../../core/utils/jobExtras';
 
 type KneeCheckKey = 'stairs' | 'kneeTwist' | 'startStop' | 'tightSpace' | 'kneeContact' | 'jumpDown';
 
@@ -26,16 +27,7 @@ export function JobTab({ sharedJobs, jobExtras, onChange, errors }: JobTabProps)
   };
 
   const handleExtra = (sharedJobId: string, field: keyof KneeJobExtras, value: string | boolean) => {
-    const updated = [...jobExtras];
-    const idx = updated.findIndex(e => e.sharedJobId === sharedJobId);
-    if (idx >= 0) {
-      updated[idx] = { ...updated[idx], [field]: value };
-    } else {
-      const newExtra = createKneeJobExtras(sharedJobId);
-      (newExtra as Record<keyof KneeJobExtras, unknown>)[field] = value;
-      updated.push(newExtra);
-    }
-    onChange(updated);
+    onChange(upsertJobExtra(jobExtras, sharedJobId, createKneeJobExtras, { [field]: value } as Partial<KneeJobExtras>));
   };
 
   return (
