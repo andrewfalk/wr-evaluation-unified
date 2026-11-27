@@ -1,20 +1,38 @@
-// @ts-nocheck
 import { Fragment } from 'react';
 import { thresholds } from '../utils/thresholds';
 import { convertTimeToSeconds, classifySpineSeverity } from '../utils/calculations';
 import { getSpineInterpretation } from '../utils/sectionText';
 import { SPINE_FORMULA_V513 } from '../utils/formulaVersion';
+import type { MddmJobResult, SpineCalcResult, SpineTask } from '@wr/analytics-core/modules/spine/index';
 
-export function SpineResultPanel({ calc }) {
+// 계산(analytics-core mddm.ts)이 작업마다 force를 숫자로 채운다 — 패널은 계산이 끝난 작업만 그린다.
+interface PanelTask extends SpineTask {
+  force: number;
+}
+
+interface PanelJobResult extends MddmJobResult {
+  tasks: PanelTask[];
+}
+
+interface PanelCalc extends SpineCalcResult {
+  tasks: PanelTask[];
+  jobResults: PanelJobResult[];
+}
+
+export interface SpineResultPanelProps {
+  calc: SpineCalcResult | null | undefined;
+}
+
+export function SpineResultPanel({ calc }: SpineResultPanelProps) {
   // present일 때만 결과 패널 표시. unknown(미평가)·none(노출없음)은 공간 절약을 위해 미표시.
   const mddmStatus = calc?.mddmStatus || (calc?.dailyDose ? 'present' : 'unknown');
   if (mddmStatus !== 'present') return null;
   if (!calc?.dailyDose) return null;
 
-  const { tasks, jobResults, dailyDose, lifetimeDose, comparison, risk, workRelatedness, maxForce, gender, weightedDailyDose, formulaVersion } = calc;
+  const { tasks, jobResults, dailyDose, lifetimeDose, comparison, risk, workRelatedness, maxForce, gender, weightedDailyDose, formulaVersion } = calc as PanelCalc;
   const forceThreshold = thresholds.singleForce;
   const isV513 = formulaVersion === SPINE_FORMULA_V513;
-  const dailyDoseThreshold = thresholds.dailyDose[isV513 ? 'v513' : 'legacy'][gender];
+  const dailyDoseThreshold = thresholds.dailyDose[isV513 ? 'v513' : 'legacy'][gender as 'male' | 'female'];
   const formulaBadgeLabel = isV513 ? 'MDDM v5.1.3' : 'MDDM 레거시';
   const formulaBadgeTitle = isV513
     ? '정정된 MDDM 공식(D_r = √(ΣF²·t/8h)·8h) 적용 중. 신규 환자 또는 v5.1.3 이후 입력이 편집된 환자에 적용됩니다.'
@@ -88,7 +106,7 @@ export function SpineResultPanel({ calc }) {
 
       <div className={`result-risk-banner level-${risk.level}`}>
         <div className="result-risk-icon">
-          {riskIcon[risk.level]}
+          {riskIcon[risk.level as keyof typeof riskIcon]}
         </div>
         <div>
           <div className={`result-risk-title level-${risk.level}`}>{risk.text}</div>
@@ -110,7 +128,7 @@ export function SpineResultPanel({ calc }) {
           <div className="result-card-top result-card-top-tight">
             <div>
               <span className="result-card-title">{name}</span>
-              <span className={`result-status-badge level-${data.status}`}>{statusLabel[data.status]}</span>
+              <span className={`result-status-badge level-${data.status}`}>{statusLabel[data.status as keyof typeof statusLabel]}</span>
             </div>
             <div className="result-card-meta">
               <span className={`result-value-highlight ${data.status !== 'safe' ? `level-${data.status}` : ''}`}>{lifetimeDose.lifetimeDoseMNh.toFixed(1)}</span>
@@ -177,9 +195,9 @@ export function SpineResultPanel({ calc }) {
               <span>평생 누적 용량</span>
               <strong>0.00 MN{'\xB7'}h <span className="result-card-meta">(일 임계값 미만으로 누적 노출량이 0으로 계산됩니다)</span></strong>
             </div>
-          ) : lifetimeDose.totalYears > 0 && (
+          ) : (lifetimeDose.totalYears as number) > 0 && (
             <>
-              <div className="result-metric-row"><span>직업력</span><strong>{'\u00D7'} {lifetimeDose.totalYears.toFixed(1)}년</strong></div>
+              <div className="result-metric-row"><span>직업력</span><strong>{'\u00D7'} {(lifetimeDose.totalYears as number).toFixed(1)}년</strong></div>
               <div className="result-metric-row"><span>평생 누적 용량</span><strong>{lifetimeDose.lifetimeDoseMNh.toFixed(2)} MN{'\xB7'}h</strong></div>
             </>
           )}
@@ -223,9 +241,9 @@ export function SpineResultPanel({ calc }) {
   );
 }
 
-function renderTaskCard(task, forceThreshold) {
+function renderTaskCard(task: PanelTask, forceThreshold: number) {
   const included = task.force >= forceThreshold;
-  const timeH = (convertTimeToSeconds(task.timeValue, task.timeUnit) * task.frequency) / 3600;
+  const timeH = (convertTimeToSeconds(task.timeValue as number, task.timeUnit as string) * (task.frequency as number)) / 3600;
   const taskDose = included ? (task.force * Math.sqrt(timeH)) / 1000 : 0;
   const forceLevel = task.force >= 6000 ? 'danger' : task.force >= forceThreshold ? 'warning' : 'safe';
   return (
@@ -246,7 +264,7 @@ function renderTaskCard(task, forceThreshold) {
   );
 }
 
-function renderTaskCards(tasks, jobResults, forceThreshold) {
+function renderTaskCards(tasks: PanelTask[], jobResults: PanelJobResult[], forceThreshold: number) {
   if (jobResults && jobResults.length > 1) {
     return jobResults.map((jr, ji) => {
       const jrTasks = jr.tasks || [];
@@ -262,7 +280,15 @@ function renderTaskCards(tasks, jobResults, forceThreshold) {
   return tasks.map(task => renderTaskCard(task, forceThreshold));
 }
 
-function SummaryCard({ label, value, unit, sub, highlight }) {
+interface SummaryCardProps {
+  label: string;
+  value: string;
+  unit: string;
+  sub: string;
+  highlight?: boolean;
+}
+
+function SummaryCard({ label, value, unit, sub, highlight }: SummaryCardProps) {
   return (
     <div className={`result-summary-card ${highlight ? 'is-danger' : ''}`}>
       <div className="result-summary-label">{label}</div>

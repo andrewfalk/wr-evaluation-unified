@@ -1,4 +1,6 @@
-function FlagPill({ flag }) {
+import type { CervicalCalcResult, FlagItem, JobSummary } from '@wr/analytics-core/modules/cervical/index';
+
+function FlagPill({ flag }: { flag: FlagItem }) {
   return (
     <span className={`cervical-flag-pill tone-${flag.tone || 'neutral'}`} title={flag.description || ''}>
       <span>{flag.label}</span>
@@ -6,7 +8,7 @@ function FlagPill({ flag }) {
   );
 }
 
-function MissingList({ items }) {
+function MissingList({ items }: { items: string[] }) {
   if (!items || items.length === 0) return null;
   return (
     <div className="result-note">
@@ -16,7 +18,7 @@ function MissingList({ items }) {
   );
 }
 
-function SummaryCard({ summary }) {
+function SummaryCard({ summary }: { summary: JobSummary }) {
   const burdenIndicatorText = summary.flagItems?.length > 0
     ? summary.flagItems.map(flag => flag.label).join(', ')
     : '확인된 부담 지표 없음';
@@ -50,7 +52,11 @@ function SummaryCard({ summary }) {
   );
 }
 
-export function CervicalResultPanel({ calc }) {
+export interface CervicalResultPanelProps {
+  calc: CervicalCalcResult | null | undefined;
+}
+
+export function CervicalResultPanel({ calc }: CervicalResultPanelProps) {
   if (!calc) return null;
 
   return (

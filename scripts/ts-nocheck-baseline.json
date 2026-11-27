@@ -51,6 +51,5 @@
   "src/core/utils/jobHistory.js",
   "src/core/utils/patientScope.js",
   "src/core/utils/workspaceAutosavePolicy.js",
-  "src/modules/cervical/components/TaskEditor.jsx",
-  "src/modules/spine/components/SpineResultPanel.jsx"
+  "src/modules/cervical/components/TaskEditor.jsx"
 ]
