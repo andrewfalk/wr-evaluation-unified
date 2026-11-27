@@ -1,9 +1,8 @@
-// @ts-nocheck
 import {
   BK_TYPE_LABELS,
   BK_TYPE_OPTIONS,
   EXPOSURE_TYPE_OPTIONS,
-  resetWristBranchFields,
+  resetElbowBranchFields,
 } from '../utils/data';
 import {
   groupDiagnosesByBkType,
@@ -11,6 +10,24 @@ import {
 } from '../utils/calculations';
 import { DiseaseSpecificFields } from './DiseaseSpecificFields';
 import { getSideText } from '../../../core/i18n/sideLabels';
+import type { BkDiagnosisGroup, ElbowDiagnosis, ElbowDiagnosisEntry as CoreElbowDiagnosisEntry } from '@wr/analytics-core/modules/elbow/index';
+import type { ElbowDiagnosisEntry } from '../utils/data';
+
+/** 화면이 다루는 엔트리 — 계산 타입에 필드 이름으로 읽고 쓰는 칸(분기 필드·노출 세부)을 더한 것. */
+type Entry = CoreElbowDiagnosisEntry & { [field: string]: unknown };
+type Group = BkDiagnosisGroup;
+type GroupItem = Group['items'][number];
+type EntryPatch = Record<string, unknown>;
+type OnChangeEntry = (jobId: string, diagnosisId: string | undefined, patch: EntryPatch) => void;
+
+interface Option { value: string; label: string }
+
+interface ExposureDetail {
+  label: string;
+  field: string;
+  options: Option[];
+  twoByTwo?: boolean;
+}
 
 const DIRECT_LINK_OPTIONS = [
   { value: 'yes', label: '예' },
@@ -30,7 +47,7 @@ const REST_OPTIONS = [
 ];
 
 const COMMON_FORCE_OPTIONS = [
-  { value: 'mild', label: '경도' },
+  { value: 'mild', label: '경미' },
   { value: 'moderate', label: '중등도' },
   { value: 'high', label: '고강도' },
 ];
@@ -40,7 +57,7 @@ const COMMON_FREQUENCY_OPTIONS = [
   { value: 'frequent', label: '빈번' },
 ];
 
-const EXPOSURE_DETAIL_CONFIG = {
+const EXPOSURE_DETAIL_CONFIG: Record<string, ExposureDetail> = {
   repetition: {
     label: '반복 동작 정도',
     field: 'repetition_level',
@@ -53,13 +70,23 @@ const EXPOSURE_DETAIL_CONFIG = {
     twoByTwo: true,
   },
   awkward_posture: {
-    label: '부자연스러운 자세 정도',
+    label: '비중립 자세 정도',
     field: 'awkward_posture_level',
     options: COMMON_FREQUENCY_OPTIONS,
   },
 };
 
-function RadioGroup({ label, name, value, options, onChange, groupClassName = '', labelClassName = '' }) {
+interface RadioGroupProps {
+  label: string;
+  name: string;
+  value: unknown;
+  options: Option[];
+  onChange: (value: string) => void;
+  groupClassName?: string;
+  labelClassName?: string;
+}
+
+function RadioGroup({ label, name, value, options, onChange, groupClassName = '', labelClassName = '' }: RadioGroupProps) {
   return (
     <div className="form-group">
       <label>{label}</label>
@@ -83,7 +110,7 @@ function RadioGroup({ label, name, value, options, onChange, groupClassName = ''
 
 const BK_META_FIELDS = new Set(['diagnosisId', 'selectedBkType', 'bkSelectionMode', 'bkAutoSyncedFrom']);
 
-function scoreEntryFields(entry) {
+function scoreEntryFields(entry: Entry | null | undefined): number {
   if (!entry) return 0;
   return Object.entries(entry).filter(([key, value]) =>
     !BK_META_FIELDS.has(key) &&
@@ -94,11 +121,11 @@ function scoreEntryFields(entry) {
 
 // 어떤 BK유형을 선택(또는 재선택)했을 때, 이미 그 유형으로 입력된 다른 상병이 있으면
 // 그중 가장 많이 채워진 entry를 "기증자"로 찾는다. EntryCard(개별 선택)와 BkGroupCard(그룹 전환) 양쪽에서 공용으로 사용한다.
-function findGroupDonorEntry(allGroups, bkType, excludeDiagnosisId) {
+function findGroupDonorEntry(allGroups: Group[], bkType: string, excludeDiagnosisId: string | null | undefined): Entry | null {
   if (!bkType) return null;
   const group = allGroups.find(g => g.bkType === bkType);
   if (!group) return null;
-  let best = null;
+  let best: Entry | null = null;
   let bestScore = 0;
   group.items.forEach(({ diagnosis, entry }) => {
     if (!entry || diagnosis.id === excludeDiagnosisId) return;
@@ -111,18 +138,29 @@ function findGroupDonorEntry(allGroups, bkType, excludeDiagnosisId) {
   return best;
 }
 
-function hasEntryMismatch(items) {
+function hasEntryMismatch(items: GroupItem[]): boolean {
   if (items.length < 2) return false;
-  const first = items[0]?.entry;
+  const first = items[0]?.entry as Entry | null | undefined;
   if (!first) return false;
   const keys = Object.keys(first).filter(k => !BK_META_FIELDS.has(k));
   return items.slice(1).some(({ entry }) =>
-    entry && keys.some(k => JSON.stringify(first[k]) !== JSON.stringify(entry[k]))
+    entry && keys.some(k => {
+      const a = first[k]; const b = entry[k];
+      return JSON.stringify(a) !== JSON.stringify(b);
+    })
   );
 }
 
-function BkGroupCard({ jobId, bkType, items, allGroups, onChangeEntry }) {
-  const representativeEntry = pickRepresentativeEntry(items);
+interface BkGroupCardProps {
+  jobId: string;
+  bkType: string;
+  items: GroupItem[];
+  allGroups: Group[];
+  onChangeEntry: OnChangeEntry;
+}
+
+function BkGroupCard({ jobId, bkType, items, allGroups, onChangeEntry }: BkGroupCardProps) {
+  const representativeEntry = pickRepresentativeEntry(items) as Entry;
   const inputKey = `${jobId}_bk_${bkType || 'none'}`;
   const shouldShowExposureFields = representativeEntry.direct_anatomic_link === 'yes';
   const selectionModeLabel = representativeEntry.bkSelectionMode === 'manual' ? '수동 선택' : (representativeEntry.selectedBkType ? '자동 제안' : '자동 제안 없음');
@@ -131,7 +169,7 @@ function BkGroupCard({ jobId, bkType, items, allGroups, onChangeEntry }) {
   const autoSyncedNotes = items
     .filter(({ entry }) => entry?.bkAutoSyncedFrom)
     .map(({ diagnosis, entry }) => {
-      const donor = items.find(i => i.diagnosis.id === entry.bkAutoSyncedFrom)?.diagnosis;
+      const donor = items.find(i => i.diagnosis.id === (entry as Entry).bkAutoSyncedFrom)?.diagnosis;
       return {
         key: diagnosis.id,
         diagnosisLabel: `${diagnosis.code || '-'} ${diagnosis.name || ''}`.trim(),
@@ -139,7 +177,7 @@ function BkGroupCard({ jobId, bkType, items, allGroups, onChangeEntry }) {
       };
     });
 
-  const patchAll = (patch) => {
+  const patchAll = (patch: EntryPatch) => {
     items.forEach(({ diagnosis }) => onChangeEntry(jobId, diagnosis.id, patch));
   };
 
@@ -150,39 +188,41 @@ function BkGroupCard({ jobId, bkType, items, allGroups, onChangeEntry }) {
     items.forEach(({ diagnosis }) => onChangeEntry(jobId, diagnosis.id, copied));
   };
 
-  const handleBkChange = (nextBk) => {
+  const handleBkChange = (nextBk: string) => {
     const donor = findGroupDonorEntry(allGroups, nextBk, null);
     if (donor) {
-      const copied = Object.fromEntries(Object.entries(donor).filter(([k]) => !BK_META_FIELDS.has(k)));
+      const copied = Object.fromEntries(
+        Object.entries(donor).filter(([k]) => !BK_META_FIELDS.has(k))
+      );
       items.forEach(({ diagnosis }) =>
         onChangeEntry(jobId, diagnosis.id, { ...copied, selectedBkType: nextBk, bkSelectionMode: 'manual', bkAutoSyncedFrom: donor.diagnosisId })
       );
     } else {
       items.forEach(({ diagnosis }) => {
-        const cur = allGroups.flatMap(g => g.items).find(i => i.diagnosis.id === diagnosis.id)?.entry || {};
-        const reset = resetWristBranchFields(cur, nextBk);
+        const cur = (allGroups.flatMap(g => g.items).find(i => i.diagnosis.id === diagnosis.id)?.entry) || {};
+        const reset = resetElbowBranchFields(cur as ElbowDiagnosisEntry, nextBk);
         onChangeEntry(jobId, diagnosis.id, { ...reset, selectedBkType: nextBk, bkSelectionMode: 'manual' });
       });
     }
   };
 
-  const toggleExposureType = (value) => {
+  const toggleExposureType = (value: string) => {
     const current = representativeEntry.exposure_types || [];
     const next = current.includes(value) ? current.filter(i => i !== value) : [...current, value];
     const detailConfig = EXPOSURE_DETAIL_CONFIG[value];
-    const patch = { exposure_types: next };
+    const patch: EntryPatch = { exposure_types: next };
     if (detailConfig && !next.includes(value)) patch[detailConfig.field] = '';
     patchAll(patch);
   };
 
   return (
-    <div className="diagnosis-card wrist-diagnosis-card">
+    <div className="diagnosis-card elbow-diagnosis-card">
       <div className="diagnosis-card-header">
         <div className="card-title-stack">
           <span className="diagnosis-card-title">{BK_TYPE_LABELS[bkType] || 'BK 유형 미선택'}</span>
           <span className="diagnosis-card-subtitle">{diagSubtitle}</span>
         </div>
-        <div className="wrist-entry-badges">
+        <div className="elbow-entry-badges">
           <span className="diagnosis-module-badge">{items.length}개 상병 공통 입력</span>
           <span className={`job-badge ${representativeEntry.bkSelectionMode === 'manual' ? 'badge-medium-high' : 'badge-low'}`}>{selectionModeLabel}</span>
         </div>
@@ -201,7 +241,9 @@ function BkGroupCard({ jobId, bkType, items, allGroups, onChangeEntry }) {
         </div>
       ))}
       {items.length > 1 && (
-        <div className="result-note">BK 유형 변경 시 {items.length}개 상병 전체에 적용됩니다.</div>
+        <div className="result-note">
+          BK 유형 변경 시 {items.length}개 상병 전체에 적용됩니다.
+        </div>
       )}
 
       <div className="form-row">
@@ -225,7 +267,7 @@ function BkGroupCard({ jobId, bkType, items, allGroups, onChangeEntry }) {
 
       {shouldShowExposureFields && (
         <>
-          <div className="form-group wrist-task-name-group">
+          <div className="form-group elbow-task-name-group">
             <label>문제 작업명</label>
             <input
               value={representativeEntry.main_task_name}
@@ -234,7 +276,7 @@ function BkGroupCard({ jobId, bkType, items, allGroups, onChangeEntry }) {
             />
           </div>
 
-          <div className="form-row wrist-task-metrics-row">
+          <div className="form-row elbow-task-metrics-row">
             <div className="form-group">
               <label>1일 총시간(시간)</label>
               <input type="number" min="0" step="0.5" value={representativeEntry.daily_exposure_hours} onChange={e => patchAll({ daily_exposure_hours: e.target.value })} />
@@ -249,12 +291,12 @@ function BkGroupCard({ jobId, bkType, items, allGroups, onChangeEntry }) {
             </div>
           </div>
 
-          <div className="form-group wrist-common-exposure-group">
+          <div className="form-group elbow-common-exposure-group">
             <div className="result-section-title">[질환 공통] 핵심 노출 지표</div>
             <div className="result-section-caption">체크한 항목만 아래에서 세부 정도를 선택합니다</div>
             <div className="checkbox-group">
               {EXPOSURE_TYPE_OPTIONS.map(option => (
-                <div key={option.value} className="wrist-exposure-option">
+                <div key={option.value} className="elbow-exposure-option">
                   <label className="assessment-reason-option">
                     <input
                       type="checkbox"
@@ -264,15 +306,15 @@ function BkGroupCard({ jobId, bkType, items, allGroups, onChangeEntry }) {
                     <span>{option.label}</span>
                   </label>
                   {(representativeEntry.exposure_types || []).includes(option.value) && EXPOSURE_DETAIL_CONFIG[option.value] && (
-                    <div className="wrist-exposure-detail">
+                    <div className="elbow-exposure-detail">
                       <RadioGroup
                         label={EXPOSURE_DETAIL_CONFIG[option.value].label}
                         name={`${EXPOSURE_DETAIL_CONFIG[option.value].field}_${inputKey}`}
                         value={representativeEntry[EXPOSURE_DETAIL_CONFIG[option.value].field]}
                         options={EXPOSURE_DETAIL_CONFIG[option.value].options}
                         onChange={value => patchAll({ [EXPOSURE_DETAIL_CONFIG[option.value].field]: value })}
-                        groupClassName={EXPOSURE_DETAIL_CONFIG[option.value].twoByTwo ? 'wrist-radio-grid-2' : ''}
-                        labelClassName={EXPOSURE_DETAIL_CONFIG[option.value].twoByTwo ? 'wrist-radio-label-grid' : ''}
+                        groupClassName={EXPOSURE_DETAIL_CONFIG[option.value].twoByTwo ? 'elbow-radio-grid-2' : ''}
+                        labelClassName={EXPOSURE_DETAIL_CONFIG[option.value].twoByTwo ? 'elbow-radio-label-grid' : ''}
                       />
                     </div>
                   )}
@@ -286,17 +328,17 @@ function BkGroupCard({ jobId, bkType, items, allGroups, onChangeEntry }) {
             <RadioGroup label="휴식 분포" name={`rest_distribution_${inputKey}`} value={representativeEntry.rest_distribution} options={REST_OPTIONS} onChange={value => patchAll({ rest_distribution: value })} />
           </div>
 
-          <div className="result-detail-card wrist-branch-card">
+          <div className="result-detail-card elbow-branch-card">
             <div className="result-section-title">질환별 세부 분기</div>
             <div className="result-section-caption">선택한 BK 유형에 따라 필요한 항목이 달라집니다</div>
-            <div className="wrist-branch-fields">
+            <div className="elbow-branch-fields">
               <DiseaseSpecificFields
                 diagnosisId={inputKey}
                 selectedBkType={representativeEntry.selectedBkType}
                 evaluation={representativeEntry}
-                onChange={(field, value) => patchAll({ [field]: value })}
-                onToggleMultiValue={(field, value) => {
-                  const current = representativeEntry[field] || [];
+                onChange={(field: string, value: unknown) => patchAll({ [field]: value })}
+                onToggleMultiValue={(field: string, value: string) => {
+                  const current = (representativeEntry[field] || []) as string[];
                   const next = current.includes(value) ? current.filter(i => i !== value) : [...current, value];
                   patchAll({ [field]: next });
                 }}
@@ -309,23 +351,31 @@ function BkGroupCard({ jobId, bkType, items, allGroups, onChangeEntry }) {
   );
 }
 
-function EntryCard({ jobId, diagnosis, entry, onChangeEntry, allGroups }) {
+interface EntryCardProps {
+  jobId: string;
+  diagnosis: ElbowDiagnosis;
+  entry: Entry;
+  onChangeEntry: OnChangeEntry;
+  allGroups: Group[];
+}
+
+function EntryCard({ jobId, diagnosis, entry, onChangeEntry, allGroups }: EntryCardProps) {
   const inputKey = `${jobId}_${diagnosis.id}`;
   const shouldShowExposureFields = entry.direct_anatomic_link === 'yes';
   const selectionModeLabel = entry.bkSelectionMode === 'manual'
     ? '수동 선택'
     : (entry.selectedBkType ? '자동 제안' : '자동 제안 없음');
 
-  const patchEntry = (patch) => onChangeEntry(jobId, diagnosis.id, patch);
+  const patchEntry = (patch: EntryPatch) => onChangeEntry(jobId, diagnosis.id, patch);
 
-  const toggleExposureType = (value) => {
+  const toggleExposureType = (value: string) => {
     const current = entry.exposure_types || [];
     const next = current.includes(value)
       ? current.filter(item => item !== value)
       : [...current, value];
 
     const detailConfig = EXPOSURE_DETAIL_CONFIG[value];
-    const patch = { exposure_types: next };
+    const patch: EntryPatch = { exposure_types: next };
 
     if (detailConfig && !next.includes(value)) {
       patch[detailConfig.field] = '';
@@ -335,14 +385,14 @@ function EntryCard({ jobId, diagnosis, entry, onChangeEntry, allGroups }) {
   };
 
   return (
-    <div className="diagnosis-card wrist-diagnosis-card">
+    <div className="diagnosis-card elbow-diagnosis-card">
       <div className="diagnosis-card-header">
         <div className="card-title-stack">
-          <span className="diagnosis-card-title">{diagnosis.code || '-'} {diagnosis.name || '손목 상병'}</span>
+          <span className="diagnosis-card-title">{diagnosis.code || '-'} {diagnosis.name || '팔꿈치 상병'}</span>
           <span className="diagnosis-card-subtitle">방향: {getSideText(diagnosis.side)}</span>
         </div>
-        <div className="wrist-entry-badges">
-          <span className="diagnosis-module-badge">{BK_TYPE_LABELS[entry.selectedBkType] || 'BK 유형 미선택'}</span>
+        <div className="elbow-entry-badges">
+          <span className="diagnosis-module-badge">{BK_TYPE_LABELS[entry.selectedBkType as string] || 'BK 유형 미선택'}</span>
           <span className={`job-badge ${entry.bkSelectionMode === 'manual' ? 'badge-medium-high' : 'badge-low'}`}>{selectionModeLabel}</span>
         </div>
       </div>
@@ -367,7 +417,7 @@ function EntryCard({ jobId, diagnosis, entry, onChangeEntry, allGroups }) {
                 });
                 return;
               }
-              const nextEntry = resetWristBranchFields(entry, nextValue);
+              const nextEntry = resetElbowBranchFields(entry as ElbowDiagnosisEntry, nextValue);
               patchEntry({
                 ...nextEntry,
                 selectedBkType: nextValue,
@@ -383,7 +433,7 @@ function EntryCard({ jobId, diagnosis, entry, onChangeEntry, allGroups }) {
       </div>
 
       <RadioGroup
-        label="병변 부위와 직접 연결되는 핵심 작업/자세가 있는가"
+        label="병변 부위와 직접 연결되는 핵심 동작/자세가 있는가"
         name={`direct_anatomic_link_${inputKey}`}
         value={entry.direct_anatomic_link}
         options={DIRECT_LINK_OPTIONS}
@@ -392,18 +442,18 @@ function EntryCard({ jobId, diagnosis, entry, onChangeEntry, allGroups }) {
 
       {shouldShowExposureFields && (
         <>
-          <div className="form-group wrist-task-name-group">
+          <div className="form-group elbow-task-name-group">
             <label>문제 작업명</label>
             <input
               value={entry.main_task_name}
               onChange={e => patchEntry({ main_task_name: e.target.value })}
-              placeholder="해당 직업에서 손목 부담이 큰 대표 작업"
+              placeholder="해당 직업에서 문제가 되는 작업명을 입력하세요"
             />
           </div>
 
-          <div className="form-row wrist-task-metrics-row">
+          <div className="form-row elbow-task-metrics-row">
             <div className="form-group">
-              <label>1일 총 노출시간(시간)</label>
+              <label>1일 총시간(시간)</label>
               <input
                 type="number"
                 min="0"
@@ -413,7 +463,7 @@ function EntryCard({ jobId, diagnosis, entry, onChangeEntry, allGroups }) {
               />
             </div>
             <div className="form-group">
-              <label>근무시간 비중(%)</label>
+              <label>하루 작업 비중(%)</label>
               <input
                 type="number"
                 min="0"
@@ -424,7 +474,7 @@ function EntryCard({ jobId, diagnosis, entry, onChangeEntry, allGroups }) {
               />
             </div>
             <div className="form-group">
-              <label>주당 근무일수</label>
+              <label>주당 수행일수</label>
               <input
                 type="number"
                 min="0"
@@ -436,12 +486,12 @@ function EntryCard({ jobId, diagnosis, entry, onChangeEntry, allGroups }) {
             </div>
           </div>
 
-          <div className="form-group wrist-common-exposure-group">
-            <div className="result-section-title">[질환 공통] 핵심 노출 축</div>
-            <div className="result-section-caption">체크한 항목만 아래에서 세부 강도를 입력합니다.</div>
+          <div className="form-group elbow-common-exposure-group">
+            <div className="result-section-title">[질환 공통] 핵심 노출 지표</div>
+            <div className="result-section-caption">체크한 항목만 아래에서 세부 정도를 선택합니다</div>
             <div className="checkbox-group">
               {EXPOSURE_TYPE_OPTIONS.map(option => (
-                <div key={option.value} className="wrist-exposure-option">
+                <div key={option.value} className="elbow-exposure-option">
                   <label className="assessment-reason-option">
                     <input
                       type="checkbox"
@@ -451,15 +501,15 @@ function EntryCard({ jobId, diagnosis, entry, onChangeEntry, allGroups }) {
                     <span>{option.label}</span>
                   </label>
                   {(entry.exposure_types || []).includes(option.value) && EXPOSURE_DETAIL_CONFIG[option.value] && (
-                    <div className="wrist-exposure-detail">
+                    <div className="elbow-exposure-detail">
                       <RadioGroup
                         label={EXPOSURE_DETAIL_CONFIG[option.value].label}
                         name={`${EXPOSURE_DETAIL_CONFIG[option.value].field}_${inputKey}`}
                         value={entry[EXPOSURE_DETAIL_CONFIG[option.value].field]}
                         options={EXPOSURE_DETAIL_CONFIG[option.value].options}
                         onChange={value => patchEntry({ [EXPOSURE_DETAIL_CONFIG[option.value].field]: value })}
-                        groupClassName={EXPOSURE_DETAIL_CONFIG[option.value].twoByTwo ? 'wrist-radio-grid-2' : ''}
-                        labelClassName={EXPOSURE_DETAIL_CONFIG[option.value].twoByTwo ? 'wrist-radio-label-grid' : ''}
+                        groupClassName={EXPOSURE_DETAIL_CONFIG[option.value].twoByTwo ? 'elbow-radio-grid-2' : ''}
+                        labelClassName={EXPOSURE_DETAIL_CONFIG[option.value].twoByTwo ? 'elbow-radio-label-grid' : ''}
                       />
                     </div>
                   )}
@@ -485,17 +535,17 @@ function EntryCard({ jobId, diagnosis, entry, onChangeEntry, allGroups }) {
             />
           </div>
 
-          <div className="result-detail-card wrist-branch-card">
-            <div className="result-section-title">질환별 분기</div>
-            <div className="result-section-caption">선택한 BK 유형에 따라 필요한 항목이 달라집니다.</div>
-            <div className="wrist-branch-fields">
+          <div className="result-detail-card elbow-branch-card">
+            <div className="result-section-title">질환별 세부 분기</div>
+            <div className="result-section-caption">선택한 BK 유형에 따라 필요한 항목이 달라집니다</div>
+            <div className="elbow-branch-fields">
               <DiseaseSpecificFields
                 diagnosisId={inputKey}
                 selectedBkType={entry.selectedBkType}
                 evaluation={entry}
-                onChange={(field, value) => patchEntry({ [field]: value })}
-                onToggleMultiValue={(field, value) => {
-                  const current = entry[field] || [];
+                onChange={(field: string, value: unknown) => patchEntry({ [field]: value })}
+                onToggleMultiValue={(field: string, value: string) => {
+                  const current = (entry[field] || []) as string[];
                   const next = current.includes(value)
                     ? current.filter(item => item !== value)
                     : [...current, value];
@@ -510,30 +560,39 @@ function EntryCard({ jobId, diagnosis, entry, onChangeEntry, allGroups }) {
   );
 }
 
+export interface ExposureFormProps {
+  job: { id: string; jobName?: string };
+  jobIndex: number;
+  elbowDiagnoses: ElbowDiagnosis[];
+  jobEvaluation: { diagnosisEntries?: CoreElbowDiagnosisEntry[] };
+  errors?: { jobs?: string } | null;
+  onChangeEntry: OnChangeEntry;
+}
+
 export function ExposureForm({
   job,
   jobIndex,
-  wristDiagnoses,
+  elbowDiagnoses,
   jobEvaluation,
   errors,
   onChangeEntry,
-}) {
-  const groups = groupDiagnosesByBkType(wristDiagnoses, jobEvaluation);
-  const groupCount = groups.length;
+}: ExposureFormProps) {
+  const groups = groupDiagnosesByBkType(elbowDiagnoses, jobEvaluation);
+  const groupCount = groups.filter(g => g.isGrouped).length + groups.filter(g => !g.isGrouped).length;
 
   return (
-    <div className="job-card wrist-job-card">
+    <div className="job-card elbow-job-card">
       <div className="job-card-header">
         <div className="card-title-stack">
           <span className="job-card-title">직력 {jobIndex + 1}: {job.jobName || '(미입력)'}</span>
-          <span className="job-card-subtitle">이 직업에서 BK 유형별 노출 특성과 분기 정보를 입력합니다.</span>
+          <span className="job-card-subtitle">이 직업에서 BK 유형별 노출 특성과 분기 정보를 입력합니다</span>
         </div>
-        <span className="job-badge badge-low">{groupCount}개 항목 / {wristDiagnoses.length}개 상병</span>
+        <span className="job-badge badge-low">{groupCount}개 항목 / {elbowDiagnoses.length}개 상병</span>
       </div>
 
       {errors?.jobs && <div className="error-message">{errors.jobs}</div>}
 
-      <div className="wrist-entry-grid">
+      <div className="elbow-entry-grid">
         {groups.map(group => {
           if (group.isGrouped) {
             return (
@@ -554,7 +613,7 @@ export function ExposureForm({
               key={diagnosis.id}
               jobId={job.id}
               diagnosis={diagnosis}
-              entry={entry}
+              entry={entry as Entry}
               onChangeEntry={onChangeEntry}
               allGroups={groups}
             />
