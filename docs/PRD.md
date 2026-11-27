@@ -959,7 +959,7 @@ src/
 │   ├── components/
 │   │   ├── BasicInfoForm.jsx            # 인적사항 + 직업력 + 특이사항 + 평가기관
 │   │   ├── DiagnosisForm.jsx            # 상병 입력 (ICD 코드/이름/부위)
-│   │   ├── AssessmentStep.jsx           # 종합소견 (공유 최종 스텝)
+│   │   ├── AssessmentStep.tsx           # 종합소견 (공유 최종 스텝)
 │   │   ├── AIAnalysisPanel.jsx          # Claude AI 분석 UI
 │   │   ├── PresetSearch.jsx             # 직업 프리셋 검색 (자동완성, 모듈 배지 표시)
 │   │   ├── PresetManageModal.jsx        # 커스텀 프리셋 저장/관리 모달

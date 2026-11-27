@@ -132,19 +132,7 @@ export type UseExportHandlers = (args: {
   activePatient: PatientRecord | undefined; patients: PatientRecord[]; selectedIds: Set<string>; dirtyAssessmentPatientId: string | null;
 }) => ExportHandlersApi;
 
-/** EMR 연동(src/core/hooks/useEMRIntegration.js). */
-export interface EmrIntegrationApi {
-  extractProgress: unknown;
-  setExtractProgress: Dispatch<SetStateAction<unknown>>;
-  handleInjectEMR: ForwardedHandler;
-  handleInjectConsultReply: ForwardedHandler;
-  handleEmrExtractBatch: ForwardedHandler;
-  handleExtractConsultation: ForwardedHandler;
-}
-export type UseEMRIntegration = (args: {
-  activePatient: PatientRecord | undefined; patients: PatientRecord[]; selectedIds: Set<string>; session: AppSession;
-  setPatients: SetPatients; dirtyAssessmentPatientId: string | null;
-}) => EmrIntegrationApi;
+// EMR 연동(useEMRIntegration)은 P2-66h에서 TS가 되어 계약·캐스트를 지웠다 — 반환 타입은 그 훅의 EmrIntegrationApi.
 
 // --- 컨트롤러 4 nav(P2-44c) ---
 

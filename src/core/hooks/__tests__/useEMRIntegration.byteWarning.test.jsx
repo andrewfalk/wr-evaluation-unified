@@ -7,7 +7,7 @@
 // prepareEmrInjection의 결과에 따라 확인창을 띄우고 그 응답에 맞게 전송을 진행/중단하는지만 본다.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, renderHook } from '@testing-library/react';
-import { useEMRIntegration } from '../useEMRIntegration.js';
+import { useEMRIntegration } from '../useEMRIntegration';
 
 vi.mock('../../utils/platform', () => ({
   showAlert: vi.fn(async () => {}),

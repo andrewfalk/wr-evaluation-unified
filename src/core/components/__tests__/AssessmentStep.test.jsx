@@ -7,7 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { AssessmentStep } from '../AssessmentStep.jsx';
+import { AssessmentStep } from '../AssessmentStep';
 
 const mockResolveAssessment = vi.fn();
 

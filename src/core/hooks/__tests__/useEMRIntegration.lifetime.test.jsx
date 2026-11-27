@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { StrictMode } from 'react';
 import { act, cleanup, renderHook } from '@testing-library/react';
-import { useEMRIntegration } from '../useEMRIntegration.js';
+import { useEMRIntegration } from '../useEMRIntegration';
 import { usePatientsContainer } from '../../state/patientStore/usePatientsContainer';
 
 vi.mock('../../utils/platform', () => ({

@@ -6,14 +6,14 @@ import { usePresetManagement } from '../../core/hooks/usePresetManagement';
 import { useMigration } from '../../core/hooks/useMigration';
 import { useOpsStatus } from '../../core/hooks/useOpsStatus';
 import { useExportHandlers } from '../../core/hooks/useExportHandlers';
-import { useEMRIntegration } from '../../core/hooks/useEMRIntegration';
+import { useEMRIntegration, type EmrIntegrationApi } from '../../core/hooks/useEMRIntegration';
 import { canEditPatient } from '../../core/utils/patientOwnership';
 import type { PatientRecord } from '../../core/types/patient';
 import type { SetPatients } from '../../core/state/patientStore/usePatientsContainer';
 import type { ModalState } from '../useModalState';
 import type {
-  AppSession, AppSettings, EmrIntegrationApi, ExportHandlersApi, LockState, MigrationApi, PresetManagementApi,
-  UseEMRIntegration, UseExportHandlers, UseMigration, UseOpsStatus, UsePatientLock, UsePresetManagement,
+  AppSession, AppSettings, ExportHandlersApi, LockState, MigrationApi, PresetManagementApi,
+  UseExportHandlers, UseMigration, UseOpsStatus, UsePatientLock, UsePresetManagement,
 } from './contracts';
 
 export interface EditingControllerInput {
@@ -100,7 +100,7 @@ export function useEditingController({
     extractProgress, setExtractProgress,
     handleInjectEMR, handleInjectConsultReply,
     handleEmrExtractBatch, handleExtractConsultation,
-  } = (useEMRIntegration as unknown as UseEMRIntegration)({ activePatient, patients, selectedIds, session, setPatients, dirtyAssessmentPatientId });
+  } = useEMRIntegration({ activePatient, patients, selectedIds, session, setPatients, dirtyAssessmentPatientId });
 
   return {
     lockState, forceAcquire, canMutateActivePatient,

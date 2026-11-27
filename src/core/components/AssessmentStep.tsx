@@ -4,10 +4,36 @@ import { generateUnifiedEMR, resolveAssessment } from '../utils/emrReport';
 import { EMR_TEXT_LIMIT_BYTES, cp949ByteLength, classifyEmrByteStatus } from '../utils/emrText';
 import { selectModuleNote } from '../utils/moduleNotes';
 import { showConfirm } from '../utils/platform';
+import type { Diagnosis, PatientData, SharedData } from '@wr/contracts';
+import type { PatientRecord } from '../types/patient';
 
-const EMR_STATUS_LABELS = { ok: '정상', warn: '주의', danger: '초과' };
+// 타입만 붙였다(P2-66h) — 실행 코드는 JSX 시절과 같다(가드·기본값을 새로 넣지 않는다). patient.data는 StepContent가 늘 채워
+// 넘기므로 단언한다.
 
-function emrGaugeInfo(text) {
+type ReportOptions = NonNullable<SharedData['reportOptions']>;
+type ModuleData = Record<string, unknown>;
+
+/** 종합평가 스텝의 props — 갱신 함수는 usePatientCrud.js가 만드는 모양(이 화면이 쓰는 꼴만). */
+export interface AssessmentStepProps {
+  patient: PatientRecord;
+  activeModules: string[];
+  updateDiagnoses: (diagnoses: Diagnosis[]) => void;
+  updateModuleById: (moduleId: string, updater: (current: ModuleData) => ModuleData) => void;
+  updateShared?: (updater: (prevShared: SharedData) => SharedData) => void;
+  canMutate?: boolean;
+  onEditingChange?: (patientId: string, editing: boolean) => void;
+}
+
+interface EmrGaugeInfo {
+  bytes: number;
+  pct: number;
+  status: string;
+  statusLabel: string;
+}
+
+const EMR_STATUS_LABELS: Record<string, string> = { ok: '정상', warn: '주의', danger: '초과' };
+
+function emrGaugeInfo(text: string): EmrGaugeInfo {
   const bytes = cp949ByteLength(text);
   const pct = Math.min(140, Math.round((bytes / EMR_TEXT_LIMIT_BYTES) * 100));
   const status = classifyEmrByteStatus(bytes, EMR_TEXT_LIMIT_BYTES);
@@ -16,13 +42,13 @@ function emrGaugeInfo(text) {
 
 // reportOptions에서 assessmentOverride만 제거 — undefined 대입이 아니라 키 자체를
 // 지운다("자동 생성으로 되돌리기"는 오버라이드가 아예 없던 상태와 동일해야 한다).
-function withoutAssessmentOverride(reportOptions) {
-  const { assessmentOverride: _drop, ...rest } = reportOptions || {};
+function withoutAssessmentOverride(reportOptions: ReportOptions | undefined): ReportOptions {
+  const { assessmentOverride: _drop, ...rest }: ReportOptions = reportOptions || {};
   return rest;
 }
 
-export function AssessmentStep({ patient, activeModules, updateDiagnoses, updateModuleById, updateShared, canMutate = true, onEditingChange }) {
-  const shared = patient.data.shared;
+export function AssessmentStep({ patient, activeModules, updateDiagnoses, updateModuleById, updateShared, canMutate = true, onEditingChange }: AssessmentStepProps) {
+  const shared = (patient.data as PatientData).shared;
   const diagnoses = shared.diagnoses || [];
   const groupOutput = !!shared.reportOptions?.groupAssessmentResults;
   const savedOverride = shared.reportOptions?.assessmentOverride;
@@ -48,22 +74,22 @@ export function AssessmentStep({ patient, activeModules, updateDiagnoses, update
     onEditingChange?.(patient.id, editing);
   }, [editing, patient.id, onEditingChange]);
 
-  const handleDiagnosisUpdate = (index, field, value) => {
+  const handleDiagnosisUpdate = (index: number, field: string, value: unknown) => {
     const updated = [...diagnoses];
     updated[index] = { ...updated[index], [field]: value };
     updateDiagnoses(updated);
   };
 
-  const handleReportOptionsChange = nextReportOptions => {
+  const handleReportOptionsChange = (nextReportOptions: ReportOptions) => {
     updateShared?.(prevShared => ({ ...prevShared, reportOptions: nextReportOptions }));
   };
 
   // 메모는 활성 모듈 전체에 같은 값을 팬아웃 저장한다(모듈 하나만 붙잡지 않으므로
   // 향후 모듈 추가 시에도 이 컴포넌트를 손댈 필요가 없다). 읽기는 selectModuleNote가
   // 우선순위를 결정한다.
-  const returnConsiderations = selectModuleNote(patient.data.modules, activeModules);
+  const returnConsiderations = selectModuleNote((patient.data as PatientData).modules, activeModules);
 
-  const handleReturnChange = (value) => {
+  const handleReturnChange = (value: string) => {
     activeModules.forEach(id =>
       updateModuleById(id, current => ({ ...current, returnConsiderations: value }))
     );
@@ -168,7 +194,7 @@ export function AssessmentStep({ patient, activeModules, updateDiagnoses, update
       ...prevShared,
       reportOptions: {
         ...prevShared.reportOptions,
-        assessmentOverride: { ...prevShared.reportOptions.assessmentOverride, baseText: sendFormatGeneratedB8 },
+        assessmentOverride: { ...(prevShared.reportOptions as Required<ReportOptions>).assessmentOverride, baseText: sendFormatGeneratedB8 },
       },
     }));
   };
