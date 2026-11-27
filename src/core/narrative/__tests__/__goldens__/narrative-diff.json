@@ -13,7 +13,7 @@
     {
       "id": "cervical",
       "name": "경추(목)",
-      "items": 4
+      "items": 5
     },
     {
       "id": "shoulder",
@@ -118,6 +118,17 @@
         "report": "- 직력{n}: {name}\n",
         "emrSection": "- 직력{n}: {name}\n",
         "emrSummary": "- 직력{n}: {name}\n"
+      },
+      "differs": false
+    },
+    {
+      "moduleId": "cervical",
+      "moduleName": "경추(목)",
+      "item": "jobNameEmpty",
+      "values": {
+        "report": "직업 미입력",
+        "emrSection": "직업 미입력",
+        "emrSummary": "직업 미입력"
       },
       "differs": false
     },

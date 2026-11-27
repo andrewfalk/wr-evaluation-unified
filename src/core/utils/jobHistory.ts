@@ -9,6 +9,7 @@
 import { getEffectiveWorkPeriodText } from './workPeriod';
 import { hasExcludedJobs, isJobExcludedFromAnalysis, orderJobsForHistory } from '@wr/analytics-core/jobScope';
 import type { JobLike } from '@wr/analytics-core/workPeriod';
+import { OUTPUT_EMPTY_JOB_NAME } from '../narrative/phrases';
 
 export const EXCLUDED_JOB_LABEL = '신체부담평가에는 미포함';
 export const NO_EVALUABLE_JOBS_NOTE = '※ 모든 직력이 신체부담평가에서 제외되어 평가 대상 없음';
@@ -39,7 +40,8 @@ export function buildJobHistoryLines(jobs: readonly JobHistoryJob[] | null | und
   const lines = ordered.map((job, index) => {
     const number = index + 1;
     if (withExclusion && job && job.id) numbering[job.id] = number;
-    let line = `- 직력${number}: ${job.jobName || '-'} | ${getEffectiveWorkPeriodText(job)}`;
+    // 빈 직종명은 출력 낱말(P2-72h, 결정 5 — 전에는 `-`).
+    let line = `- 직력${number}: ${job.jobName || OUTPUT_EMPTY_JOB_NAME} | ${getEffectiveWorkPeriodText(job)}`;
     if (isJobExcludedFromAnalysis(job)) line += ` | ${EXCLUDED_JOB_LABEL}`;
     return line;
   });

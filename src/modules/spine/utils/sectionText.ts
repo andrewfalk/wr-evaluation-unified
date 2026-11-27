@@ -9,6 +9,8 @@ import {
 import { thresholds } from './thresholds';
 import { SPINE_FORMULA_V513 } from './formulaVersion';
 import { NO_EVALUABLE_JOBS_NOTE } from '../../../core/utils/jobHistory';
+import { EMPTY_JOB_NAME_LABEL } from '../../../core/utils/jobLabels';
+import { OUTPUT_EMPTY_JOB_NAME } from '../../../core/narrative/phrases';
 import type { MddmCalcResult, SpineCalcResult, SpineTask, VibrationCalcResult } from '@wr/analytics-core/modules/spine/index';
 
 /** 기준 비교 한 칸(법원·MDDM)의 모양 — analytics-core compareThresholds의 결과. */
@@ -19,6 +21,14 @@ export type SpineSectionCalc = Partial<SpineCalcResult> & { evalMethod?: string 
 export type VibrationSectionCalc = Partial<VibrationCalcResult>;
 
 const EXCLUDED_NOTE = '(일 임계값 미만으로 누적 노출량이 0으로 계산됩니다)';
+
+/**
+ * 직력 머리줄의 직종명(P2-72h, 결정 5). 척추 계산(analytics-core mddm.ts·vibration.ts)이 빈 직종명을 화면 낱말 `(미입력)`으로
+ * 채워 주므로, 출력에서는 그 낱말(과 빈 값)을 출력 낱말로 바꿔 쓴다. 계산 쪽 낱말이 바뀌면 sectionText.emptyJobName 테스트가 잡는다.
+ */
+function outputJobName(jobName: string | undefined): string {
+  return !jobName || jobName === EMPTY_JOB_NAME_LABEL ? OUTPUT_EMPTY_JOB_NAME : jobName;
+}
 
 export function formatSpineNumber(value: unknown, digits = 2): string {
   return Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : '-';
@@ -157,7 +167,7 @@ function buildMddmSectionText(calc: SpineSectionCalc = {}): string {
       const jrTasks = jr.tasks || [];
       if (jrTasks.length === 0) return;
       const contributions = getSpineTaskDoses(jrTasks, formulaVersion);
-      text += `[직력${ji + 1}: ${jr.jobName || '-'}]\n`;
+      text += `[직력${ji + 1}: ${outputJobName(jr.jobName)}]\n`;
       jrTasks.forEach((task, index) => {
         text += renderSpineTask(task, index, contributions);
       });
@@ -230,7 +240,7 @@ export function buildVibrationSectionText(calc: VibrationSectionCalc = {}): stri
     jrs.forEach((jr, ji) => {
       const ivs = jr.intervals || [];
       if (ivs.length === 0) return;
-      text += `[직력${ji + 1}: ${jr.jobName || '-'}]\n`;
+      text += `[직력${ji + 1}: ${outputJobName(jr.jobName)}]\n`;
       ivs.forEach((iv, idx) => {
         text += `진동작업 ${idx + 1}. ${iv.name || '-'}\n`;
         text += `aw ${formatSpineNumber(iv.awMin)} ~ ${formatSpineNumber(iv.awMax)} m/s² · 1일 노출시간 ${iv.timeValue || 0}${iv.timeUnit === 'hr' ? '시간' : iv.timeUnit === 'min' ? '분' : '초'}\n`;

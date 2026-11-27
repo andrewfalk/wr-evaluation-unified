@@ -4,7 +4,7 @@
 // 2칸), 부담 지표 이름이 없으면 키(B10). 직력 번호는 세 변형 모두 jobSummaries 순번이다([직업력] 번호와 같다).
 // 변형마다 달라지는 문구는 CERVICAL_PHRASES(narrative.phrases — 문구 차이 표의 원본, P2-65a)에서 꺼내 쓴다.
 import type { ModuleNarrative, NarrativePhrases, NarrativeVariant } from '../../core/modules/manifest';
-import { fillPhrase } from '../../core/narrative/phrases';
+import { fillPhrase, OUTPUT_EMPTY_JOB_NAME } from '../../core/narrative/phrases';
 import { NO_EVALUABLE_JOBS_NOTE } from '../../core/utils/jobHistory';
 
 interface CervicalFlag {
@@ -31,10 +31,11 @@ interface CervicalNarrativeCalc {
 /** 전문 블록을 쓰는 변형(소견서·4번 칸). */
 type FullVariant = Exclude<NarrativeVariant, 'emrSummary'>;
 
-/** 변형별 문구. {n} = 직력 번호, {name} = 직종명. */
+/** 변형별 문구. {n} = 직력 번호, {name} = 직종명(빈 값이면 jobNameEmpty — P2-72h, 결정 5: 전에는 `-`). */
 const CERVICAL_PHRASES = {
   heading: { report: '\n<경추(목)>\n', emrSection: '\n<경추(목)>\n', emrSummary: '\n<경추(목)>\n' },
   jobLine: { report: '- 직력{n}: {name}\n', emrSection: '- 직력{n}: {name}\n', emrSummary: '- 직력{n}: {name}\n' },
+  jobNameEmpty: { report: OUTPUT_EMPTY_JOB_NAME, emrSection: OUTPUT_EMPTY_JOB_NAME, emrSummary: OUTPUT_EMPTY_JOB_NAME },
   /** 전문은 6칸 들여쓰기, 요약은 2칸(표 A 23행 — 낱말만 맞춤) */
   flagsLabel: { report: '      부담 요인: ', emrSection: '      부담 요인: ', emrSummary: '  부담 요인: ' },
   noFlags: { report: '확인된 부담 요인 없음', emrSection: '확인된 부담 요인 없음', emrSummary: '확인된 부담 요인 없음' },
@@ -56,7 +57,7 @@ function buildCervicalFullSection(calc: CervicalNarrativeCalc | undefined, varia
 
   const jobSummaries = calc?.jobSummaries || [];
   jobSummaries.forEach((jobSummary, index) => {
-    text += fillPhrase(P.jobLine[variant], { n: index + 1, name: jobSummary.jobName || '-' });
+    text += fillPhrase(P.jobLine[variant], { n: index + 1, name: jobSummary.jobName || P.jobNameEmpty[variant] });
     if (jobSummary.missingFields.length > 0) {
       text += `    입력 누락: ${jobSummary.missingFields.join(', ')}\n`;
     }
@@ -79,7 +80,7 @@ function buildCervicalExposureSummary(calc: CervicalNarrativeCalc | undefined): 
   if (calc?.noEvaluableJobs) return `${text}${NO_EVALUABLE_JOBS_NOTE}\n`;
 
   (calc?.jobSummaries || []).forEach((jobSummary, index) => {
-    text += fillPhrase(P.jobLine.emrSummary, { n: index + 1, name: jobSummary.jobName || '-' });
+    text += fillPhrase(P.jobLine.emrSummary, { n: index + 1, name: jobSummary.jobName || P.jobNameEmpty.emrSummary });
     text += `${P.flagsLabel.emrSummary}${flagsText(jobSummary, 'emrSummary')}\n`;
   });
 
