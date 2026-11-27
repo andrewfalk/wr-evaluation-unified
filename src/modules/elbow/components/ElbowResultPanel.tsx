@@ -119,11 +119,20 @@ export function ElbowResultPanel({ calc, temporalSequence, onTemporalChange }: E
       </div>
 
       <div className="result-panel elbow-result-panel">
-        {calc.missingCommonFields?.length > 0 && (
-          <div className="elbow-result-spacing">
+        {/* 시간적 선후관계 표시(P2-74c, 결정 3나) — 손목 결과와 같은 마크업. 칸은 항상 그리고, 표시가 없으면 '선후관계 확인되지 않음'. */}
+        <div className="elbow-result-spacing">
+          {calc.temporalFlagItems?.length > 0
+            ? calc.temporalFlagItems.map(flag => (
+                <span key={flag.key} className={`elbow-flag-pill tone-${flag.tone || 'neutral'}`} title={flag.description || ''}>
+                  <span>{flag.label}</span>
+                </span>
+              ))
+            : <span className="result-card-meta">선후관계 확인되지 않음</span>
+          }
+          {calc.missingCommonFields?.length > 0 && (
             <MissingList classPrefix="elbow" title="공통 시간적 선후관계 입력 누락" items={calc.missingCommonFields} />
-          </div>
-        )}
+          )}
+        </div>
 
         <div className="result-detail-stack">
           {(calc.jobSummaries || []).map(jobSummary => (
