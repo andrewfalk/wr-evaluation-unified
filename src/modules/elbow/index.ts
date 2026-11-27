@@ -2,9 +2,23 @@ import { registerModule } from '../../core/moduleRegistry';
 import { elbowNarrative } from './narrative';
 import { ElbowEvaluation } from './ElbowEvaluation';
 import { createElbowModuleData, createElbowJobEvaluation, createElbowDiagnosisEntry } from './utils/data';
+import type { ElbowDiagnosisLike, ElbowModuleDataInput, ElbowTemporalSequence } from './utils/data';
 import { computeElbowCalc, isElbowAssessmentComplete } from './utils/calculations';
 import { ensureModule, splitList, parseDate } from '../../core/utils/batchImportHelpers';
 import { elbowBatchExport } from './batchExport';
+import type { ComponentType } from 'react';
+import type { ModuleEvaluationProps, ModuleManifest } from '../../core/modules/manifest';
+
+/** applyRow가 받는 값 가운데 이 모듈이 읽는 모양(일괄 가져오기 — src/core/services/batchImport.ts). */
+interface ElbowImportRowContext {
+  patient: unknown;
+  row: unknown[];
+  diagnosis: (ElbowDiagnosisLike & { id: string }) | null;
+  job: { id: string } | null;
+  colMap: Record<string, number | undefined>;
+  getCell: (row: unknown[], index: number | undefined) => unknown;
+  rowIndex: number;
+}
 
 // 프리셋에 저장할 공통 노출 필드 (BK 유형과 무관한 직업 물리부담 정보)
 const PRESET_COMMON_FIELDS = [
@@ -20,7 +34,7 @@ registerModule({
   name: '팔꿈치',
   icon: '💪',
   description: '팔꿈치 질환 공통 신체부담 평가',
-  EvaluationComponent: ElbowEvaluation,
+  EvaluationComponent: ElbowEvaluation as ComponentType<ModuleEvaluationProps>,
   createModuleData: createElbowModuleData,
   computeCalc: computeElbowCalc,
   isComplete: isElbowAssessmentComplete,
@@ -37,7 +51,7 @@ registerModule({
       { key: 'rest_distribution', label: '휴식 분포', type: 'string' },
       { key: 'force_level', label: '힘 수준', type: 'string' },
     ],
-    extractFromModule(moduleData, sharedJobId) {
+    extractFromModule(moduleData: ElbowModuleDataInput, sharedJobId: string) {
       const jobEval = (moduleData.jobEvaluations || []).find(j => j.sharedJobId === sharedJobId);
       if (!jobEval) return null;
       // 첫 번째 유효 entry에서 공통 필드 추출
@@ -45,7 +59,7 @@ registerModule({
         e.daily_exposure_hours || e.main_task_name || (e.exposure_types && e.exposure_types.length)
       );
       if (!entry) return null;
-      const result = {};
+      const result: Record<string, unknown> = {};
       for (const key of PRESET_COMMON_FIELDS) {
         const val = entry[key];
         if (val !== undefined && val !== '' && val !== null && !(Array.isArray(val) && val.length === 0)) {
@@ -54,7 +68,7 @@ registerModule({
       }
       return Object.keys(result).length > 0 ? result : null;
     },
-    applyToModule(moduleData, sharedJobId, presetData) {
+    applyToModule(moduleData: ElbowModuleDataInput, sharedJobId: string, presetData: Record<string, unknown>) {
       const jobEvals = [...(moduleData.jobEvaluations || [])];
       const idx = jobEvals.findIndex(j => j.sharedJobId === sharedJobId);
       if (idx < 0) {
@@ -125,7 +139,7 @@ registerModule({
       elbowBk2103ToolPressing: ['팔꿈치_bk2103_공구를강하게쥐거나누르면서사용하는작업', '팔꿈치_bk2103_공구압박', 'elbow_bk2103_tool_pressing'],
       elbowBk2103FrequentHighForceGrip: ['팔꿈치_bk2103_강하게쥐는동작반복', '팔꿈치_bk2103_고힘그립', 'elbow_bk2103_frequent_high_force_grip'],
     },
-    applyRow({ patient, row, diagnosis, job, colMap, getCell }) {
+    applyRow({ patient, row, diagnosis, job, colMap, getCell }: ElbowImportRowContext) {
       if (!diagnosis || !job) return;
 
       const hasElbowData = [
@@ -136,7 +150,7 @@ registerModule({
       ].some(index => getCell(row, index));
       if (!hasElbowData) return;
 
-      const elbowData = ensureModule(patient, 'elbow');
+      const elbowData = ensureModule(patient, 'elbow') as ElbowModuleDataInput;
       if (!elbowData.temporalSequence) {
         elbowData.temporalSequence = elbowData.temporalRelation || createElbowModuleData().temporalSequence;
       }
@@ -199,17 +213,17 @@ registerModule({
       });
 
       if (getCell(row, colMap.elbowRecentTaskChange)) {
-        elbowData.temporalSequence.recent_task_change = String(getCell(row, colMap.elbowRecentTaskChange)).trim();
+        (elbowData.temporalSequence as ElbowTemporalSequence).recent_task_change = String(getCell(row, colMap.elbowRecentTaskChange)).trim();
       }
       if (getCell(row, colMap.elbowTaskChangeDate)) {
-        elbowData.temporalSequence.task_change_date = parseDate(getCell(row, colMap.elbowTaskChangeDate));
+        (elbowData.temporalSequence as ElbowTemporalSequence).task_change_date = parseDate(getCell(row, colMap.elbowTaskChangeDate));
       }
       if (getCell(row, colMap.elbowSymptomOnsetInterval)) {
-        elbowData.temporalSequence.symptom_onset_interval = String(getCell(row, colMap.elbowSymptomOnsetInterval)).trim();
+        (elbowData.temporalSequence as ElbowTemporalSequence).symptom_onset_interval = String(getCell(row, colMap.elbowSymptomOnsetInterval)).trim();
       }
       if (getCell(row, colMap.elbowImprovesWithRest)) {
-        elbowData.temporalSequence.improves_with_rest = String(getCell(row, colMap.elbowImprovesWithRest)).trim();
+        (elbowData.temporalSequence as ElbowTemporalSequence).improves_with_rest = String(getCell(row, colMap.elbowImprovesWithRest)).trim();
       }
     },
   },
-});
+} satisfies ModuleManifest);

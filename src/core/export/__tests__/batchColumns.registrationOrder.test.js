@@ -12,7 +12,7 @@ const ORDERS = [
 
 async function exportWith(order) {
   vi.resetModules();
-  for (const id of order) await import(`../../../modules/${id}/index.js`);
+  for (const id of order) await import(`../../../modules/${id}/index`);
   const exportService = await import('../../utils/exportService');
   const { getAllModules } = await import('../../moduleRegistry');
   return {

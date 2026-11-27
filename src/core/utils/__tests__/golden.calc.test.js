@@ -19,7 +19,7 @@ let batchImport;
 
 beforeEach(async () => {
   useGoldenEnvironment();
-  for (const id of MODULE_IDS) await import(`../../../modules/${id}/index.js`);
+  for (const id of MODULE_IDS) await import(`../../../modules/${id}/index`);
   registry = await import('../../moduleRegistry');
   batch = await import('../exportService');
   batchImport = await import('../../services/batchImport');
