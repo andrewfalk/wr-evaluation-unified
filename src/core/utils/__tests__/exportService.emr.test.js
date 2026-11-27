@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 // EMR 블록은 테스트에서만 생기는 경로다 — 서술이 모듈로 옮겨 가면(C7-a) 미등록 모듈의 블록은 나오지 않는다.
 import '../../../modules/knee';
 import { generateEMRFieldData } from '../exportService.js';
-import { generateUnifiedEMR, resolveAssessment, prepareEmrInjection } from '../emrReport.js';
+import { generateUnifiedEMR, resolveAssessment, prepareEmrInjection } from '../emrReport';
 import { cp949ByteLength, EMR_TEXT_LIMIT_BYTES } from '../emrText.js';
 
 function makePatient({ activeModules = [], jobs = [], modules = {} } = {}) {

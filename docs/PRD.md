@@ -744,7 +744,7 @@ Gemini 2.5 Pro는 thinking(추론) 기능이 기본 활성화되어 비활성화
 ### 7.1 통합 미리보기
 
 모든 활성 모듈의 평가 결과를 하나의 텍스트 보고서로 통합 표시한다.
-`generateUnifiedReport(patient)` (`src/core/utils/reportGenerator.js`)가 환자 전체 데이터를 받아 통합 보고서 텍스트를 생성한다.
+`generateUnifiedReport(patient)` (`src/core/utils/reportGenerator.ts`)가 환자 전체 데이터를 받아 통합 보고서 텍스트를 생성한다.
 
 **보고서 구조:**
 
@@ -974,7 +974,7 @@ src/
 │       ├── workPeriod.js                # 근무기간 계산 유틸리티
 │       ├── diagnosisMapping.js          # ICD → 모듈 매핑
 │       ├── common.js                    # BMI, 나이 계산 등
-│       ├── reportGenerator.js           # 통합 미리보기 텍스트 생성
+│       ├── reportGenerator.ts           # 통합 미리보기 텍스트 생성
 │       ├── exportService.js             # 통합 EMR Excel 내보내기 (single/selected/batch)
 │       ├── storage.js                   # localStorage 관리
 │       └── platform.js                  # 플랫폼 추상화 (alert, confirm)

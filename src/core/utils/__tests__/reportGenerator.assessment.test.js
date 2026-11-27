@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { generateUnifiedReport } from '../reportGenerator.js';
+import { generateUnifiedReport } from '../reportGenerator';
 
 function makePatient({ diagnoses = [], activeModules = [], reportOptions, modules = {} } = {}) {
   return {

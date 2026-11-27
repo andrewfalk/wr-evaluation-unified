@@ -7,8 +7,8 @@ import '../../../modules/cervical';
 import '../../../modules/elbow';
 import '../../../modules/wrist';
 import { buildJobHistoryLines, resolveJobNumber, EXCLUDED_JOB_LABEL, NO_EVALUABLE_JOBS_NOTE } from '../jobHistory.js';
-import { generateUnifiedEMR, generateEMRFieldData } from '../emrReport.js';
-import { generateUnifiedReport } from '../reportGenerator.js';
+import { generateUnifiedEMR, generateEMRFieldData } from '../emrReport';
+import { generateUnifiedReport } from '../reportGenerator';
 
 const job = (id, jobName, extra = {}) => ({
   id, jobName, startDate: '2010-01-01', endDate: '2015-01-01', workPeriodOverride: '', workDaysPerYear: 250, ...extra,

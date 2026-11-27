@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import '../../../modules/spine'; // registerModule 사이드이펙트
 import { generateEMRFieldData } from '../exportService.js';
-import { generateUnifiedReport } from '../reportGenerator.js';
+import { generateUnifiedReport } from '../reportGenerator';
 
 function makeTask(name, sharedJobId) {
   return {
