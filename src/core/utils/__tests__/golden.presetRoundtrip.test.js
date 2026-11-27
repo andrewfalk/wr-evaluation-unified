@@ -24,7 +24,7 @@ let registry;
 
 beforeEach(async () => {
   useGoldenEnvironment();
-  for (const id of MODULE_IDS) await import(`../../../modules/${id}/index.js`);
+  for (const id of MODULE_IDS) await import(`../../../modules/${id}/index`);
   registry = await import('../../moduleRegistry');
 });
 

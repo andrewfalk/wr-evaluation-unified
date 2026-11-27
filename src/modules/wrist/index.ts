@@ -2,9 +2,23 @@ import { registerModule } from '../../core/moduleRegistry';
 import { wristNarrative } from './narrative';
 import { WristEvaluation } from './WristEvaluation';
 import { createWristModuleData, createWristJobEvaluation, createWristDiagnosisEntry } from './utils/data';
+import type { WristDiagnosisLike, WristModuleDataInput, WristTemporalSequence } from './utils/data';
 import { computeWristCalc, isWristAssessmentComplete } from './utils/calculations';
 import { ensureModule, splitList, parseDate } from '../../core/utils/batchImportHelpers';
 import { wristBatchExport } from './batchExport';
+import type { ComponentType } from 'react';
+import type { ModuleDevFixtures, ModuleEvaluationProps, ModuleManifest } from '../../core/modules/manifest';
+
+/** applyRow가 받는 값 가운데 이 모듈이 읽는 모양(일괄 가져오기 — src/core/services/batchImport.ts). */
+interface WristImportRowContext {
+  patient: unknown;
+  row: unknown[];
+  diagnosis: (WristDiagnosisLike & { id: string }) | null;
+  job: { id: string } | null;
+  colMap: Record<string, number | undefined>;
+  getCell: (row: unknown[], index: number | undefined) => unknown;
+  rowIndex: number;
+}
 
 const PRESET_COMMON_FIELDS = [
   'main_task_name', 'direct_anatomic_link',
@@ -19,7 +33,7 @@ registerModule({
   name: '손목/손가락',
   icon: '✋',
   description: '손목 및 손가락 질환 공통 노출 평가',
-  EvaluationComponent: WristEvaluation,
+  EvaluationComponent: WristEvaluation as ComponentType<ModuleEvaluationProps>,
   createModuleData: createWristModuleData,
   computeCalc: computeWristCalc,
   isComplete: isWristAssessmentComplete,
@@ -29,7 +43,7 @@ registerModule({
   // 시험 데이터(core/fixtures/createTestPatients.js)가 쓰는 생성 함수(P2-53).
   devFixtures: {
     createJobEvaluation: createWristJobEvaluation,
-    createDiagnosisEntry: createWristDiagnosisEntry,
+    createDiagnosisEntry: createWristDiagnosisEntry as ModuleDevFixtures['createDiagnosisEntry'],
   },
   presetConfig: {
     label: '손목 공통 노출',
@@ -41,7 +55,7 @@ registerModule({
       { key: 'rest_distribution', label: '휴식 분포', type: 'string' },
       { key: 'force_level', label: '힘 사용', type: 'string' },
     ],
-    extractFromModule(moduleData, sharedJobId) {
+    extractFromModule(moduleData: WristModuleDataInput, sharedJobId: string) {
       const jobEval = (moduleData.jobEvaluations || []).find(j => j.sharedJobId === sharedJobId);
       if (!jobEval) return null;
       const entry = (jobEval.diagnosisEntries || []).find(e =>
@@ -49,7 +63,7 @@ registerModule({
       );
       if (!entry) return null;
 
-      const result = {};
+      const result: Record<string, unknown> = {};
       for (const key of PRESET_COMMON_FIELDS) {
         const val = entry[key];
         if (val !== undefined && val !== '' && val !== null && !(Array.isArray(val) && val.length === 0)) {
@@ -58,7 +72,7 @@ registerModule({
       }
       return Object.keys(result).length > 0 ? result : null;
     },
-    applyToModule(moduleData, sharedJobId, presetData) {
+    applyToModule(moduleData: WristModuleDataInput, sharedJobId: string, presetData: Record<string, unknown>) {
       const jobEvals = [...(moduleData.jobEvaluations || [])];
       const idx = jobEvals.findIndex(j => j.sharedJobId === sharedJobId);
       if (idx < 0) {
@@ -120,7 +134,7 @@ registerModule({
       wristBk2103FrequentHighForceGrip: ['손목_bk2103_고강도파지', 'wrist_bk2103_frequent_high_force_grip'],
       wristBk2106PressureSource: ['손목_bk2106_압박원인', 'wrist_bk2106_pressure_source'],
     },
-    applyRow({ patient, row, diagnosis, job, colMap, getCell }) {
+    applyRow({ patient, row, diagnosis, job, colMap, getCell }: WristImportRowContext) {
       if (!diagnosis || !job) return;
 
       const hasWristData = [
@@ -131,7 +145,7 @@ registerModule({
       ].some(index => getCell(row, index));
       if (!hasWristData) return;
 
-      const wristData = ensureModule(patient, 'wrist');
+      const wristData = ensureModule(patient, 'wrist') as WristModuleDataInput;
       if (!wristData.temporalSequence) {
         wristData.temporalSequence = wristData.temporalRelation || createWristModuleData().temporalSequence;
       }
@@ -196,17 +210,17 @@ registerModule({
       });
 
       if (getCell(row, colMap.wristRecentTaskChange)) {
-        wristData.temporalSequence.recent_task_change = String(getCell(row, colMap.wristRecentTaskChange)).trim();
+        (wristData.temporalSequence as WristTemporalSequence).recent_task_change = String(getCell(row, colMap.wristRecentTaskChange)).trim();
       }
       if (getCell(row, colMap.wristTaskChangeDate)) {
-        wristData.temporalSequence.task_change_date = parseDate(getCell(row, colMap.wristTaskChangeDate));
+        (wristData.temporalSequence as WristTemporalSequence).task_change_date = parseDate(getCell(row, colMap.wristTaskChangeDate));
       }
       if (getCell(row, colMap.wristSymptomOnsetInterval)) {
-        wristData.temporalSequence.symptom_onset_interval = String(getCell(row, colMap.wristSymptomOnsetInterval)).trim();
+        (wristData.temporalSequence as WristTemporalSequence).symptom_onset_interval = String(getCell(row, colMap.wristSymptomOnsetInterval)).trim();
       }
       if (getCell(row, colMap.wristImprovesWithRest)) {
-        wristData.temporalSequence.improves_with_rest = String(getCell(row, colMap.wristImprovesWithRest)).trim();
+        (wristData.temporalSequence as WristTemporalSequence).improves_with_rest = String(getCell(row, colMap.wristImprovesWithRest)).trim();
       }
     },
   },
-});
+} satisfies ModuleManifest);

@@ -14,7 +14,7 @@ describe('모듈 미등록', () => {
 
 describe('6모듈 등록', () => {
   it('구간 7개(지금 열 순서), 열 124개, 머리글 고유', async () => {
-    for (const id of ['knee', 'shoulder', 'elbow', 'wrist', 'spine', 'cervical']) await import(`../../../modules/${id}/index.js`);
+    for (const id of ['knee', 'shoulder', 'elbow', 'wrist', 'spine', 'cervical']) await import(`../../../modules/${id}/index`);
     expect(getBatchColumnSections().map(section => [section.id, section.order, section.columns.length])).toEqual([
       ['core', 0, 32],
       ['knee', 10, 8],

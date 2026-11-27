@@ -58,7 +58,7 @@ beforeEach(async () => {
   URL.createObjectURL = vi.fn(() => 'blob:golden');
   URL.revokeObjectURL = vi.fn();
   vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function click() { downloads.push(this.download); });
-  for (const id of MODULE_IDS) await import(`../../../modules/${id}/index.js`);
+  for (const id of MODULE_IDS) await import(`../../../modules/${id}/index`);
   XLSX = await import('xlsx');
   exportService = await import('../exportService');
   reportGenerator = await import('../reportGenerator');
