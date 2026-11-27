@@ -1,6 +1,60 @@
 import { resolveDiagnosisModule } from '../../../core/utils/diagnosisMapping';
 import { stableStringify } from '../../../core/utils/common';
 
+/** 상병(공용 shared.diagnoses 항목) 가운데 이 파일이 읽는 필드. */
+export interface WristDiagnosisLike {
+  id?: string;
+  code?: string;
+  name?: string;
+  moduleId?: string | null;
+}
+
+/** 직력(shared.jobs 항목) 가운데 이 파일이 읽는 필드. */
+export interface WristJobLike {
+  id: string;
+}
+
+/** 직력 × 상병 한 칸의 입력값(createWristDiagnosisEntry의 모양 + 옛 데이터·자동 복사가 더하는 필드). */
+export interface WristDiagnosisEntry {
+  diagnosisId: string;
+  selectedBkType: string;
+  bkSelectionMode: string;
+  bkAutoSyncedFrom?: string;
+  exposure_types: string[];
+  bk2103_tool_pressing: string;
+  bk2103_frequent_high_force_grip: string;
+  [field: string]: unknown;
+}
+
+export interface WristTemporalSequence {
+  recent_task_change: string;
+  task_change_date: string;
+  symptom_onset_interval: string;
+  improves_with_rest: string;
+}
+
+export interface WristJobEvaluation {
+  sharedJobId: string;
+  diagnosisEntries: WristDiagnosisEntry[];
+  _pendingPreset?: Record<string, unknown>;
+  [field: string]: unknown;
+}
+
+/** 저장된 모듈 데이터(옛 형식 포함 — temporalRelation·diagnosisEvaluations). */
+export interface WristModuleDataInput {
+  returnConsiderations?: string;
+  temporalSequence?: Partial<WristTemporalSequence>;
+  temporalRelation?: Partial<WristTemporalSequence>;
+  jobEvaluations?: WristJobEvaluation[];
+  diagnosisEvaluations?: Array<Partial<WristDiagnosisEntry> & { diagnosisId: string; linkedJobId?: string }>;
+}
+
+export interface WristModuleData {
+  returnConsiderations: string;
+  temporalSequence: WristTemporalSequence;
+  jobEvaluations: WristJobEvaluation[];
+}
+
 export const BK_TYPE_OPTIONS = [
   { value: '', label: '선택' },
   { value: 'BK2113', label: 'BK2113 수근관증후군' },
@@ -71,11 +125,11 @@ export const WRIST_BRANCH_FIELDS = {
   ],
 };
 
-function serialize(value) {
+function serialize(value: unknown) {
   return stableStringify(value || null);
 }
 
-export function createWristTemporalSequence() {
+export function createWristTemporalSequence(): WristTemporalSequence {
   return {
     recent_task_change: '',
     task_change_date: '',
@@ -84,7 +138,7 @@ export function createWristTemporalSequence() {
   };
 }
 
-export function inferWristBkTypeFromDiagnosis(diagnosis = {}) {
+export function inferWristBkTypeFromDiagnosis(diagnosis: WristDiagnosisLike = {}): string {
   const code = String(diagnosis.code || '').trim().toUpperCase();
   const name = String(diagnosis.name || '').trim();
 
@@ -105,7 +159,7 @@ export function inferWristBkTypeFromDiagnosis(diagnosis = {}) {
   return '';
 }
 
-export function createWristDiagnosisEntry(diagnosis = {}) {
+export function createWristDiagnosisEntry(diagnosis: WristDiagnosisLike = {}): WristDiagnosisEntry {
   const inferredBkType = inferWristBkTypeFromDiagnosis(diagnosis);
 
   return {
@@ -140,18 +194,18 @@ export function createWristDiagnosisEntry(diagnosis = {}) {
   };
 }
 
-export function createWristDiagnosisEvaluation(diagnosisId = '') {
+export function createWristDiagnosisEvaluation(diagnosisId = ''): WristDiagnosisEntry {
   return createWristDiagnosisEntry({ id: diagnosisId });
 }
 
-export function createWristJobEvaluation(sharedJobId = '') {
+export function createWristJobEvaluation(sharedJobId = ''): WristJobEvaluation {
   return {
     sharedJobId,
     diagnosisEntries: [],
   };
 }
 
-export function createWristModuleData() {
+export function createWristModuleData(): WristModuleData {
   return {
     returnConsiderations: '',
     temporalSequence: createWristTemporalSequence(),
@@ -159,15 +213,15 @@ export function createWristModuleData() {
   };
 }
 
-export function isWristDiagnosis(diag, activeModules = []) {
+export function isWristDiagnosis(diag: WristDiagnosisLike, activeModules: string[] = []): boolean {
   const resolved = resolveDiagnosisModule(diag, activeModules);
   if (resolved?.moduleId === 'wrist') return true;
   if (diag?.moduleId === '__none__' || resolved) return false;
   return Boolean(inferWristBkTypeFromDiagnosis(diag));
 }
 
-export function resetWristBranchFields(entry = {}, nextBkType = '') {
-  const nextEntry = { ...entry, selectedBkType: nextBkType };
+export function resetWristBranchFields(entry: Partial<WristDiagnosisEntry> = {}, nextBkType = ''): Partial<WristDiagnosisEntry> {
+  const nextEntry: Partial<WristDiagnosisEntry> = { ...entry, selectedBkType: nextBkType };
 
   Object.values(WRIST_BRANCH_FIELDS).flat().forEach(fieldName => {
     nextEntry[fieldName] = Array.isArray(nextEntry[fieldName]) ? [] : '';
@@ -176,15 +230,15 @@ export function resetWristBranchFields(entry = {}, nextBkType = '') {
   return nextEntry;
 }
 
-function normalizeTemporalSequence(moduleData = {}) {
+function normalizeTemporalSequence(moduleData: WristModuleDataInput = {}): WristTemporalSequence {
   return {
     ...createWristTemporalSequence(),
     ...(moduleData.temporalSequence || moduleData.temporalRelation || {}),
   };
 }
 
-function buildLegacyEntryMap(moduleData = {}, jobs = [], diagnoses = []) {
-  const legacyMap = new Map();
+function buildLegacyEntryMap(moduleData: WristModuleDataInput = {}, jobs: WristJobLike[] = [], diagnoses: WristDiagnosisLike[] = []) {
+  const legacyMap = new Map<string, WristDiagnosisEntry>();
   const firstJobId = jobs[0]?.id || '';
   const legacyDiagnoses = Array.isArray(moduleData.diagnosisEvaluations)
     ? moduleData.diagnosisEvaluations
@@ -195,7 +249,7 @@ function buildLegacyEntryMap(moduleData = {}, jobs = [], diagnoses = []) {
     const sharedJobId = legacyEntry.linkedJobId || firstJobId;
     if (!sharedJobId || !legacyEntry.diagnosisId) return;
 
-    const nextEntry = {
+    const nextEntry: WristDiagnosisEntry = {
       ...createWristDiagnosisEntry(diagnosis),
       ...legacyEntry,
       diagnosisId: legacyEntry.diagnosisId,
@@ -207,8 +261,8 @@ function buildLegacyEntryMap(moduleData = {}, jobs = [], diagnoses = []) {
   return legacyMap;
 }
 
-function normalizeDiagnosisEntry(existingEntry, diagnosis) {
-  const baseEntry = {
+function normalizeDiagnosisEntry(existingEntry: WristDiagnosisEntry | undefined, diagnosis: WristDiagnosisLike & { id: string }): WristDiagnosisEntry {
+  const baseEntry: WristDiagnosisEntry = {
     ...createWristDiagnosisEntry(diagnosis),
     ...(existingEntry || {}),
     diagnosisId: diagnosis.id,
@@ -240,7 +294,7 @@ function normalizeDiagnosisEntry(existingEntry, diagnosis) {
 
 const BK_GROUP_META_FIELDS = new Set(['diagnosisId', 'selectedBkType', 'bkSelectionMode', 'bkAutoSyncedFrom']);
 
-function scoreDiagnosisEntry(entry) {
+function scoreDiagnosisEntry(entry: WristDiagnosisEntry | undefined): number {
   if (!entry) return 0;
   return Object.entries(entry).filter(([key, value]) =>
     !BK_GROUP_META_FIELDS.has(key) &&
@@ -249,18 +303,23 @@ function scoreDiagnosisEntry(entry) {
   ).length;
 }
 
-export function syncWristModuleData(moduleData = {}, jobs = [], diagnoses = [], activeModules = []) {
+export function syncWristModuleData(
+  moduleData: WristModuleDataInput = {},
+  jobs: WristJobLike[] = [],
+  diagnoses: Array<WristDiagnosisLike & { id: string }> | null = [],
+  activeModules: string[] = [],
+) {
   const wristDiagnoses = (diagnoses || []).filter(diag => isWristDiagnosis(diag, activeModules));
   const temporalSequence = normalizeTemporalSequence(moduleData);
   const legacyEntryMap = buildLegacyEntryMap(moduleData, jobs, wristDiagnoses);
-  const existingJobMap = new Map(
+  const existingJobMap = new Map<string, WristJobEvaluation>(
     (moduleData.jobEvaluations || []).map(jobEvaluation => [jobEvaluation.sharedJobId, jobEvaluation])
   );
 
   const nextJobEvaluations = (jobs || []).map(job => {
     const existingJobEvaluation = existingJobMap.get(job.id);
     const pendingPreset = existingJobEvaluation?._pendingPreset;
-    const existingEntryMap = new Map(
+    const existingEntryMap = new Map<string, WristDiagnosisEntry>(
       (existingJobEvaluation?.diagnosisEntries || []).map(entry => [entry.diagnosisId, entry])
     );
 
@@ -285,7 +344,7 @@ export function syncWristModuleData(moduleData = {}, jobs = [], diagnoses = [], 
     // (화면엔 대표값이 채워진 것처럼 보이지만 실제 저장값은 비어있는 상태를 방지하기 위해) 대표값을 즉시 복사한다.
     diagnosisEntries.forEach(({ entry, autoSyncEligible }) => {
       if (!autoSyncEligible || !entry.selectedBkType || scoreDiagnosisEntry(entry) > 0) return;
-      const donor = diagnosisEntries.reduce((best, other) => {
+      const donor = diagnosisEntries.reduce<(typeof diagnosisEntries)[number] | null>((best, other) => {
         if (other.entry === entry || other.entry.selectedBkType !== entry.selectedBkType) return best;
         const score = scoreDiagnosisEntry(other.entry);
         if (score === 0) return best;
@@ -300,7 +359,7 @@ export function syncWristModuleData(moduleData = {}, jobs = [], diagnoses = [], 
       entry.bkAutoSyncedFrom = donor.entry.diagnosisId;
     });
 
-    const { _pendingPreset, ...restJobEval } = (existingJobEvaluation || {});
+    const { _pendingPreset, ...restJobEval } = (existingJobEvaluation || {}) as Partial<WristJobEvaluation>;
     return {
       ...createWristJobEvaluation(job.id),
       ...restJobEval,
@@ -309,7 +368,7 @@ export function syncWristModuleData(moduleData = {}, jobs = [], diagnoses = [], 
     };
   });
 
-  const nextModuleData = {
+  const nextModuleData: WristModuleData = {
     returnConsiderations: moduleData?.returnConsiderations || '',
     temporalSequence,
     jobEvaluations: nextJobEvaluations,
