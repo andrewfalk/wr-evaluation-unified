@@ -1,7 +1,9 @@
 import { BK_TYPE_LABELS } from '../utils/data';
 import { formatCommonExposureTypeText, groupSummariesByBkType, mergeBkGroupSummaries } from '../utils/calculations';
 import { getSideText } from '../../../core/i18n/sideLabels';
-import type { BkSummaryGroup, DiagnosisSummary, WristCalcResult, FlagItem } from '@wr/analytics-core/modules/wrist/index';
+import type { DiagnosisSummary, WristCalcResult } from '@wr/analytics-core/modules/wrist/index';
+import { BkGroupSummaryCard, MissingList, SummaryCard } from '../../_shared/upperLimb/ResultCards';
+import type { UpperLimbResultCardConfig } from '../../_shared/upperLimb/ResultCards';
 import type { WristTemporalSequence } from '../utils/data';
 
 type TemporalField = keyof WristTemporalSequence;
@@ -17,26 +19,6 @@ const REST_OPTIONS = [
   { value: 'yes', label: '예' },
   { value: 'no', label: '아니오' },
 ];
-
-function FlagPill({ flag }: { flag: FlagItem }) {
-  return (
-    <span className={`wrist-flag-pill tone-${flag.tone || 'neutral'}`} title={flag.description || ''}>
-      <span className="wrist-flag-icon">{flag.icon}</span>
-      <span>{flag.label}</span>
-    </span>
-  );
-}
-
-function MissingList({ title, items }: { title: string; items: string[] | undefined }) {
-  if (!items || items.length === 0) return null;
-
-  return (
-    <div className="result-note">
-      <strong>{title}</strong>
-      <div className="wrist-note-list">{items.join(', ')}</div>
-    </div>
-  );
-}
 
 function TemporalSequenceSection({ temporalSequence, onChange }: { temporalSequence: WristTemporalSequence; onChange: (field: TemporalField, value: string) => void }) {
   return (
@@ -104,103 +86,17 @@ function TemporalSequenceSection({ temporalSequence, onChange }: { temporalSeque
   );
 }
 
-function SummaryCard({ summary }: { summary: DiagnosisSummary }) {
-  const diag: Partial<DiagnosisSummary['diagnosis']> = summary.diagnosis || {};
-  const entry: Partial<DiagnosisSummary['entry']> = summary.entry || {};
-  const exposureTypes = formatCommonExposureTypeText(entry);
-  const riskFactorSummary = summary.riskFactorItems?.length > 0
-    ? summary.riskFactorItems.map(flag => flag.label).join(', ')
-    : '확인된 위험 요인 없음';
-
-  return (
-    <div className="result-detail-card wrist-summary-card">
-      <div className="result-card-title">{diag.code || '-'} {diag.name || '손목 상병'}</div>
-      <div className="result-card-meta">
-        {summary.jobName || '직업 미입력'}
-        {' · '}
-        {getSideText(diag.side)}
-        {' · '}
-        {BK_TYPE_LABELS[entry.selectedBkType as string] || 'BK 유형 미선택'}
-        {' · '}
-        {entry.bkSelectionMode === 'manual' ? '수동 선택' : (entry.selectedBkType ? '자동 제안' : '자동 제안 없음')}
-      </div>
-
-      <div className="result-metric-list">
-        <div className="result-metric-row"><span>문제 작업</span><strong>{entry.main_task_name || '-'}</strong></div>
-        <div className="result-metric-row"><span>공통 노출 유형</span><strong>{exposureTypes}</strong></div>
-        <div className="result-metric-row"><span>1일 노출시간</span><strong>{entry.daily_exposure_hours || '-'}시간</strong></div>
-        <div className="result-metric-row"><span>근무시간 비중</span><strong>{entry.shift_share_percent || '-'}%</strong></div>
-      </div>
-
-      <div className="wrist-flag-list">
-        {summary.flagItems.length > 0
-          ? summary.flagItems.map(flag => <FlagPill key={flag.key} flag={flag} />)
-          : <span className="result-card-meta">표시할 신호 없음</span>}
-      </div>
-
-      <MissingList title="입력 누락" items={summary.missingFields} />
-
-      <div className="report-preview ai-result-panel wrist-summary-panel">
-        <div className="report-preview-toolbar">
-          <span className="report-preview-label">분석 정리</span>
-        </div>
-        <div className="preview-section wrist-summary-copy">
-          <div>{summary.narrative}</div>
-          <div><strong>업무관련성 위험 요인:</strong> {riskFactorSummary}</div>
-          <div className="wrist-summary-conclusion"><strong>종합평가</strong> {summary.riskFactorSentence}</div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function BkGroupSummaryCard({ group }: { group: BkSummaryGroup }) {
-  const merged = mergeBkGroupSummaries(group.summaries);
-  const representativeEntry: Partial<DiagnosisSummary['entry']> = merged.entry || {};
-  const exposureTypes = formatCommonExposureTypeText(representativeEntry);
-  const riskFactorSummary = merged.riskFactorItems?.length > 0
-    ? merged.riskFactorItems.map(flag => flag.label).join(', ')
-    : '확인된 위험 요인 없음';
-  const diagSubtitle = group.summaries
-    .map(s => {
-      const d: Partial<DiagnosisSummary['diagnosis']> = s.diagnosis || {};
-      return `${d.code || ''} ${d.name || ''}`.trim();
-    })
-    .join(' / ');
-
-  return (
-    <div className="result-detail-card wrist-summary-card">
-      <div className="result-card-title">{BK_TYPE_LABELS[group.bkType] || group.bkType}</div>
-      <div className="result-card-meta">{diagSubtitle}</div>
-
-      <div className="result-metric-list">
-        <div className="result-metric-row"><span>문제 작업</span><strong>{representativeEntry.main_task_name || '-'}</strong></div>
-        <div className="result-metric-row"><span>공통 노출 유형</span><strong>{exposureTypes}</strong></div>
-        <div className="result-metric-row"><span>1일 노출시간</span><strong>{representativeEntry.daily_exposure_hours || '-'}시간</strong></div>
-        <div className="result-metric-row"><span>근무시간 비중</span><strong>{representativeEntry.shift_share_percent || '-'}%</strong></div>
-      </div>
-
-      <div className="wrist-flag-list">
-        {merged.flagItems?.length > 0
-          ? merged.flagItems.map(flag => <FlagPill key={flag.key} flag={flag} />)
-          : <span className="result-card-meta">표시할 신호 없음</span>}
-      </div>
-
-      <MissingList title="입력 누락" items={merged.missingFields} />
-
-      <div className="report-preview ai-result-panel wrist-summary-panel">
-        <div className="report-preview-toolbar">
-          <span className="report-preview-label">분석 정리</span>
-        </div>
-        <div className="preview-section wrist-summary-copy">
-          <div>{merged.narrative}</div>
-          <div><strong>업무관련성 위험 요인:</strong> {riskFactorSummary}</div>
-          <div className="wrist-summary-conclusion"><strong>종합평가</strong> {merged.riskFactorSentence}</div>
-        </div>
-      </div>
-    </div>
-  );
-}
+// 결과 카드(상병 요약·BK 묶음 요약·신호 알약·입력 누락)는 팔꿈치·손목 공용(_shared/upperLimb/ResultCards, P2-72b) — 이 모듈의
+// className 접두·라벨을 넘긴다. 패널 본문(시간적 선후관계·직업별 묶음)은 손목과 두 벌로 남는다(P2-71 twinParity가 지킨다).
+const CARD_CONFIG: UpperLimbResultCardConfig<DiagnosisSummary> = {
+  classPrefix: 'wrist',
+  emptyDiagnosisName: '손목 상병',
+  labels: { exposureTypes: '공통 노출 유형', shiftShare: '근무시간 비중', riskFactors: '업무관련성 위험 요인:' },
+  bkLabels: BK_TYPE_LABELS,
+  getSideText,
+  formatExposureTypes: formatCommonExposureTypeText,
+  mergeGroups: mergeBkGroupSummaries,
+};
 
 export interface WristResultPanelProps {
   calc: WristCalcResult | null | undefined;
@@ -233,7 +129,7 @@ export function WristResultPanel({ calc, temporalSequence, onTemporalChange }: W
             : <span className="result-card-meta">선후관계 확인되지 않음</span>
           }
           {calc.missingCommonFields?.length > 0 && (
-            <MissingList title="시간적 선후관계 입력 누락" items={calc.missingCommonFields} />
+            <MissingList classPrefix="wrist" title="시간적 선후관계 입력 누락" items={calc.missingCommonFields} />
           )}
         </div>
 
@@ -249,8 +145,8 @@ export function WristResultPanel({ calc, temporalSequence, onTemporalChange }: W
               <div className="result-detail-stack">
                 {groupSummariesByBkType(jobSummary.diagnosisSummaries || []).map(group =>
                   group.isGrouped
-                    ? <BkGroupSummaryCard key={group.bkType} group={group} />
-                    : <SummaryCard key={`${group.summaries[0]?.sharedJobId}_${group.summaries[0]?.diagnosisId}`} summary={group.summaries[0]} />
+                    ? <BkGroupSummaryCard key={group.bkType} group={group} config={CARD_CONFIG} />
+                    : <SummaryCard key={`${group.summaries[0]?.sharedJobId}_${group.summaries[0]?.diagnosisId}`} summary={group.summaries[0]} config={CARD_CONFIG} />
                 )}
               </div>
             </div>
