@@ -182,6 +182,12 @@ function changedParts(before: Fields, after: Fields) {
     if (JSON.stringify(a.get(key)) !== JSON.stringify(b.get(key))) entries[key] = b.get(key) ?? null;
   }
   out.entries = entries;
+  // 엔트리 내용은 그대로인데 순서만 바뀌거나 직력별 다른 필드가 바뀐 경우도 잡는다(Codex P2-67b 1회차 권고).
+  const shape = (data: Fields) => ((data.jobEvaluations as Fields[] | undefined) || []).map(jobEval => {
+    const { diagnosisEntries, ...rest } = jobEval;
+    return { ...rest, diagnosisIds: ((diagnosisEntries as Fields[] | undefined) || []).map(entry => entry.diagnosisId) };
+  });
+  if (JSON.stringify(shape(before)) !== JSON.stringify(shape(after))) out.jobEvaluationsShape = shape(after);
   return out;
 }
 
