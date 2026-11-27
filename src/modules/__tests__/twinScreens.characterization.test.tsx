@@ -21,6 +21,8 @@ import { getModule } from '../../core/moduleRegistry';
 import { CervicalResultPanel } from '../cervical/components/CervicalResultPanel';
 import { SpineResultPanel } from '../spine/components/SpineResultPanel';
 import { VibrationResultPanel } from '../spine/components/VibrationResultPanel';
+import type { CervicalCalcResult } from '@wr/analytics-core/modules/cervical/index';
+import type { SpineCalcResult, VibrationCalcResult } from '@wr/analytics-core/modules/spine/index';
 import { BasicInfoForm } from '../../core/components/BasicInfoForm';
 
 type Fields = Record<string, unknown>;
@@ -296,8 +298,8 @@ describe('P2-67b — 경추·척추 결과 패널', () => {
       const calc = mod.computeCalc({ shared: c.shared, module: c.module || {} }) as Fields;
       const { container, unmount } = render(
         moduleId === 'cervical'
-          ? <CervicalResultPanel calc={calc} />
-          : <><SpineResultPanel calc={calc} /><VibrationResultPanel calc={calc?.vibration} /></>,
+          ? <CervicalResultPanel calc={calc as unknown as CervicalCalcResult} />
+          : <><SpineResultPanel calc={calc as unknown as SpineCalcResult} /><VibrationResultPanel calc={calc?.vibration as VibrationCalcResult} /></>,
       );
       result[c.name] = serializeDom(container);
       unmount();

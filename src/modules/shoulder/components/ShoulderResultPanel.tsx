@@ -1,6 +1,7 @@
 import { NoEvaluableJobsNotice } from '../../../core/components/NoEvaluableJobsNotice';
+import type { ShoulderCalcResult } from '@wr/analytics-core/modules/shoulder/index';
 
-function RatioBar({ ratio }) {
+function RatioBar({ ratio }: { ratio: number }) {
   const pct = Math.min(ratio * 100, 100);
   const level = ratio >= 1.0 ? 'danger' : ratio >= 0.7 ? 'warning' : 'safe';
   return (
@@ -15,7 +16,11 @@ function RatioBar({ ratio }) {
   );
 }
 
-export function ShoulderResultPanel({ calc }) {
+export interface ShoulderResultPanelProps {
+  calc: ShoulderCalcResult | null | undefined;
+}
+
+export function ShoulderResultPanel({ calc }: ShoulderResultPanelProps) {
   if (calc?.noEvaluableJobs) return <div className="panel"><NoEvaluableJobsNotice compact /></div>;
   if (!calc?.totals) return null;
 
@@ -84,7 +89,7 @@ export function ShoulderResultPanel({ calc }) {
               {jobsWithData.map((j, idx) => (
                 <div key={j.id} className="result-detail-card">
                   <div className="result-card-title">
-                    직력 {idx + 1}: {j.jobName}
+                    직력 {idx + 1}: {j.jobName as string}
                   </div>
                   <div className="result-card-meta">
                     {j.periodYears > 0 ? `${j.periodYears.toFixed(1)}년` : '-'} · {j.workDaysPerYear}일/년

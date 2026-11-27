@@ -1,12 +1,17 @@
 import { WBV_FORMULA_LABEL, WBV_FORMULA_TITLE } from '../utils/formulaVersion';
+import type { VibrationCalcResult } from '@wr/analytics-core/modules/spine/index';
 
 const riskIcon = { danger: '⛔', warning: '⚠️', safe: '✅' };
 const statusLabel = { safe: '✓ 미만', warning: '⚠ 걸침', danger: '✗ 초과' };
 
-const fmt = (v, d = 2) => (Number.isFinite(Number(v)) ? Number(v).toFixed(d) : '-');
+const fmt = (v: unknown, d = 2) => (Number.isFinite(Number(v)) ? Number(v).toFixed(d) : '-');
 
 // calc은 computeVibrationCalc 결과(=상위 calc.vibration 서브객체)를 받는다.
-export function VibrationResultPanel({ calc }) {
+export interface VibrationResultPanelProps {
+  calc: VibrationCalcResult | null | undefined;
+}
+
+export function VibrationResultPanel({ calc }: VibrationResultPanelProps) {
   if (!calc || calc.evalMethod !== 'wbv') return null;
 
   // present일 때만 결과 패널 표시. unknown(미평가)·none(노출없음)은 공간 절약을 위해 미표시.
@@ -60,7 +65,7 @@ export function VibrationResultPanel({ calc }) {
         </div>
 
         <div className={`result-risk-banner level-${risk.level}`}>
-          <div className="result-risk-icon">{riskIcon[risk.level]}</div>
+          <div className="result-risk-icon">{riskIcon[risk.level as keyof typeof riskIcon]}</div>
           <div>
             <div className={`result-risk-title level-${risk.level}`}>{risk.text}</div>
             <div className="result-risk-copy">{risk.description}</div>
@@ -81,7 +86,7 @@ export function VibrationResultPanel({ calc }) {
                 <div className="result-card-top result-card-top-tight">
                   <div>
                     <span className="result-card-title">{name}</span>
-                    <span className={`result-status-badge level-${data.status}`}>{statusLabel[data.status]}</span>
+                    <span className={`result-status-badge level-${data.status}`}>{statusLabel[data.status as keyof typeof statusLabel]}</span>
                   </div>
                   <div className="result-card-meta">
                     <span className={`result-value-highlight ${data.status !== 'safe' ? `level-${data.status}` : ''}`}>
