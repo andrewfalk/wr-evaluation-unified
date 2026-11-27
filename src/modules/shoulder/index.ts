@@ -6,13 +6,31 @@ import { ensureModule } from '../../core/utils/batchImportHelpers';
 import { jobScopeWriteField, stringCoerce } from '../../core/utils/videoMapping';
 import { shoulderBatchExport } from './batchExport';
 import { shoulderNarrative } from './narrative';
+import type { ShoulderJobExtras } from './components/JobTab';
+import type { ComponentType } from 'react';
+import type { ModuleEvaluationProps, ModuleManifest } from '../../core/modules/manifest';
+
+/** applyRow가 받는 값 가운데 이 모듈이 읽는 모양(일괄 가져오기 — src/core/services/batchImport.ts). */
+interface ShoulderImportRowContext {
+  patient: unknown;
+  row: unknown[];
+  diagnosis: { ellmanRight?: string; ellmanLeft?: string } | null;
+  job: { id: string } | null;
+  colMap: Record<string, number | undefined>;
+  getCell: (row: unknown[], index: number | undefined) => unknown;
+  rowIndex: number;
+}
+
+interface ShoulderModuleShape {
+  jobExtras?: ShoulderJobExtras[];
+}
 
 registerModule({
   id: 'shoulder',
   name: '어깨',
   icon: '🙆',
   description: '어깨 근골격계 질환 업무관련성 평가',
-  EvaluationComponent: ShoulderEvaluation,
+  EvaluationComponent: ShoulderEvaluation as ComponentType<ModuleEvaluationProps>,
   createModuleData: createShoulderModuleData,
   computeCalc: computeShoulderCalc,
   isComplete: isShoulderAssessmentComplete,
@@ -25,7 +43,7 @@ registerModule({
     scope: 'job',
     featureKeys: ['overheadHours', 'repetitiveMediumHours', 'repetitiveFastHours'],
     coerce: stringCoerce, // *_Hours는 문자열 저장
-    writeField: (moduleData, ctx, featureKey, value) =>
+    writeField: (moduleData: unknown, ctx: unknown, featureKey: string, value: unknown) =>
       jobScopeWriteField('shoulder', createShoulderJobExtras, moduleData, ctx, featureKey, value),
   },
   presetConfig: {
@@ -38,7 +56,7 @@ registerModule({
       { key: 'heavyLoadSeconds', label: '중량물 취급 (초/회)', type: 'number' },
       { key: 'vibrationHours', label: '진동 노출 (시간/일)', type: 'number' },
     ],
-    extractFromModule(moduleData, sharedJobId) {
+    extractFromModule(moduleData: ShoulderModuleShape, sharedJobId: string) {
       const e = (moduleData.jobExtras || []).find(x => x.sharedJobId === sharedJobId);
       if (!e) return null;
       return {
@@ -47,7 +65,7 @@ registerModule({
         heavyLoadSeconds: e.heavyLoadSeconds, vibrationHours: e.vibrationHours,
       };
     },
-    applyToModule(moduleData, sharedJobId, presetData) {
+    applyToModule(moduleData: ShoulderModuleShape, sharedJobId: string, presetData: Partial<Record<keyof ShoulderJobExtras, unknown>>) {
       const extras = [...(moduleData.jobExtras || [])];
       const idx = extras.findIndex(e => e.sharedJobId === sharedJobId);
       const patch = {
@@ -77,7 +95,7 @@ registerModule({
       shoulderHeavySeconds: ['중량물시간(초/회)', '중량물시간', 'heavyloadseconds'],
       shoulderVibration: ['진동(시간/일)', 'vibration'],
     },
-    applyRow({ patient, row, diagnosis, job, colMap, getCell }) {
+    applyRow({ patient, row, diagnosis, job, colMap, getCell }: ShoulderImportRowContext) {
       if (diagnosis && (getCell(row, colMap.ellmanRight) || getCell(row, colMap.ellmanLeft))) {
         diagnosis.ellmanRight = diagnosis.ellmanRight || String(getCell(row, colMap.ellmanRight) || '').trim();
         diagnosis.ellmanLeft = diagnosis.ellmanLeft || String(getCell(row, colMap.ellmanLeft) || '').trim();
@@ -86,7 +104,7 @@ registerModule({
       const hasShoulderData = [colMap.shoulderOverhead, colMap.shoulderMedium, colMap.shoulderFast, colMap.shoulderHeavyCount, colMap.shoulderHeavySeconds, colMap.shoulderVibration].some(index => getCell(row, index));
       if (!hasShoulderData || !job) return;
 
-      const shoulderData = ensureModule(patient, 'shoulder');
+      const shoulderData = ensureModule(patient, 'shoulder') as ShoulderModuleShape;
       if (!shoulderData.jobExtras) shoulderData.jobExtras = [];
       let extra = (shoulderData.jobExtras || []).find(item => item.sharedJobId === job.id);
       if (!extra) {
@@ -103,4 +121,4 @@ registerModule({
       });
     },
   },
-});
+} satisfies ModuleManifest);

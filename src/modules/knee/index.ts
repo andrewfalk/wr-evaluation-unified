@@ -6,13 +6,43 @@ import { parseKlg, parseBool, ensureModule } from '../../core/utils/batchImportH
 import { jobScopeWriteField, stringCoerce } from '../../core/utils/videoMapping';
 import { kneeBatchExport } from './batchExport';
 import { kneeNarrative } from './narrative';
+import type { KneeJobExtras } from './components/JobTab';
+import type { ComponentType } from 'react';
+import type { ModuleEvaluationProps, ModuleManifest } from '../../core/modules/manifest';
+
+/** applyRow가 받는 값 가운데 이 모듈이 읽는 모양(일괄 가져오기 — src/core/services/batchImport.ts). */
+interface KneeImportRowContext {
+  patient: unknown;
+  row: unknown[];
+  diagnosis: { klgRight?: unknown; klgLeft?: unknown } | null;
+  job: { id: string } | null;
+  colMap: Record<string, number | undefined>;
+  getCell: (row: unknown[], index: number | undefined) => unknown;
+  rowIndex: number;
+}
+
+interface KneeModuleShape {
+  jobExtras?: KneeJobExtras[];
+}
+
+/** 프리셋 값(무릎 신체부담 — 저장된 프리셋 JSON이라 숫자 칸은 문자열·숫자 어느 쪽일 수 있다). */
+interface KneePresetData {
+  weight?: unknown;
+  squatting?: unknown;
+  stairs?: boolean;
+  kneeTwist?: boolean;
+  startStop?: boolean;
+  tightSpace?: boolean;
+  kneeContact?: boolean;
+  jumpDown?: boolean;
+}
 
 registerModule({
   id: 'knee',
   name: '무릎 (슬관절)',
   icon: '\uD83C\uDFC3',
   description: '근골격계 질환 업무관련성 평가',
-  EvaluationComponent: KneeEvaluation,
+  EvaluationComponent: KneeEvaluation as ComponentType<ModuleEvaluationProps>,
   createModuleData: createKneeModuleData,
   computeCalc: computeKneeCalc,
   isComplete: isKneeAssessmentComplete,
@@ -24,7 +54,7 @@ registerModule({
     scope: 'job',
     featureKeys: ['squatDuration'],
     coerce: stringCoerce, // squatting은 문자열 저장
-    writeField: (moduleData, ctx, featureKey, value) =>
+    writeField: (moduleData: unknown, ctx: unknown, featureKey: string, value: unknown) =>
       jobScopeWriteField('knee', createKneeJobExtras, moduleData, ctx, featureKey, value),
   },
   presetConfig: {
@@ -39,7 +69,7 @@ registerModule({
       { key: 'kneeContact', label: '무릎 접촉/충격', type: 'boolean' },
       { key: 'jumpDown', label: '뛰어내리기', type: 'boolean' },
     ],
-    extractFromModule(moduleData, sharedJobId) {
+    extractFromModule(moduleData: KneeModuleShape, sharedJobId: string) {
       const e = (moduleData.jobExtras || []).find(x => x.sharedJobId === sharedJobId);
       if (!e) return null;
       return {
@@ -48,7 +78,7 @@ registerModule({
         tightSpace: e.tightSpace, kneeContact: e.kneeContact, jumpDown: e.jumpDown,
       };
     },
-    applyToModule(moduleData, sharedJobId, presetData) {
+    applyToModule(moduleData: KneeModuleShape, sharedJobId: string, presetData: KneePresetData) {
       const extras = [...(moduleData.jobExtras || [])];
       const idx = extras.findIndex(e => e.sharedJobId === sharedJobId);
       const patch = {
@@ -82,7 +112,7 @@ registerModule({
       kneeContact: ['무릎접촉충격', 'contact'],
       kneeJumpDown: ['점프착지', 'jump'],
     },
-    applyRow({ patient, row, diagnosis, job, colMap, getCell }) {
+    applyRow({ patient, row, diagnosis, job, colMap, getCell }: KneeImportRowContext) {
       if (diagnosis && (getCell(row, colMap.klgRight) || getCell(row, colMap.klgLeft))) {
         diagnosis.klgRight = diagnosis.klgRight || parseKlg(getCell(row, colMap.klgRight));
         diagnosis.klgLeft = diagnosis.klgLeft || parseKlg(getCell(row, colMap.klgLeft));
@@ -91,7 +121,7 @@ registerModule({
       const hasKneeData = [colMap.kneeWeight, colMap.kneeSquatting, colMap.kneeStairs, colMap.kneeTwist, colMap.kneeStartStop, colMap.kneeTightSpace, colMap.kneeContact, colMap.kneeJumpDown].some(index => getCell(row, index));
       if (!hasKneeData || !job) return;
 
-      const kneeData = ensureModule(patient, 'knee');
+      const kneeData = ensureModule(patient, 'knee') as KneeModuleShape;
       if (!kneeData.jobExtras) kneeData.jobExtras = [];
       let extra = (kneeData.jobExtras || []).find(item => item.sharedJobId === job.id);
       if (!extra) {
@@ -110,4 +140,4 @@ registerModule({
       });
     },
   },
-});
+} satisfies ModuleManifest);

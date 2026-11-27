@@ -7,13 +7,34 @@ import { SPINE_FORMULA_V513 } from './utils/formulaVersion';
 import { ensureModule } from '../../core/utils/batchImportHelpers';
 import { taskScopeWriteField, numberCoerce } from '../../core/utils/videoMapping';
 import { spineBatchExport } from './batchExport';
+import type { ComponentType } from 'react';
+import type { ModuleEvaluationProps, ModuleManifest } from '../../core/modules/manifest';
+
+/** applyRow가 받는 값 가운데 이 모듈이 읽는 모양(일괄 가져오기 — src/core/services/batchImport.ts). */
+interface SpineImportRowContext {
+  patient: unknown;
+  row: unknown[];
+  diagnosis: unknown | null;
+  job: { id: string } | null;
+  colMap: Record<string, number | undefined>;
+  getCell: (row: unknown[], index: number | undefined) => unknown;
+  rowIndex: number;
+}
+
+/** MDDM 작업 한 줄(createTask의 모양 — 프리셋·일괄 가져오기가 읽고 쓰는 필드). */
+type SpineTask = ReturnType<typeof createTask>;
+
+interface SpineModuleShape {
+  tasks?: SpineTask[];
+  formulaVersion?: string;
+}
 
 registerModule({
   id: 'spine',
   name: '요추(허리)',
   icon: '\u2695\uFE0F',
   description: 'MDDM 요추 압박력 및 BK2110 전신진동 평가',
-  EvaluationComponent: SpineEvaluation,
+  EvaluationComponent: SpineEvaluation as ComponentType<ModuleEvaluationProps>,
   createModuleData: createSpineModuleData,
   computeCalc: computeSpineCalc,
   isComplete: isSpineAssessmentComplete,
@@ -28,14 +49,14 @@ registerModule({
     coerce: numberCoerce, // frequency·timeValue는 숫자 저장
     // 직업 미연결 레거시 task도 대상 후보로 허용(extractFromModule과 동일 fallback). cervical은 미적용(엄격).
     taskFallbackUnlinked: true,
-    writeField: (moduleData, ctx, featureKey, value) =>
+    writeField: (moduleData: unknown, ctx: unknown, featureKey: string, value: unknown) =>
       taskScopeWriteField('spine', moduleData, ctx, featureKey, value,
-        (fk) => (fk === 'cycleSeconds' ? { timeUnit: 'sec' } : undefined)),
+        (fk: string) => (fk === 'cycleSeconds' ? { timeUnit: 'sec' } : undefined)),
   },
   presetConfig: {
     label: '척추 작업목록',
     fields: [{ key: 'tasks', type: 'taskList' }],
-    extractFromModule(moduleData, sharedJobId) {
+    extractFromModule(moduleData: SpineModuleShape, sharedJobId: string) {
       let tasks = (moduleData.tasks || []).filter(t => t.sharedJobId === sharedJobId);
       // 연결되지 않은 task만 남아 있는 예전 데이터도 허용한다.
       if (!tasks.length) {
@@ -48,7 +69,7 @@ registerModule({
           ({ name, posture, weight, frequency, timeValue, timeUnit, correctionFactor })),
       };
     },
-    applyToModule(moduleData, sharedJobId, presetData) {
+    applyToModule(moduleData: SpineModuleShape, sharedJobId: string, presetData: { tasks?: Array<Partial<SpineTask>> }) {
       // sharedJobId가 비어있는 기본/레거시 태스크는 첫 직업에 귀속될 예정이므로 preset 적용 시 덮어씀
       const otherTasks = (moduleData.tasks || []).filter(t => t.sharedJobId && t.sharedJobId !== sharedJobId);
       const newTasks = (presetData.tasks || []).map((t, i) => ({
@@ -71,11 +92,11 @@ registerModule({
       timeUnit: ['시간단위', 'timeunit'],
       correctionFactor: ['보정계수', 'correction'],
     },
-    applyRow({ patient, row, job, colMap, getCell }) {
+    applyRow({ patient, row, job, colMap, getCell }: SpineImportRowContext) {
       const hasSpineData = [colMap.taskName, colMap.posture].some(index => getCell(row, index));
       if (!hasSpineData) return;
 
-      const spineData = ensureModule(patient, 'spine');
+      const spineData = ensureModule(patient, 'spine') as SpineModuleShape;
       if (!spineData.tasks) spineData.tasks = [];
       const taskName = String(getCell(row, colMap.taskName) || '').trim();
       const posture = String(getCell(row, colMap.posture) || '').trim();
@@ -100,4 +121,4 @@ registerModule({
       spineData.formulaVersion = SPINE_FORMULA_V513;
     },
   },
-});
+} satisfies ModuleManifest);

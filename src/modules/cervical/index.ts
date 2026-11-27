@@ -7,14 +7,46 @@ import { computeCervicalCalc, isCervicalAssessmentComplete } from './utils/calcu
 import { ensureModule, parseYesNo, splitList } from '../../core/utils/batchImportHelpers';
 import { taskScopeWriteField, stringCoerce } from '../../core/utils/videoMapping';
 import { cervicalBatchExport } from './batchExport';
+import type { ComponentType } from 'react';
+import type { ModuleEvaluationProps, ModuleManifest } from '../../core/modules/manifest';
 
-const EXPOSURE_TYPE_LOOKUP = EXPOSURE_TYPE_OPTIONS.reduce((acc, option) => {
+/** applyRow가 받는 값 가운데 이 모듈이 읽는 모양(일괄 가져오기 — src/core/services/batchImport.ts). */
+interface CervicalImportRowContext {
+  patient: unknown;
+  row: unknown[];
+  diagnosis: unknown | null;
+  job: { id: string } | null;
+  colMap: Record<string, number | undefined>;
+  getCell: (row: unknown[], index: number | undefined) => unknown;
+  rowIndex: number;
+}
+
+/** 경추 작업 한 줄(createCervicalTask의 모양 — JS 팩토리의 추론 타입은 exposure_types가 never[]라 따로 적는다). */
+interface CervicalTask {
+  id: number;
+  sharedJobId: string;
+  name: string;
+  exposure_types: string[];
+  load_weight_kg: string;
+  carry_hours_per_shift: string;
+  forced_neck_posture: string;
+  neck_nonneutral_hours_per_day: string;
+  combined_flexion_rotation_posture: string;
+  precision_work: string;
+  notes: string;
+}
+
+interface CervicalModuleShape {
+  tasks?: CervicalTask[];
+}
+
+const EXPOSURE_TYPE_LOOKUP = EXPOSURE_TYPE_OPTIONS.reduce<Record<string, string>>((acc, option) => {
   acc[option.value] = option.value;
   acc[option.label] = option.value;
   return acc;
 }, {});
 
-function parseExposureTypes(value) {
+function parseExposureTypes(value: unknown): string[] {
   return splitList(value)
     .map(item => EXPOSURE_TYPE_LOOKUP[item] || item)
     .filter(mapped => EXPOSURE_TYPE_OPTIONS.some(option => option.value === mapped));
@@ -25,7 +57,7 @@ registerModule({
   name: '경추(목)',
   icon: '👤',
   description: '경추 질환 공통 부담 노출 평가',
-  EvaluationComponent: CervicalEvaluation,
+  EvaluationComponent: CervicalEvaluation as ComponentType<ModuleEvaluationProps>,
   createModuleData: createCervicalModuleData,
   computeCalc: computeCervicalCalc,
   isComplete: isCervicalAssessmentComplete,
@@ -38,13 +70,13 @@ registerModule({
     scope: 'task',
     featureKeys: ['neckFlexionOver20HoursPerDay', 'neckForcedFlexion'],
     coerce: stringCoerce, // neck_* 필드는 문자열 저장
-    writeField: (moduleData, ctx, featureKey, value) =>
+    writeField: (moduleData: unknown, ctx: unknown, featureKey: string, value: unknown) =>
       taskScopeWriteField('cervical', moduleData, ctx, featureKey, value),
   },
   presetConfig: {
     label: '경추 작업목록',
     fields: [{ key: 'tasks', type: 'taskList', chips: cervicalPresetChips }],
-    extractFromModule(moduleData, sharedJobId) {
+    extractFromModule(moduleData: CervicalModuleShape, sharedJobId: string) {
       const tasks = (moduleData.tasks || []).filter(task => task.sharedJobId === sharedJobId);
       if (!tasks.length) return null;
 
@@ -62,7 +94,7 @@ registerModule({
         })),
       };
     },
-    applyToModule(moduleData, sharedJobId, presetData) {
+    applyToModule(moduleData: CervicalModuleShape, sharedJobId: string, presetData: { tasks?: Array<Partial<CervicalTask>> }) {
       // sharedJobId가 비어있는 레거시 태스크는 첫 직업에 귀속될 예정이므로 preset 적용 시 덮어씀
       const otherTasks = (moduleData.tasks || []).filter(task => task.sharedJobId && task.sharedJobId !== sharedJobId);
       const newTasks = (presetData.tasks || []).map((task, index) => ({
@@ -92,7 +124,7 @@ registerModule({
       cervicalPrecisionWork: ['경추_고도의정밀작업', 'cervical_precision_work'],
       cervicalNotes: ['경추_메모', 'cervical_notes'],
     },
-    applyRow({ patient, row, job, colMap, getCell, rowIndex }) {
+    applyRow({ patient, row, job, colMap, getCell, rowIndex }: CervicalImportRowContext) {
       if (!job) return;
 
       const hasCervicalData = [
@@ -108,7 +140,7 @@ registerModule({
       ].some(index => getCell(row, index));
       if (!hasCervicalData) return;
 
-      const cervicalData = ensureModule(patient, 'cervical');
+      const cervicalData = ensureModule(patient, 'cervical') as CervicalModuleShape;
       if (!Array.isArray(cervicalData.tasks)) {
         cervicalData.tasks = [];
       }
@@ -146,4 +178,4 @@ registerModule({
       });
     },
   },
-});
+} satisfies ModuleManifest);
