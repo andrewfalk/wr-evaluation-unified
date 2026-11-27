@@ -6,8 +6,8 @@
 //  · 전부 미포함이면 안내만 보이고 결과 패널·입력 카드는 없다.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
-import { ElbowEvaluation } from '../ElbowEvaluation.jsx';
-import { WristEvaluation } from '../../wrist/WristEvaluation.jsx';
+import { ElbowEvaluation } from '../ElbowEvaluation';
+import { WristEvaluation } from '../../wrist/WristEvaluation';
 
 vi.mock('../components/ExposureForm', () => ({
   ExposureForm: ({ job, jobIndex }) => <div data-testid="exposure-form">{`직력${jobIndex + 1}:${job.jobName}`}</div>,

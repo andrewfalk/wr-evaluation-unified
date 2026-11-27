@@ -4,10 +4,27 @@ import { WristResultPanel } from './components/WristResultPanel';
 import { syncWristModuleData } from './utils/data';
 import { NoEvaluableJobsNotice } from '../../core/components/NoEvaluableJobsNotice';
 import { hasNoEvaluableJobs, isJobIdExcluded } from '@wr/analytics-core/jobScope';
+import type { WristCalcResult } from '@wr/analytics-core/modules/wrist/index';
+import type { WristDiagnosisLike, WristJobLike, WristModuleDataInput, WristTemporalSequence } from './utils/data';
 
-export function WristEvaluation({ patient, calc, updateModule }) {
-  const shared = patient.data.shared || {};
-  const mod = patient.data.module || {};
+type WristJob = WristJobLike & { jobName?: string; excludeFromAnalysis?: boolean };
+
+export interface WristEvaluationProps {
+  patient: {
+    data: {
+      shared?: { diagnoses?: Array<WristDiagnosisLike & { id: string }>; jobs?: WristJob[] };
+      module?: WristModuleDataInput;
+      activeModules?: string[];
+    };
+  };
+  calc: WristCalcResult | null | undefined;
+  updateModule: (updater: (current: WristModuleDataInput) => unknown) => void;
+  errors?: { jobs?: string } | null;
+}
+
+export function WristEvaluation({ patient, calc, updateModule }: WristEvaluationProps) {
+  const shared: NonNullable<WristEvaluationProps['patient']['data']['shared']> = patient.data.shared || {};
+  const mod: WristModuleDataInput = patient.data.module || {};
   const diagnoses = shared.diagnoses || [];
   const activeModules = patient.data.activeModules || [];
   const sharedJobs = shared.jobs || [];
@@ -46,7 +63,7 @@ export function WristEvaluation({ patient, calc, updateModule }) {
   // 미포함 직력의 jobEvaluations 입력값을 보존한다(다시 '포함'으로 바꾸면 그대로 돌아와야 함).
   const evaluatedJobEvaluations = jobEvaluations.filter(jobEvaluation => !isJobIdExcluded(sharedJobs, jobEvaluation.sharedJobId));
 
-  const updateTemporalSequence = (field, value) => {
+  const updateTemporalSequence = (field: keyof WristTemporalSequence, value: string) => {
     updateModule(current => {
       const normalized = syncWristModuleData(current, sharedJobs, diagnoses, activeModules).moduleData;
       return {
@@ -59,7 +76,7 @@ export function WristEvaluation({ patient, calc, updateModule }) {
     });
   };
 
-  const updateDiagnosisEntry = (sharedJobId, diagnosisId, patch) => {
+  const updateDiagnosisEntry = (sharedJobId: string, diagnosisId: string | undefined, patch: Record<string, unknown>) => {
     updateModule(current => {
       const normalized = syncWristModuleData(current, sharedJobs, diagnoses, activeModules).moduleData;
       return {
