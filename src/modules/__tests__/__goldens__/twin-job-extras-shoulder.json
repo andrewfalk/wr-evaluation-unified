@@ -1,0 +1,387 @@
+{
+  "existing:overheadHours": [
+    {
+      "sharedJobId": "job-removed",
+      "overheadHours": "9",
+      "repetitiveMediumHours": "",
+      "repetitiveFastHours": "",
+      "heavyLoadCount": "",
+      "heavyLoadSeconds": "",
+      "vibrationHours": "",
+      "evidenceSources": []
+    },
+    {
+      "sharedJobId": "job-a",
+      "overheadHours": "0.5",
+      "repetitiveMediumHours": "2",
+      "repetitiveFastHours": "",
+      "heavyLoadCount": "10",
+      "heavyLoadSeconds": "",
+      "vibrationHours": "",
+      "evidenceSources": [
+        "면담"
+      ],
+      "extraField": "보존"
+    }
+  ],
+  "missing:overheadHours": [
+    {
+      "sharedJobId": "job-removed",
+      "overheadHours": "9",
+      "repetitiveMediumHours": "",
+      "repetitiveFastHours": "",
+      "heavyLoadCount": "",
+      "heavyLoadSeconds": "",
+      "vibrationHours": "",
+      "evidenceSources": []
+    },
+    {
+      "sharedJobId": "job-a",
+      "overheadHours": "1.5",
+      "repetitiveMediumHours": "2",
+      "repetitiveFastHours": "",
+      "heavyLoadCount": "10",
+      "heavyLoadSeconds": "",
+      "vibrationHours": "",
+      "evidenceSources": [
+        "면담"
+      ],
+      "extraField": "보존"
+    },
+    {
+      "sharedJobId": "job-b",
+      "overheadHours": "1",
+      "repetitiveMediumHours": "",
+      "repetitiveFastHours": "",
+      "heavyLoadCount": "",
+      "heavyLoadSeconds": "",
+      "vibrationHours": "",
+      "evidenceSources": []
+    }
+  ],
+  "existing:repetitiveMediumHours": [
+    {
+      "sharedJobId": "job-removed",
+      "overheadHours": "9",
+      "repetitiveMediumHours": "",
+      "repetitiveFastHours": "",
+      "heavyLoadCount": "",
+      "heavyLoadSeconds": "",
+      "vibrationHours": "",
+      "evidenceSources": []
+    },
+    {
+      "sharedJobId": "job-a",
+      "overheadHours": "1.5",
+      "repetitiveMediumHours": "1.5",
+      "repetitiveFastHours": "",
+      "heavyLoadCount": "10",
+      "heavyLoadSeconds": "",
+      "vibrationHours": "",
+      "evidenceSources": [
+        "면담"
+      ],
+      "extraField": "보존"
+    }
+  ],
+  "missing:repetitiveMediumHours": [
+    {
+      "sharedJobId": "job-removed",
+      "overheadHours": "9",
+      "repetitiveMediumHours": "",
+      "repetitiveFastHours": "",
+      "heavyLoadCount": "",
+      "heavyLoadSeconds": "",
+      "vibrationHours": "",
+      "evidenceSources": []
+    },
+    {
+      "sharedJobId": "job-a",
+      "overheadHours": "1.5",
+      "repetitiveMediumHours": "2",
+      "repetitiveFastHours": "",
+      "heavyLoadCount": "10",
+      "heavyLoadSeconds": "",
+      "vibrationHours": "",
+      "evidenceSources": [
+        "면담"
+      ],
+      "extraField": "보존"
+    },
+    {
+      "sharedJobId": "job-b",
+      "overheadHours": "",
+      "repetitiveMediumHours": "2",
+      "repetitiveFastHours": "",
+      "heavyLoadCount": "",
+      "heavyLoadSeconds": "",
+      "vibrationHours": "",
+      "evidenceSources": []
+    }
+  ],
+  "existing:repetitiveFastHours": [
+    {
+      "sharedJobId": "job-removed",
+      "overheadHours": "9",
+      "repetitiveMediumHours": "",
+      "repetitiveFastHours": "",
+      "heavyLoadCount": "",
+      "heavyLoadSeconds": "",
+      "vibrationHours": "",
+      "evidenceSources": []
+    },
+    {
+      "sharedJobId": "job-a",
+      "overheadHours": "1.5",
+      "repetitiveMediumHours": "2",
+      "repetitiveFastHours": "2.5",
+      "heavyLoadCount": "10",
+      "heavyLoadSeconds": "",
+      "vibrationHours": "",
+      "evidenceSources": [
+        "면담"
+      ],
+      "extraField": "보존"
+    }
+  ],
+  "missing:repetitiveFastHours": [
+    {
+      "sharedJobId": "job-removed",
+      "overheadHours": "9",
+      "repetitiveMediumHours": "",
+      "repetitiveFastHours": "",
+      "heavyLoadCount": "",
+      "heavyLoadSeconds": "",
+      "vibrationHours": "",
+      "evidenceSources": []
+    },
+    {
+      "sharedJobId": "job-a",
+      "overheadHours": "1.5",
+      "repetitiveMediumHours": "2",
+      "repetitiveFastHours": "",
+      "heavyLoadCount": "10",
+      "heavyLoadSeconds": "",
+      "vibrationHours": "",
+      "evidenceSources": [
+        "면담"
+      ],
+      "extraField": "보존"
+    },
+    {
+      "sharedJobId": "job-b",
+      "overheadHours": "",
+      "repetitiveMediumHours": "",
+      "repetitiveFastHours": "3",
+      "heavyLoadCount": "",
+      "heavyLoadSeconds": "",
+      "vibrationHours": "",
+      "evidenceSources": []
+    }
+  ],
+  "existing:vibrationHours": [
+    {
+      "sharedJobId": "job-removed",
+      "overheadHours": "9",
+      "repetitiveMediumHours": "",
+      "repetitiveFastHours": "",
+      "heavyLoadCount": "",
+      "heavyLoadSeconds": "",
+      "vibrationHours": "",
+      "evidenceSources": []
+    },
+    {
+      "sharedJobId": "job-a",
+      "overheadHours": "1.5",
+      "repetitiveMediumHours": "2",
+      "repetitiveFastHours": "",
+      "heavyLoadCount": "10",
+      "heavyLoadSeconds": "",
+      "vibrationHours": "3.5",
+      "evidenceSources": [
+        "면담"
+      ],
+      "extraField": "보존"
+    }
+  ],
+  "missing:vibrationHours": [
+    {
+      "sharedJobId": "job-removed",
+      "overheadHours": "9",
+      "repetitiveMediumHours": "",
+      "repetitiveFastHours": "",
+      "heavyLoadCount": "",
+      "heavyLoadSeconds": "",
+      "vibrationHours": "",
+      "evidenceSources": []
+    },
+    {
+      "sharedJobId": "job-a",
+      "overheadHours": "1.5",
+      "repetitiveMediumHours": "2",
+      "repetitiveFastHours": "",
+      "heavyLoadCount": "10",
+      "heavyLoadSeconds": "",
+      "vibrationHours": "",
+      "evidenceSources": [
+        "면담"
+      ],
+      "extraField": "보존"
+    },
+    {
+      "sharedJobId": "job-b",
+      "overheadHours": "",
+      "repetitiveMediumHours": "",
+      "repetitiveFastHours": "",
+      "heavyLoadCount": "",
+      "heavyLoadSeconds": "",
+      "vibrationHours": "4",
+      "evidenceSources": []
+    }
+  ],
+  "existing:heavyLoadCount": [
+    {
+      "sharedJobId": "job-removed",
+      "overheadHours": "9",
+      "repetitiveMediumHours": "",
+      "repetitiveFastHours": "",
+      "heavyLoadCount": "",
+      "heavyLoadSeconds": "",
+      "vibrationHours": "",
+      "evidenceSources": []
+    },
+    {
+      "sharedJobId": "job-a",
+      "overheadHours": "1.5",
+      "repetitiveMediumHours": "2",
+      "repetitiveFastHours": "",
+      "heavyLoadCount": "4.5",
+      "heavyLoadSeconds": "",
+      "vibrationHours": "",
+      "evidenceSources": [
+        "면담"
+      ],
+      "extraField": "보존"
+    }
+  ],
+  "missing:heavyLoadCount": [
+    {
+      "sharedJobId": "job-removed",
+      "overheadHours": "9",
+      "repetitiveMediumHours": "",
+      "repetitiveFastHours": "",
+      "heavyLoadCount": "",
+      "heavyLoadSeconds": "",
+      "vibrationHours": "",
+      "evidenceSources": []
+    },
+    {
+      "sharedJobId": "job-a",
+      "overheadHours": "1.5",
+      "repetitiveMediumHours": "2",
+      "repetitiveFastHours": "",
+      "heavyLoadCount": "10",
+      "heavyLoadSeconds": "",
+      "vibrationHours": "",
+      "evidenceSources": [
+        "면담"
+      ],
+      "extraField": "보존"
+    },
+    {
+      "sharedJobId": "job-b",
+      "overheadHours": "",
+      "repetitiveMediumHours": "",
+      "repetitiveFastHours": "",
+      "heavyLoadCount": "5",
+      "heavyLoadSeconds": "",
+      "vibrationHours": "",
+      "evidenceSources": []
+    }
+  ],
+  "existing:heavyLoadSeconds": [
+    {
+      "sharedJobId": "job-removed",
+      "overheadHours": "9",
+      "repetitiveMediumHours": "",
+      "repetitiveFastHours": "",
+      "heavyLoadCount": "",
+      "heavyLoadSeconds": "",
+      "vibrationHours": "",
+      "evidenceSources": []
+    },
+    {
+      "sharedJobId": "job-a",
+      "overheadHours": "1.5",
+      "repetitiveMediumHours": "2",
+      "repetitiveFastHours": "",
+      "heavyLoadCount": "10",
+      "heavyLoadSeconds": "5.5",
+      "vibrationHours": "",
+      "evidenceSources": [
+        "면담"
+      ],
+      "extraField": "보존"
+    }
+  ],
+  "missing:heavyLoadSeconds": [
+    {
+      "sharedJobId": "job-removed",
+      "overheadHours": "9",
+      "repetitiveMediumHours": "",
+      "repetitiveFastHours": "",
+      "heavyLoadCount": "",
+      "heavyLoadSeconds": "",
+      "vibrationHours": "",
+      "evidenceSources": []
+    },
+    {
+      "sharedJobId": "job-a",
+      "overheadHours": "1.5",
+      "repetitiveMediumHours": "2",
+      "repetitiveFastHours": "",
+      "heavyLoadCount": "10",
+      "heavyLoadSeconds": "",
+      "vibrationHours": "",
+      "evidenceSources": [
+        "면담"
+      ],
+      "extraField": "보존"
+    },
+    {
+      "sharedJobId": "job-b",
+      "overheadHours": "",
+      "repetitiveMediumHours": "",
+      "repetitiveFastHours": "",
+      "heavyLoadCount": "",
+      "heavyLoadSeconds": "6",
+      "vibrationHours": "",
+      "evidenceSources": []
+    }
+  ],
+  "existingCleared": [
+    {
+      "sharedJobId": "job-removed",
+      "overheadHours": "9",
+      "repetitiveMediumHours": "",
+      "repetitiveFastHours": "",
+      "heavyLoadCount": "",
+      "heavyLoadSeconds": "",
+      "vibrationHours": "",
+      "evidenceSources": []
+    },
+    {
+      "sharedJobId": "job-a",
+      "overheadHours": "",
+      "repetitiveMediumHours": "2",
+      "repetitiveFastHours": "",
+      "heavyLoadCount": "10",
+      "heavyLoadSeconds": "",
+      "vibrationHours": "",
+      "evidenceSources": [
+        "면담"
+      ],
+      "extraField": "보존"
+    }
+  ]
+}

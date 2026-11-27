@@ -1,0 +1,196 @@
+{
+  "jobs": [
+    { "id": "job-a", "jobName": "용접공", "startDate": "2010-01-01", "endDate": "2015-12-31", "workDaysPerYear": 250 },
+    { "id": "job-b", "jobName": "", "startDate": "2016-01-01", "endDate": "2016-01-01", "workDaysPerYear": 250 },
+    { "id": "job-c", "jobName": "사무직", "startDate": "2017-01-01", "endDate": "2020-12-31", "workDaysPerYear": 250, "excludeFromAnalysis": true }
+  ],
+  "diagnoses": [
+    { "id": "dx-e2101a", "code": "M77.0", "name": "내측상과염", "side": "right" },
+    { "id": "dx-e2101b", "code": "M77.1", "name": "외측상과염", "side": "left" },
+    { "id": "dx-e2103", "code": "T75.2", "name": "진동성 팔꿈치 관절병증", "side": "both" },
+    { "id": "dx-e2105", "code": "M70.2", "name": "팔꿈치 점액낭염", "side": "right", "moduleId": "elbow" },
+    { "id": "dx-e2106", "code": "G56.2", "name": "주관증후군", "side": "left", "moduleId": "elbow" },
+    { "id": "dx-e-noinfer", "code": "", "name": "", "side": "right", "moduleId": "elbow" },
+    { "id": "dx-w2113", "code": "G56.0", "name": "수근관증후군", "side": "right" },
+    { "id": "dx-w2101a", "code": "M65.4", "name": "드퀘르벵 건초염", "side": "right" },
+    { "id": "dx-w2101b", "code": "M65.3", "name": "방아쇠수지", "side": "left" },
+    { "id": "dx-w2103", "code": "M19.04", "name": "손목 관절병증", "side": "right", "moduleId": "wrist" },
+    { "id": "dx-w2106", "code": "G56.2", "name": "손목 척골신경 압박(Guyon)", "side": "left" },
+    { "id": "dx-w-nameonly", "code": "", "name": "trigger thumb", "side": "left" },
+    { "id": "dx-none", "code": "G56.0", "name": "수근관증후군(평가 제외)", "side": "right", "moduleId": "__none__" },
+    { "id": "dx-knee", "code": "M17.1", "name": "무릎 골관절염", "side": "right" },
+    { "id": "dx-blank", "code": "", "name": "", "side": "" }
+  ],
+  "activeModuleSets": [["elbow"], ["wrist"], ["elbow", "wrist"], ["elbow", "wrist", "knee"]],
+  "commonValues": {
+    "main_task_name": "배관 용접",
+    "direct_anatomic_link": "yes",
+    "exposure_types": ["repetition", "force", "awkward_posture", "vibration"],
+    "repetition_level": "frequent",
+    "daily_exposure_hours": "4.5",
+    "shift_share_percent": "60",
+    "days_per_week": "5",
+    "work_pattern": "continuous",
+    "rest_distribution": "insufficient",
+    "force_level": "high",
+    "awkward_posture_level": "occasional"
+  },
+  "branchValues": {
+    "BK2101": {
+      "bk2101_cycle_seconds": "20",
+      "bk2101_repetition_per_hour": "",
+      "bk2101_monotony": "yes",
+      "static_holding_level": "frequent",
+      "bk2101_forced_dorsal_extension": "frequent",
+      "bk2101_prosupination": "occasional"
+    },
+    "BK2103": {
+      "vibration_exposure": "present",
+      "bk2103_vibration_tool_type": ["grinder", "jackhammer", "impact_wrench", "other"],
+      "bk2103_daily_vibration_hours": "2.5",
+      "bk2103_tool_pressing": "yes"
+    },
+    "BK2105": {
+      "bk2105_elbow_leaning": "frequent",
+      "direct_pressure_level": "frequent",
+      "bk2105_pressure_source": ["hard_surface", "ground_contact", "palm_contact"]
+    },
+    "BK2106": {
+      "static_holding_level": "occasional",
+      "direct_pressure_level": "present",
+      "bk2106_pressure_source": ["tool_edge", "carrying_contact", "palm_contact"]
+    },
+    "BK2113": {
+      "bk2113_repetitive_wrist_motion": "frequent"
+    }
+  },
+  "moduleStates": {
+    "empty": {},
+    "legacy": {
+      "returnConsiderations": "옛 형식 메모",
+      "temporalRelation": { "recent_task_change": "yes", "task_change_date": "2015-03-01", "symptom_onset_interval": "within_3_months", "improves_with_rest": "yes" },
+      "diagnosisEvaluations": [
+        { "diagnosisId": "dx-e2101a", "linkedJobId": "job-a", "selectedBkType": "BK2101", "daily_exposure_hours": "3", "exposure_types": ["repetition", "unknown"] },
+        { "diagnosisId": "dx-e2103", "selectedBkType": "", "bk2106_tool_pressing": "yes" },
+        { "diagnosisId": "dx-w2113", "linkedJobId": "job-b", "selectedBkType": "BK2113", "bk2113_repetitive_wrist_motion": "occasional" },
+        { "diagnosisId": "dx-w2101a", "daily_exposure_hours": "2" },
+        { "diagnosisId": "", "linkedJobId": "job-a", "selectedBkType": "BK2101" }
+      ]
+    },
+    "pendingPreset": {
+      "returnConsiderations": "",
+      "temporalSequence": { "recent_task_change": "no", "task_change_date": "", "symptom_onset_interval": "", "improves_with_rest": "" },
+      "jobEvaluations": [
+        {
+          "sharedJobId": "job-a",
+          "_pendingPreset": { "main_task_name": "프리셋 작업", "daily_exposure_hours": "6", "force_level": "moderate", "not_a_field": "x" },
+          "diagnosisEntries": []
+        },
+        {
+          "sharedJobId": "job-b",
+          "_pendingPreset": { "main_task_name": "기존 엔트리에는 적용 안 됨" },
+          "diagnosisEntries": [{ "diagnosisId": "dx-e2101a", "main_task_name": "기존 값" }, { "diagnosisId": "dx-w2113", "main_task_name": "기존 값" }]
+        }
+      ]
+    },
+    "donor": {
+      "returnConsiderations": "복귀 시 고려",
+      "temporalSequence": { "recent_task_change": "yes", "task_change_date": "2014-06-01", "symptom_onset_interval": "over_1_year", "improves_with_rest": "no" },
+      "jobEvaluations": [
+        {
+          "sharedJobId": "job-a",
+          "extraJobField": "보존",
+          "diagnosisEntries": [
+            { "diagnosisId": "dx-e2101a", "selectedBkType": "BK2101", "bkSelectionMode": "auto", "main_task_name": "기증 작업", "daily_exposure_hours": "5", "exposure_types": ["repetition"], "repetition_level": "frequent", "bk2101_cycle_seconds": "15" },
+            { "diagnosisId": "dx-w2101a", "selectedBkType": "BK2101", "bkSelectionMode": "auto", "main_task_name": "기증 작업", "daily_exposure_hours": "5", "exposure_types": ["repetition"], "repetition_level": "frequent", "bk2101_cycle_seconds": "15" },
+            { "diagnosisId": "dx-e2106", "selectedBkType": "BK2101", "bkSelectionMode": "auto" },
+            { "diagnosisId": "dx-w2106", "selectedBkType": "BK2101", "bkSelectionMode": "auto" }
+          ]
+        },
+        { "sharedJobId": "job-removed", "diagnosisEntries": [{ "diagnosisId": "dx-e2101a", "main_task_name": "지워진 직력" }] }
+      ]
+    },
+    "corrections": {
+      "returnConsiderations": "",
+      "temporalSequence": { "recent_task_change": "", "task_change_date": "", "symptom_onset_interval": "", "improves_with_rest": "" },
+      "jobEvaluations": [
+        {
+          "sharedJobId": "job-a",
+          "diagnosisEntries": [
+            { "diagnosisId": "dx-e2101a", "selectedBkType": "", "bkSelectionMode": "manual", "bk2103_frequent_high_force_grip": "yes" },
+            { "diagnosisId": "dx-e2101b", "selectedBkType": "BK2105", "bkSelectionMode": "manual", "bk2106_tool_pressing": "yes", "exposure_types": ["force", "bogus"] },
+            { "diagnosisId": "dx-e2103", "selectedBkType": "BK2106", "bkSelectionMode": "auto", "bk2106_frequent_high_force_grip": "yes" },
+            { "diagnosisId": "dx-w2113", "selectedBkType": "", "bkSelectionMode": "manual", "bk2103_frequent_high_force_grip": "yes" },
+            { "diagnosisId": "dx-w2101a", "selectedBkType": "BK2113", "bkSelectionMode": "manual", "bk2106_tool_pressing": "yes", "exposure_types": ["force", "bogus"] },
+            { "diagnosisId": "dx-w2103", "selectedBkType": "BK2106", "bkSelectionMode": "auto", "bk2106_frequent_high_force_grip": "yes", "bk2103_tool_pressing": "no" }
+          ]
+        }
+      ]
+    }
+  },
+  "batchImport": {
+    "baseRow": {
+      "이름": "가져오기 시험",
+      "등록번호": "T-0001",
+      "생년월일": "1970-05-05",
+      "재해일자": "2021-02-01",
+      "성별": "남",
+      "진단코드": "M77.0",
+      "진단명": "내측상과염",
+      "방향": "우",
+      "직종명": "용접공",
+      "시작일": "2010-01-01",
+      "종료일": "2015-12-31"
+    },
+    "rows": [
+      { "진단코드": "M77.0", "진단명": "내측상과염", "방향": "우", "직종명": "용접공" },
+      { "진단코드": "G56.0", "진단명": "수근관증후군", "방향": "좌", "직종명": "용접공" },
+      { "진단코드": "M77.0", "진단명": "내측상과염", "방향": "우", "직종명": "조립공", "시작일": "2016-01-01", "종료일": "2018-12-31" },
+      { "이름": "빈 값 시험", "진단코드": "M65.4", "진단명": "드퀘르벵 건초염", "방향": "우", "직종명": "포장원", "__blankModuleValues": true }
+    ],
+    "values": {
+      "RecentTaskChange": " yes ",
+      "TaskChangeDate": "2015-03-01",
+      "SymptomOnsetInterval": "within_3_months ",
+      "ImprovesWithRest": "no",
+      "BkType": " BK2101 ",
+      "BkSelectionMode": "  ",
+      "MainTaskName": " 배관 용접 ",
+      "DirectAnatomicLink": "yes",
+      "ExposureTypes": "repetition| force |awkward_posture",
+      "RepetitionLevel": "frequent",
+      "DailyExposureHours": " 4.5 ",
+      "ShiftSharePercent": "60",
+      "DaysPerWeek": 5,
+      "WorkPattern": "continuous",
+      "RestDistribution": "insufficient",
+      "ForceLevel": "high",
+      "AwkwardPostureLevel": "occasional",
+      "StaticHoldingLevel": "frequent",
+      "DirectPressureLevel": "present",
+      "VibrationExposure": "present",
+      "Bk2101CycleSeconds": 20,
+      "Bk2101RepetitionPerHour": "180",
+      "Bk2101Monotony": "yes",
+      "Bk2101ForcedDorsalExtension": "frequent",
+      "Bk2101Prosupination": "occasional",
+      "Bk2105ElbowLeaning": "frequent",
+      "Bk2105RepeatedFrictionImpact": "yes",
+      "Bk2105PressureSource": "hard_surface|ground_contact",
+      "Bk2106RepeatedMechanicalExposure": "yes",
+      "Bk2106NoncorrectablePosture": "yes",
+      "Bk2106ProlongedJointPosition": "yes",
+      "Bk2106PressureSource": "tool_edge|carrying_contact",
+      "Bk2106ToolPressing": "yes",
+      "Bk2106FrequentHighForceGrip": "yes",
+      "Bk2103VibrationToolType": "grinder|jackhammer",
+      "Bk2103DailyVibrationHours": "2.5",
+      "Bk2103HandheldOrGuided": "yes",
+      "Bk2103ToolPressing": " no ",
+      "Bk2103FrequentHighForceGrip": "yes",
+      "Bk2113RepetitiveMotion": " frequent "
+    },
+    "excelSerialTaskChangeDate": 43000,
+    "partialSuffix": "(입력)"
+  }
+}
