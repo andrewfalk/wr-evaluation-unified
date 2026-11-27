@@ -1,6 +1,10 @@
 import { BK_TYPE_LABELS } from '../utils/data';
 import { formatCommonExposureTypeText, groupSummariesByBkType, mergeBkGroupSummaries } from '../utils/calculations';
 import { getSideText } from '../../../core/i18n/sideLabels';
+import type { BkSummaryGroup, DiagnosisSummary, ElbowCalcResult, FlagItem } from '@wr/analytics-core/modules/elbow/index';
+import type { ElbowTemporalSequence } from '../utils/data';
+
+type TemporalField = keyof ElbowTemporalSequence;
 
 const TASK_CHANGE_OPTIONS = [
   { value: 'none', label: '변화 없음' },
@@ -14,7 +18,7 @@ const REST_OPTIONS = [
   { value: 'no', label: '아니오' },
 ];
 
-function FlagPill({ flag }) {
+function FlagPill({ flag }: { flag: FlagItem }) {
   return (
     <span className={`elbow-flag-pill tone-${flag.tone || 'neutral'}`} title={flag.description || ''}>
       <span className="elbow-flag-icon">{flag.icon}</span>
@@ -23,7 +27,7 @@ function FlagPill({ flag }) {
   );
 }
 
-function MissingList({ title, items }) {
+function MissingList({ title, items }: { title: string; items: string[] | undefined }) {
   if (!items || items.length === 0) return null;
 
   return (
@@ -34,7 +38,7 @@ function MissingList({ title, items }) {
   );
 }
 
-function TemporalSequenceSection({ temporalSequence, onChange }) {
+function TemporalSequenceSection({ temporalSequence, onChange }: { temporalSequence: ElbowTemporalSequence; onChange: (field: TemporalField, value: string) => void }) {
   return (
     <section className="section pattern-surface form-section">
       <div className="section-header elbow-analysis-header">
@@ -100,9 +104,9 @@ function TemporalSequenceSection({ temporalSequence, onChange }) {
   );
 }
 
-function SummaryCard({ summary }) {
-  const diag = summary.diagnosis || {};
-  const entry = summary.entry || {};
+function SummaryCard({ summary }: { summary: DiagnosisSummary }) {
+  const diag: Partial<DiagnosisSummary['diagnosis']> = summary.diagnosis || {};
+  const entry: Partial<DiagnosisSummary['entry']> = summary.entry || {};
   const exposureTypes = formatCommonExposureTypeText(entry);
   const riskFactorSummary = summary.riskFactorItems?.length > 0
     ? summary.riskFactorItems.map(flag => flag.label).join(', ')
@@ -116,7 +120,7 @@ function SummaryCard({ summary }) {
         {' · '}
         {getSideText(diag.side)}
         {' · '}
-        {BK_TYPE_LABELS[entry.selectedBkType] || 'BK 유형 미선택'}
+        {BK_TYPE_LABELS[entry.selectedBkType as string] || 'BK 유형 미선택'}
         {' · '}
         {entry.bkSelectionMode === 'manual' ? '수동 선택' : (entry.selectedBkType ? '자동 제안' : '자동 제안 없음')}
       </div>
@@ -150,16 +154,16 @@ function SummaryCard({ summary }) {
   );
 }
 
-function BkGroupSummaryCard({ group }) {
+function BkGroupSummaryCard({ group }: { group: BkSummaryGroup }) {
   const merged = mergeBkGroupSummaries(group.summaries);
-  const representativeEntry = merged.entry || {};
+  const representativeEntry: Partial<DiagnosisSummary['entry']> = merged.entry || {};
   const exposureTypes = formatCommonExposureTypeText(representativeEntry);
   const riskFactorSummary = merged.riskFactorItems?.length > 0
     ? merged.riskFactorItems.map(flag => flag.label).join(', ')
     : '확인된 위험 요인 없음';
   const diagSubtitle = group.summaries
     .map(s => {
-      const d = s.diagnosis || {};
+      const d: Partial<DiagnosisSummary['diagnosis']> = s.diagnosis || {};
       return `${d.code || ''} ${d.name || ''}`.trim();
     })
     .join(' / ');
@@ -198,7 +202,13 @@ function BkGroupSummaryCard({ group }) {
   );
 }
 
-export function ElbowResultPanel({ calc, temporalSequence, onTemporalChange }) {
+export interface ElbowResultPanelProps {
+  calc: ElbowCalcResult | null | undefined;
+  temporalSequence: ElbowTemporalSequence;
+  onTemporalChange: (field: TemporalField, value: string) => void;
+}
+
+export function ElbowResultPanel({ calc, temporalSequence, onTemporalChange }: ElbowResultPanelProps) {
   if (!calc) return null;
 
   return (
