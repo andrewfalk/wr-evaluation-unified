@@ -1,3 +1,5 @@
+import type { PatientData, SharedData } from '@wr/contracts';
+import type { PatientRecord } from '../types/patient';
 import { renderNarrativeBlocks } from '../narrative/renderBlocks';
 import { getSideText } from '../i18n/sideLabels';
 import { buildAssessmentBlocks, formatGroupedAssessment } from './assessmentGroups';
@@ -5,10 +7,11 @@ import { calculateAge, calculateBMI } from './common';
 import { buildJobHistoryLines } from './jobHistory';
 import { selectModuleNote } from './moduleNotes';
 
-export function generateUnifiedReport(patient) {
-  const shared = patient.data.shared || {};
-  const modules = patient.data.modules || {};
-  const activeModules = patient.data.activeModules || [];
+// 타입만 붙였다(P2-66g) — 실행 코드는 JS 시절과 같다. patient.data는 호출자가 늘 채워 넘기므로 단언한다(가드를 새로 넣지 않는다).
+export function generateUnifiedReport(patient: PatientRecord): string {
+  const shared: Partial<SharedData> = (patient.data as PatientData).shared || {};
+  const modules = (patient.data as PatientData).modules || {};
+  const activeModules = (patient.data as PatientData).activeModules || [];
   const diagnoses = shared.diagnoses || [];
   const jobs = shared.jobs || [];
 

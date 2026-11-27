@@ -577,7 +577,7 @@ src/  # (기존 standalone 부분만 발췌)
 │   │   ├── steps.js                 # buildSteps() — 동적 스텝 생성
 │   │   ├── data.js                  # 데이터 초기화 & 마이그레이션
 │   │   ├── diagnosisMapping.js      # ICD 코드 → 모듈 매핑
-│   │   ├── reportGenerator.js       # 통합 미리보기 보고서
+│   │   ├── reportGenerator.ts       # 통합 미리보기 보고서
 │   │   ├── exportService.js         # 엑셀/PDF 내보내기
 │   │   ├── patientCompletion.js     # 환자 완료 판정
 │   │   ├── storage.js               # localStorage/Electron FS 추상화

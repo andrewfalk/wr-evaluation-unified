@@ -9,12 +9,10 @@ import { loadGoldenBatchPatients, loadGoldenNarrativePatients, loadGoldenPatient
 import { getModule } from '../../modules/registry';
 import { generateUnifiedEMR } from '../../utils/emrReport';
 import { generateUnifiedReport } from '../../utils/reportGenerator';
+import type { PatientData } from '@wr/contracts';
+import type { PatientRecord } from '../../types/patient';
 
-interface Job { id: string; jobName?: string; excludeFromAnalysis?: boolean }
-interface GoldenPatient {
-  id: string;
-  data: { shared: { jobs: Job[] } & Record<string, unknown>; modules: Record<string, unknown>; activeModules: string[] };
-}
+type GoldenPatient = PatientRecord & { data: PatientData };
 
 afterEach(() => {
   vi.useRealTimers();
