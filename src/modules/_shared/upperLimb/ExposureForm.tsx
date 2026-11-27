@@ -1,0 +1,708 @@
+// 팔꿈치·손목 공용 노출 입력 화면(REFACTORING_ROADMAP Phase 2 C8, P2-73b) — 직력 하나의 상병별 노출 입력(개별 카드 EntryCard,
+// 같은 BK 유형으로 묶인 상병의 묶음 카드 BkGroupCard). 두 모듈의 components/ExposureForm은 라벨·className 접두·빈 상병 이름·
+// 힘 수준 낱말만 다른 같은 코드였다(로직 차이 없음 — 계획 K3). 모듈마다 다른 것은 config로 받는다:
+//   · classPrefix — 지금과 같은 className을 낸다(`elbow-…`·`wrist-…`, `.ul-` 통합은 C10)
+//   · labels — 개별 카드의 라벨 9곳·직력 카드 부제·힘 수준 'mild'('경미'/'경도')·비중립 자세 세부 라벨
+//     (묶음 카드의 문구는 두 모듈이 같아 여기 고정)
+//   · emptyDiagnosisName — 상병 이름이 비었을 때
+//   · 상수 표·분기 초기화·상병 묶기·대표값 고르기·상병 분기 화면(DiseaseSpecificFields — 두 벌로 남는다)
+// 각 모듈의 components/ExposureForm.tsx는 config를 묶는 얇은 래퍼로 남는다(prop 이름 elbowDiagnoses/wristDiagnoses와 테스트의
+// vi.mock('../components/ExposureForm')가 그대로 듣게).
+import type { ComponentType } from 'react';
+import { getSideText } from '../../../core/i18n/sideLabels';
+
+/** 화면이 다루는 엔트리(두 모듈 계산 타입의 공통 모양 + 필드 이름으로 읽고 쓰는 칸). */
+export interface UpperLimbFormEntry {
+  diagnosisId?: string;
+  selectedBkType?: string;
+  bkSelectionMode?: string;
+  bkAutoSyncedFrom?: string;
+  main_task_name?: string;
+  direct_anatomic_link?: string;
+  exposure_types?: string[];
+  daily_exposure_hours?: string | number;
+  shift_share_percent?: string | number;
+  days_per_week?: string | number;
+  work_pattern?: string;
+  rest_distribution?: string;
+  [field: string]: unknown;
+}
+
+export interface UpperLimbFormDiagnosis {
+  id?: string;
+  code?: string;
+  name?: string;
+  side?: string;
+}
+
+type Entry = UpperLimbFormEntry;
+type GroupItem = { diagnosis: UpperLimbFormDiagnosis; entry: Entry | null };
+type Group = { bkType: string; isGrouped: boolean; items: GroupItem[] };
+type EntryPatch = Record<string, unknown>;
+export type UpperLimbOnChangeEntry = (jobId: string, diagnosisId: string | undefined, patch: EntryPatch) => void;
+
+interface Option { value: string; label: string }
+
+interface ExposureDetail {
+  label: string;
+  field: string;
+  options: Option[];
+  twoByTwo?: boolean;
+}
+
+export interface UpperLimbExposureFormLabels {
+  /** 개별 카드 "병변 부위와 직접 연결되는 핵심 …/자세가 있는가". */
+  directLink: string;
+  taskNamePlaceholder: string;
+  dailyHours: string;
+  shiftShare: string;
+  daysPerWeek: string;
+  commonExposureTitle: string;
+  commonExposureCaption: string;
+  branchTitle: string;
+  branchCaption: string;
+  /** 직력 카드 부제. */
+  jobCardSubtitle: string;
+  /** 힘 수준 'mild'의 라벨. */
+  forceMild: string;
+  /** 비중립 자세 세부 정도 라벨. */
+  awkwardPostureDetail: string;
+}
+
+/** 상병 분기 화면(모듈마다 두 벌 — DiseaseSpecificFields.jsx)의 props. */
+export interface UpperLimbDiseaseSpecificFieldsProps {
+  diagnosisId: string;
+  selectedBkType: string | undefined;
+  evaluation: Entry;
+  onChange: (field: string, value: unknown) => void;
+  onToggleMultiValue: (field: string, value: string) => void;
+}
+
+export interface UpperLimbExposureFormConfig {
+  classPrefix: string;
+  emptyDiagnosisName: string;
+  labels: UpperLimbExposureFormLabels;
+  bkTypeLabels: Record<string, string>;
+  bkTypeOptions: Option[];
+  exposureTypeOptions: Option[];
+  resetBranchFields(entry: Entry, nextBkType: string): EntryPatch;
+  groupDiagnosesByBkType(diagnoses: UpperLimbFormDiagnosis[], jobEvaluation: { diagnosisEntries?: Entry[] }): Group[];
+  pickRepresentativeEntry(items: GroupItem[]): Entry;
+  DiseaseSpecificFields: ComponentType<UpperLimbDiseaseSpecificFieldsProps>;
+}
+
+const DIRECT_LINK_OPTIONS = [
+  { value: 'yes', label: '예' },
+  { value: 'no', label: '아니오' },
+];
+
+const WORK_PATTERN_OPTIONS = [
+  { value: 'continuous', label: '연속' },
+  { value: 'intermittent', label: '간헐' },
+  { value: 'mixed', label: '혼합' },
+];
+
+const REST_OPTIONS = [
+  { value: 'adequate', label: '충분' },
+  { value: 'moderate', label: '보통' },
+  { value: 'insufficient', label: '부족' },
+];
+
+const COMMON_FREQUENCY_OPTIONS = [
+  { value: 'occasional', label: '가끔' },
+  { value: 'frequent', label: '빈번' },
+];
+
+// 노출 유형 → 세부 정도 입력. 힘 수준 'mild'와 비중립 자세의 라벨만 모듈마다 다르다 — config마다 한 번 만들어 둔다.
+const exposureDetailCache = new WeakMap<UpperLimbExposureFormConfig, Record<string, ExposureDetail>>();
+
+function getExposureDetailConfig(config: UpperLimbExposureFormConfig): Record<string, ExposureDetail> {
+  const cached = exposureDetailCache.get(config);
+  if (cached) return cached;
+  const COMMON_FORCE_OPTIONS = [
+    { value: 'mild', label: config.labels.forceMild },
+    { value: 'moderate', label: '중등도' },
+    { value: 'high', label: '고강도' },
+  ];
+  const details: Record<string, ExposureDetail> = {
+    repetition: {
+      label: '반복 동작 정도',
+      field: 'repetition_level',
+      options: COMMON_FREQUENCY_OPTIONS,
+    },
+    force: {
+      label: '힘 사용 정도',
+      field: 'force_level',
+      options: COMMON_FORCE_OPTIONS,
+      twoByTwo: true,
+    },
+    awkward_posture: {
+      label: config.labels.awkwardPostureDetail,
+      field: 'awkward_posture_level',
+      options: COMMON_FREQUENCY_OPTIONS,
+    },
+  };
+  exposureDetailCache.set(config, details);
+  return details;
+}
+
+interface RadioGroupProps {
+  label: string;
+  name: string;
+  value: unknown;
+  options: Option[];
+  onChange: (value: string) => void;
+  groupClassName?: string;
+  labelClassName?: string;
+}
+
+function RadioGroup({ label, name, value, options, onChange, groupClassName = '', labelClassName = '' }: RadioGroupProps) {
+  return (
+    <div className="form-group">
+      <label>{label}</label>
+      <div className={`radio-group ${groupClassName}`.trim()}>
+        {options.map(option => (
+          <label key={option.value} className={`radio-label ${labelClassName}`.trim()}>
+            <input
+              type="radio"
+              name={name}
+              value={option.value}
+              checked={value === option.value}
+              onChange={e => onChange(e.target.value)}
+            />
+            <span>{option.label}</span>
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const BK_META_FIELDS = new Set(['diagnosisId', 'selectedBkType', 'bkSelectionMode', 'bkAutoSyncedFrom']);
+
+function scoreEntryFields(entry: Entry | null | undefined): number {
+  if (!entry) return 0;
+  return Object.entries(entry).filter(([key, value]) =>
+    !BK_META_FIELDS.has(key) &&
+    value !== '' && value !== null &&
+    !(Array.isArray(value) && value.length === 0)
+  ).length;
+}
+
+// 어떤 BK유형을 선택(또는 재선택)했을 때, 이미 그 유형으로 입력된 다른 상병이 있으면
+// 그중 가장 많이 채워진 entry를 "기증자"로 찾는다. EntryCard(개별 선택)와 BkGroupCard(그룹 전환) 양쪽에서 공용으로 사용한다.
+function findGroupDonorEntry(allGroups: Group[], bkType: string, excludeDiagnosisId: string | null | undefined): Entry | null {
+  if (!bkType) return null;
+  const group = allGroups.find(g => g.bkType === bkType);
+  if (!group) return null;
+  let best: Entry | null = null;
+  let bestScore = 0;
+  group.items.forEach(({ diagnosis, entry }) => {
+    if (!entry || diagnosis.id === excludeDiagnosisId) return;
+    const score = scoreEntryFields(entry);
+    if (score > bestScore) {
+      best = entry;
+      bestScore = score;
+    }
+  });
+  return best;
+}
+
+function hasEntryMismatch(items: GroupItem[]): boolean {
+  if (items.length < 2) return false;
+  const first = items[0]?.entry;
+  if (!first) return false;
+  const keys = Object.keys(first).filter(k => !BK_META_FIELDS.has(k));
+  return items.slice(1).some(({ entry }) =>
+    entry && keys.some(k => {
+      const a = first[k]; const b = entry[k];
+      return JSON.stringify(a) !== JSON.stringify(b);
+    })
+  );
+}
+
+interface BkGroupCardProps {
+  config: UpperLimbExposureFormConfig;
+  jobId: string;
+  bkType: string;
+  items: GroupItem[];
+  allGroups: Group[];
+  onChangeEntry: UpperLimbOnChangeEntry;
+}
+
+function BkGroupCard({ config, jobId, bkType, items, allGroups, onChangeEntry }: BkGroupCardProps) {
+  const p = config.classPrefix;
+  const EXPOSURE_DETAIL_CONFIG = getExposureDetailConfig(config);
+  const { DiseaseSpecificFields } = config;
+  const representativeEntry = config.pickRepresentativeEntry(items);
+  const inputKey = `${jobId}_bk_${bkType || 'none'}`;
+  const shouldShowExposureFields = representativeEntry.direct_anatomic_link === 'yes';
+  const selectionModeLabel = representativeEntry.bkSelectionMode === 'manual' ? '수동 선택' : (representativeEntry.selectedBkType ? '자동 제안' : '자동 제안 없음');
+  const diagSubtitle = items.map(({ diagnosis }) => `${diagnosis.code || '-'} ${diagnosis.name || ''}`.trim()).join(' / ');
+  const mismatch = hasEntryMismatch(items);
+  const autoSyncedNotes = items
+    .filter(({ entry }) => entry?.bkAutoSyncedFrom)
+    .map(({ diagnosis, entry }) => {
+      const donor = items.find(i => i.diagnosis.id === (entry as Entry).bkAutoSyncedFrom)?.diagnosis;
+      return {
+        key: diagnosis.id,
+        diagnosisLabel: `${diagnosis.code || '-'} ${diagnosis.name || ''}`.trim(),
+        donorLabel: donor ? `${donor.code || '-'} ${donor.name || ''}`.trim() : '다른 상병',
+      };
+    });
+
+  const patchAll = (patch: EntryPatch) => {
+    items.forEach(({ diagnosis }) => onChangeEntry(jobId, diagnosis.id, patch));
+  };
+
+  const applyRepresentativeToAll = () => {
+    const copied = Object.fromEntries(
+      Object.entries(representativeEntry).filter(([k]) => !BK_META_FIELDS.has(k))
+    );
+    items.forEach(({ diagnosis }) => onChangeEntry(jobId, diagnosis.id, copied));
+  };
+
+  const handleBkChange = (nextBk: string) => {
+    const donor = findGroupDonorEntry(allGroups, nextBk, null);
+    if (donor) {
+      const copied = Object.fromEntries(
+        Object.entries(donor).filter(([k]) => !BK_META_FIELDS.has(k))
+      );
+      items.forEach(({ diagnosis }) =>
+        onChangeEntry(jobId, diagnosis.id, { ...copied, selectedBkType: nextBk, bkSelectionMode: 'manual', bkAutoSyncedFrom: donor.diagnosisId })
+      );
+    } else {
+      items.forEach(({ diagnosis }) => {
+        const cur = (allGroups.flatMap(g => g.items).find(i => i.diagnosis.id === diagnosis.id)?.entry) || {};
+        const reset = config.resetBranchFields(cur, nextBk);
+        onChangeEntry(jobId, diagnosis.id, { ...reset, selectedBkType: nextBk, bkSelectionMode: 'manual' });
+      });
+    }
+  };
+
+  const toggleExposureType = (value: string) => {
+    const current = representativeEntry.exposure_types || [];
+    const next = current.includes(value) ? current.filter(i => i !== value) : [...current, value];
+    const detailConfig = EXPOSURE_DETAIL_CONFIG[value];
+    const patch: EntryPatch = { exposure_types: next };
+    if (detailConfig && !next.includes(value)) patch[detailConfig.field] = '';
+    patchAll(patch);
+  };
+
+  return (
+    <div className={`diagnosis-card ${p}-diagnosis-card`}>
+      <div className="diagnosis-card-header">
+        <div className="card-title-stack">
+          <span className="diagnosis-card-title">{config.bkTypeLabels[bkType] || 'BK 유형 미선택'}</span>
+          <span className="diagnosis-card-subtitle">{diagSubtitle}</span>
+        </div>
+        <div className={`${p}-entry-badges`}>
+          <span className="diagnosis-module-badge">{items.length}개 상병 공통 입력</span>
+          <span className={`job-badge ${representativeEntry.bkSelectionMode === 'manual' ? 'badge-medium-high' : 'badge-low'}`}>{selectionModeLabel}</span>
+        </div>
+      </div>
+      {mismatch && (
+        <div className="result-note" style={{ color: 'var(--warning-color, #b45309)' }}>
+          ⚠ 상병별 실제 저장값이 서로 다릅니다. 화면에는 대표값(가장 많이 입력된 값)만 표시되고 있어 실제 저장값과 다를 수 있습니다.{' '}
+          <button type="button" className="btn btn-outline btn-xs" onClick={applyRepresentativeToAll}>
+            표시된 대표값을 전체 상병에 적용
+          </button>
+        </div>
+      )}
+      {autoSyncedNotes.map(note => (
+        <div key={note.key} className="result-note" style={{ color: 'var(--warning-color, #b45309)' }}>
+          ⚠ &quot;{note.diagnosisLabel}&quot; 상병에 &quot;{note.donorLabel}&quot; 상병과 동일한 입력값이 자동 적용되었습니다. 내용을 확인 후 실제와 다르면 직접 수정해 주세요.
+        </div>
+      ))}
+      {items.length > 1 && (
+        <div className="result-note">
+          BK 유형 변경 시 {items.length}개 상병 전체에 적용됩니다.
+        </div>
+      )}
+
+      <div className="form-row">
+        <div className="form-group">
+          <label>BK 유형</label>
+          <select value={representativeEntry.selectedBkType || ''} onChange={e => handleBkChange(e.target.value)}>
+            {config.bkTypeOptions.map(option => (
+              <option key={option.value || 'empty'} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <RadioGroup
+        label="병변 부위와 직접 연결되는 핵심 동작/자세가 있는가"
+        name={`direct_anatomic_link_${inputKey}`}
+        value={representativeEntry.direct_anatomic_link}
+        options={DIRECT_LINK_OPTIONS}
+        onChange={value => patchAll({ direct_anatomic_link: value })}
+      />
+
+      {shouldShowExposureFields && (
+        <>
+          <div className={`form-group ${p}-task-name-group`}>
+            <label>문제 작업명</label>
+            <input
+              value={representativeEntry.main_task_name}
+              onChange={e => patchAll({ main_task_name: e.target.value })}
+              placeholder="해당 직업에서 문제가 되는 작업명을 입력하세요"
+            />
+          </div>
+
+          <div className={`form-row ${p}-task-metrics-row`}>
+            <div className="form-group">
+              <label>1일 총시간(시간)</label>
+              <input type="number" min="0" step="0.5" value={representativeEntry.daily_exposure_hours} onChange={e => patchAll({ daily_exposure_hours: e.target.value })} />
+            </div>
+            <div className="form-group">
+              <label>하루 작업 비중(%)</label>
+              <input type="number" min="0" max="100" step="1" value={representativeEntry.shift_share_percent} onChange={e => patchAll({ shift_share_percent: e.target.value })} />
+            </div>
+            <div className="form-group">
+              <label>주당 수행일수</label>
+              <input type="number" min="0" max="7" step="0.5" value={representativeEntry.days_per_week} onChange={e => patchAll({ days_per_week: e.target.value })} />
+            </div>
+          </div>
+
+          <div className={`form-group ${p}-common-exposure-group`}>
+            <div className="result-section-title">[질환 공통] 핵심 노출 지표</div>
+            <div className="result-section-caption">체크한 항목만 아래에서 세부 정도를 선택합니다</div>
+            <div className="checkbox-group">
+              {config.exposureTypeOptions.map(option => (
+                <div key={option.value} className={`${p}-exposure-option`}>
+                  <label className="assessment-reason-option">
+                    <input
+                      type="checkbox"
+                      checked={(representativeEntry.exposure_types || []).includes(option.value)}
+                      onChange={() => toggleExposureType(option.value)}
+                    />
+                    <span>{option.label}</span>
+                  </label>
+                  {(representativeEntry.exposure_types || []).includes(option.value) && EXPOSURE_DETAIL_CONFIG[option.value] && (
+                    <div className={`${p}-exposure-detail`}>
+                      <RadioGroup
+                        label={EXPOSURE_DETAIL_CONFIG[option.value].label}
+                        name={`${EXPOSURE_DETAIL_CONFIG[option.value].field}_${inputKey}`}
+                        value={representativeEntry[EXPOSURE_DETAIL_CONFIG[option.value].field]}
+                        options={EXPOSURE_DETAIL_CONFIG[option.value].options}
+                        onChange={value => patchAll({ [EXPOSURE_DETAIL_CONFIG[option.value].field]: value })}
+                        groupClassName={EXPOSURE_DETAIL_CONFIG[option.value].twoByTwo ? `${p}-radio-grid-2` : ''}
+                        labelClassName={EXPOSURE_DETAIL_CONFIG[option.value].twoByTwo ? `${p}-radio-label-grid` : ''}
+                      />
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="form-row">
+            <RadioGroup label="작업 형태" name={`work_pattern_${inputKey}`} value={representativeEntry.work_pattern} options={WORK_PATTERN_OPTIONS} onChange={value => patchAll({ work_pattern: value })} />
+            <RadioGroup label="휴식 분포" name={`rest_distribution_${inputKey}`} value={representativeEntry.rest_distribution} options={REST_OPTIONS} onChange={value => patchAll({ rest_distribution: value })} />
+          </div>
+
+          <div className={`result-detail-card ${p}-branch-card`}>
+            <div className="result-section-title">질환별 세부 분기</div>
+            <div className="result-section-caption">선택한 BK 유형에 따라 필요한 항목이 달라집니다</div>
+            <div className={`${p}-branch-fields`}>
+              <DiseaseSpecificFields
+                diagnosisId={inputKey}
+                selectedBkType={representativeEntry.selectedBkType}
+                evaluation={representativeEntry}
+                onChange={(field: string, value: unknown) => patchAll({ [field]: value })}
+                onToggleMultiValue={(field: string, value: string) => {
+                  const current = (representativeEntry[field] || []) as string[];
+                  const next = current.includes(value) ? current.filter(i => i !== value) : [...current, value];
+                  patchAll({ [field]: next });
+                }}
+              />
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+interface EntryCardProps {
+  config: UpperLimbExposureFormConfig;
+  jobId: string;
+  diagnosis: UpperLimbFormDiagnosis;
+  entry: Entry;
+  onChangeEntry: UpperLimbOnChangeEntry;
+  allGroups: Group[];
+}
+
+function EntryCard({ config, jobId, diagnosis, entry, onChangeEntry, allGroups }: EntryCardProps) {
+  const p = config.classPrefix;
+  const EXPOSURE_DETAIL_CONFIG = getExposureDetailConfig(config);
+  const { DiseaseSpecificFields } = config;
+  const inputKey = `${jobId}_${diagnosis.id}`;
+  const shouldShowExposureFields = entry.direct_anatomic_link === 'yes';
+  const selectionModeLabel = entry.bkSelectionMode === 'manual'
+    ? '수동 선택'
+    : (entry.selectedBkType ? '자동 제안' : '자동 제안 없음');
+
+  const patchEntry = (patch: EntryPatch) => onChangeEntry(jobId, diagnosis.id, patch);
+
+  const toggleExposureType = (value: string) => {
+    const current = entry.exposure_types || [];
+    const next = current.includes(value)
+      ? current.filter(item => item !== value)
+      : [...current, value];
+
+    const detailConfig = EXPOSURE_DETAIL_CONFIG[value];
+    const patch: EntryPatch = { exposure_types: next };
+
+    if (detailConfig && !next.includes(value)) {
+      patch[detailConfig.field] = '';
+    }
+
+    patchEntry(patch);
+  };
+
+  return (
+    <div className={`diagnosis-card ${p}-diagnosis-card`}>
+      <div className="diagnosis-card-header">
+        <div className="card-title-stack">
+          <span className="diagnosis-card-title">{diagnosis.code || '-'} {diagnosis.name || config.emptyDiagnosisName}</span>
+          <span className="diagnosis-card-subtitle">방향: {getSideText(diagnosis.side)}</span>
+        </div>
+        <div className={`${p}-entry-badges`}>
+          <span className="diagnosis-module-badge">{config.bkTypeLabels[entry.selectedBkType as string] || 'BK 유형 미선택'}</span>
+          <span className={`job-badge ${entry.bkSelectionMode === 'manual' ? 'badge-medium-high' : 'badge-low'}`}>{selectionModeLabel}</span>
+        </div>
+      </div>
+
+      <div className="form-row">
+        <div className="form-group">
+          <label>BK 유형</label>
+          <select
+            value={entry.selectedBkType}
+            onChange={e => {
+              const nextValue = e.target.value;
+              const donor = findGroupDonorEntry(allGroups, nextValue, diagnosis.id);
+              if (donor) {
+                const copied = Object.fromEntries(
+                  Object.entries(donor).filter(([k]) => !BK_META_FIELDS.has(k))
+                );
+                patchEntry({
+                  ...copied,
+                  selectedBkType: nextValue,
+                  bkSelectionMode: 'manual',
+                  bkAutoSyncedFrom: donor.diagnosisId,
+                });
+                return;
+              }
+              const nextEntry = config.resetBranchFields(entry, nextValue);
+              patchEntry({
+                ...nextEntry,
+                selectedBkType: nextValue,
+                bkSelectionMode: nextValue ? 'manual' : 'auto',
+              });
+            }}
+          >
+            {config.bkTypeOptions.map(option => (
+              <option key={option.value || 'empty'} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <RadioGroup
+        label={config.labels.directLink}
+        name={`direct_anatomic_link_${inputKey}`}
+        value={entry.direct_anatomic_link}
+        options={DIRECT_LINK_OPTIONS}
+        onChange={value => patchEntry({ direct_anatomic_link: value })}
+      />
+
+      {shouldShowExposureFields && (
+        <>
+          <div className={`form-group ${p}-task-name-group`}>
+            <label>문제 작업명</label>
+            <input
+              value={entry.main_task_name}
+              onChange={e => patchEntry({ main_task_name: e.target.value })}
+              placeholder={config.labels.taskNamePlaceholder}
+            />
+          </div>
+
+          <div className={`form-row ${p}-task-metrics-row`}>
+            <div className="form-group">
+              <label>{config.labels.dailyHours}</label>
+              <input
+                type="number"
+                min="0"
+                step="0.5"
+                value={entry.daily_exposure_hours}
+                onChange={e => patchEntry({ daily_exposure_hours: e.target.value })}
+              />
+            </div>
+            <div className="form-group">
+              <label>{config.labels.shiftShare}</label>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                step="1"
+                value={entry.shift_share_percent}
+                onChange={e => patchEntry({ shift_share_percent: e.target.value })}
+              />
+            </div>
+            <div className="form-group">
+              <label>{config.labels.daysPerWeek}</label>
+              <input
+                type="number"
+                min="0"
+                max="7"
+                step="0.5"
+                value={entry.days_per_week}
+                onChange={e => patchEntry({ days_per_week: e.target.value })}
+              />
+            </div>
+          </div>
+
+          <div className={`form-group ${p}-common-exposure-group`}>
+            <div className="result-section-title">{config.labels.commonExposureTitle}</div>
+            <div className="result-section-caption">{config.labels.commonExposureCaption}</div>
+            <div className="checkbox-group">
+              {config.exposureTypeOptions.map(option => (
+                <div key={option.value} className={`${p}-exposure-option`}>
+                  <label className="assessment-reason-option">
+                    <input
+                      type="checkbox"
+                      checked={(entry.exposure_types || []).includes(option.value)}
+                      onChange={() => toggleExposureType(option.value)}
+                    />
+                    <span>{option.label}</span>
+                  </label>
+                  {(entry.exposure_types || []).includes(option.value) && EXPOSURE_DETAIL_CONFIG[option.value] && (
+                    <div className={`${p}-exposure-detail`}>
+                      <RadioGroup
+                        label={EXPOSURE_DETAIL_CONFIG[option.value].label}
+                        name={`${EXPOSURE_DETAIL_CONFIG[option.value].field}_${inputKey}`}
+                        value={entry[EXPOSURE_DETAIL_CONFIG[option.value].field]}
+                        options={EXPOSURE_DETAIL_CONFIG[option.value].options}
+                        onChange={value => patchEntry({ [EXPOSURE_DETAIL_CONFIG[option.value].field]: value })}
+                        groupClassName={EXPOSURE_DETAIL_CONFIG[option.value].twoByTwo ? `${p}-radio-grid-2` : ''}
+                        labelClassName={EXPOSURE_DETAIL_CONFIG[option.value].twoByTwo ? `${p}-radio-label-grid` : ''}
+                      />
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="form-row">
+            <RadioGroup
+              label="작업 형태"
+              name={`work_pattern_${inputKey}`}
+              value={entry.work_pattern}
+              options={WORK_PATTERN_OPTIONS}
+              onChange={value => patchEntry({ work_pattern: value })}
+            />
+            <RadioGroup
+              label="휴식 분포"
+              name={`rest_distribution_${inputKey}`}
+              value={entry.rest_distribution}
+              options={REST_OPTIONS}
+              onChange={value => patchEntry({ rest_distribution: value })}
+            />
+          </div>
+
+          <div className={`result-detail-card ${p}-branch-card`}>
+            <div className="result-section-title">{config.labels.branchTitle}</div>
+            <div className="result-section-caption">{config.labels.branchCaption}</div>
+            <div className={`${p}-branch-fields`}>
+              <DiseaseSpecificFields
+                diagnosisId={inputKey}
+                selectedBkType={entry.selectedBkType}
+                evaluation={entry}
+                onChange={(field: string, value: unknown) => patchEntry({ [field]: value })}
+                onToggleMultiValue={(field: string, value: string) => {
+                  const current = (entry[field] || []) as string[];
+                  const next = current.includes(value)
+                    ? current.filter(item => item !== value)
+                    : [...current, value];
+                  patchEntry({ [field]: next });
+                }}
+              />
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+export interface UpperLimbExposureFormProps {
+  config: UpperLimbExposureFormConfig;
+  job: { id: string; jobName?: string };
+  jobIndex: number;
+  diagnoses: UpperLimbFormDiagnosis[];
+  jobEvaluation: { diagnosisEntries?: Entry[] };
+  errors?: { jobs?: string } | null;
+  onChangeEntry: UpperLimbOnChangeEntry;
+}
+
+export function UpperLimbExposureForm({
+  config,
+  job,
+  jobIndex,
+  diagnoses,
+  jobEvaluation,
+  errors,
+  onChangeEntry,
+}: UpperLimbExposureFormProps) {
+  const p = config.classPrefix;
+  const groups = config.groupDiagnosesByBkType(diagnoses, jobEvaluation);
+  const groupCount = groups.length;
+
+  return (
+    <div className={`job-card ${p}-job-card`}>
+      <div className="job-card-header">
+        <div className="card-title-stack">
+          <span className="job-card-title">직력 {jobIndex + 1}: {job.jobName || '(미입력)'}</span>
+          <span className="job-card-subtitle">{config.labels.jobCardSubtitle}</span>
+        </div>
+        <span className="job-badge badge-low">{groupCount}개 항목 / {diagnoses.length}개 상병</span>
+      </div>
+
+      {errors?.jobs && <div className="error-message">{errors.jobs}</div>}
+
+      <div className={`${p}-entry-grid`}>
+        {groups.map(group => {
+          if (group.isGrouped) {
+            return (
+              <BkGroupCard
+                config={config}
+                key={group.bkType}
+                jobId={job.id}
+                bkType={group.bkType}
+                items={group.items}
+                allGroups={groups}
+                onChangeEntry={onChangeEntry}
+              />
+            );
+          }
+          const { diagnosis, entry } = group.items[0];
+          if (!entry) return null;
+          return (
+            <EntryCard
+              config={config}
+              key={diagnosis.id}
+              jobId={job.id}
+              diagnosis={diagnosis}
+              entry={entry as Entry}
+              onChangeEntry={onChangeEntry}
+              allGroups={groups}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
