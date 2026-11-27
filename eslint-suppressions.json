@@ -69,11 +69,6 @@
       "count": 4
     }
   },
-  "src/modules/elbow/components/ExposureForm.tsx": {
-    "react/no-unescaped-entities": {
-      "count": 4
-    }
-  },
   "src/modules/spine/MddmEvaluation.jsx": {
     "react-hooks/preserve-manual-memoization": {
       "count": 4
@@ -92,11 +87,6 @@
   "src/modules/spine/components/TaskEditor.jsx": {
     "no-unused-vars": {
       "count": 1
-    }
-  },
-  "src/modules/wrist/components/ExposureForm.tsx": {
-    "react/no-unescaped-entities": {
-      "count": 4
     }
   }
 }
