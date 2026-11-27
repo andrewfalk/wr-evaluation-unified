@@ -47,7 +47,6 @@
   "src/core/services/videoServerApply.js",
   "src/core/services/workspaceRepository.js",
   "src/core/utils/dashboardStats.js",
-  "src/core/utils/jobHistory.js",
   "src/core/utils/patientScope.js",
   "src/core/utils/workspaceAutosavePolicy.js",
   "src/modules/cervical/components/TaskEditor.jsx"

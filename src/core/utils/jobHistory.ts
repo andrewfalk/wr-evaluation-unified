@@ -1,4 +1,3 @@
-// @ts-nocheck
 // 직업력([직업력]) 출력 공통 함수. 종합소견 미리보기·EMR(txtJobCusCont/txtSyth1Cont)·엑셀·통합 텍스트
 // 리포트가 같은 포맷을 쓰도록 한 곳에서 만든다.
 //
@@ -9,21 +8,33 @@
 
 import { getEffectiveWorkPeriodText } from './workPeriod';
 import { hasExcludedJobs, isJobExcludedFromAnalysis, orderJobsForHistory } from '@wr/analytics-core/jobScope';
+import type { JobLike } from '@wr/analytics-core/workPeriod';
 
 export const EXCLUDED_JOB_LABEL = '신체부담평가에는 미포함';
 export const NO_EVALUABLE_JOBS_NOTE = '※ 모든 직력이 신체부담평가에서 제외되어 평가 대상 없음';
 
+/** 직업력 줄이 읽는 직력 모양(shared.jobs[]). */
+export interface JobHistoryJob extends JobLike {
+  id?: string;
+  jobName?: string;
+}
+
+export interface JobHistoryLines {
+  lines: string[];
+  text: string;
+  numberingByJobId: Record<string, number> | null;
+}
+
 /**
- * @param {Array} jobs shared.jobs
- * @returns {{ lines: string[], text: string, numberingByJobId: (Object<string, number>|null) }}
- *   numberingByJobId: 미포함 직력이 하나라도 있을 때만 jobId → 직업력 번호 맵, 없으면 null(각 모듈 블록은
+ * @param jobs shared.jobs
+ * @returns numberingByJobId: 미포함 직력이 하나라도 있을 때만 jobId → 직업력 번호 맵, 없으면 null(각 모듈 블록은
  *   기존 번호 규칙을 그대로 쓴다). 직력 번호를 자기 필터로 다시 매기는 블록(어깨 보고서)만 조회한다.
  */
-export function buildJobHistoryLines(jobs) {
+export function buildJobHistoryLines(jobs: readonly JobHistoryJob[] | null | undefined): JobHistoryLines {
   const list = Array.isArray(jobs) ? jobs : [];
   const ordered = orderJobsForHistory(list);
   const withExclusion = hasExcludedJobs(list);
-  const numbering = {};
+  const numbering: Record<string, number> = {};
 
   const lines = ordered.map((job, index) => {
     const number = index + 1;
@@ -41,7 +52,7 @@ export function buildJobHistoryLines(jobs) {
 }
 
 /** 모듈 블록의 직력 번호: 번호 맵이 있고 해당 직력이 들어 있으면 그 번호, 아니면 기존 규칙(fallback). */
-export function resolveJobNumber(jobNumbering, jobId, fallback) {
+export function resolveJobNumber(jobNumbering: Record<string, number> | null | undefined, jobId: string | null | undefined, fallback: number): number {
   if (jobNumbering && jobId && jobNumbering[jobId]) return jobNumbering[jobId];
   return fallback;
 }

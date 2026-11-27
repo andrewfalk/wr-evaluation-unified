@@ -6,7 +6,7 @@ import '../../../modules/spine';
 import '../../../modules/cervical';
 import '../../../modules/elbow';
 import '../../../modules/wrist';
-import { buildJobHistoryLines, resolveJobNumber, EXCLUDED_JOB_LABEL, NO_EVALUABLE_JOBS_NOTE } from '../jobHistory.js';
+import { buildJobHistoryLines, resolveJobNumber, EXCLUDED_JOB_LABEL, NO_EVALUABLE_JOBS_NOTE } from '../jobHistory';
 import { generateUnifiedEMR, generateEMRFieldData } from '../emrReport';
 import { generateUnifiedReport } from '../reportGenerator';
 
