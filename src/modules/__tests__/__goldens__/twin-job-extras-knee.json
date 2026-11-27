@@ -1,0 +1,241 @@
+{
+  "existingSquatting": [
+    {
+      "sharedJobId": "job-removed",
+      "weight": "1",
+      "squatting": "1",
+      "evidenceSources": [],
+      "stairs": true,
+      "kneeTwist": false,
+      "startStop": false,
+      "tightSpace": false,
+      "kneeContact": false,
+      "jumpDown": false
+    },
+    {
+      "sharedJobId": "job-a",
+      "weight": "20",
+      "squatting": "45",
+      "evidenceSources": [
+        "면담"
+      ],
+      "stairs": false,
+      "kneeTwist": true,
+      "startStop": false,
+      "tightSpace": false,
+      "kneeContact": false,
+      "jumpDown": false,
+      "extraField": "보존"
+    }
+  ],
+  "existingWeight": [
+    {
+      "sharedJobId": "job-removed",
+      "weight": "1",
+      "squatting": "1",
+      "evidenceSources": [],
+      "stairs": true,
+      "kneeTwist": false,
+      "startStop": false,
+      "tightSpace": false,
+      "kneeContact": false,
+      "jumpDown": false
+    },
+    {
+      "sharedJobId": "job-a",
+      "weight": "",
+      "squatting": "30",
+      "evidenceSources": [
+        "면담"
+      ],
+      "stairs": false,
+      "kneeTwist": true,
+      "startStop": false,
+      "tightSpace": false,
+      "kneeContact": false,
+      "jumpDown": false,
+      "extraField": "보존"
+    }
+  ],
+  "existingCheckboxOn": [
+    {
+      "sharedJobId": "job-removed",
+      "weight": "1",
+      "squatting": "1",
+      "evidenceSources": [],
+      "stairs": true,
+      "kneeTwist": false,
+      "startStop": false,
+      "tightSpace": false,
+      "kneeContact": false,
+      "jumpDown": false
+    },
+    {
+      "sharedJobId": "job-a",
+      "weight": "20",
+      "squatting": "30",
+      "evidenceSources": [
+        "면담"
+      ],
+      "stairs": true,
+      "kneeTwist": true,
+      "startStop": false,
+      "tightSpace": false,
+      "kneeContact": false,
+      "jumpDown": false,
+      "extraField": "보존"
+    }
+  ],
+  "existingCheckboxOff": [
+    {
+      "sharedJobId": "job-removed",
+      "weight": "1",
+      "squatting": "1",
+      "evidenceSources": [],
+      "stairs": true,
+      "kneeTwist": false,
+      "startStop": false,
+      "tightSpace": false,
+      "kneeContact": false,
+      "jumpDown": false
+    },
+    {
+      "sharedJobId": "job-a",
+      "weight": "20",
+      "squatting": "30",
+      "evidenceSources": [
+        "면담"
+      ],
+      "stairs": false,
+      "kneeTwist": false,
+      "startStop": false,
+      "tightSpace": false,
+      "kneeContact": false,
+      "jumpDown": false,
+      "extraField": "보존"
+    }
+  ],
+  "missingSquatting": [
+    {
+      "sharedJobId": "job-removed",
+      "weight": "1",
+      "squatting": "1",
+      "evidenceSources": [],
+      "stairs": true,
+      "kneeTwist": false,
+      "startStop": false,
+      "tightSpace": false,
+      "kneeContact": false,
+      "jumpDown": false
+    },
+    {
+      "sharedJobId": "job-a",
+      "weight": "20",
+      "squatting": "30",
+      "evidenceSources": [
+        "면담"
+      ],
+      "stairs": false,
+      "kneeTwist": true,
+      "startStop": false,
+      "tightSpace": false,
+      "kneeContact": false,
+      "jumpDown": false,
+      "extraField": "보존"
+    },
+    {
+      "sharedJobId": "job-b",
+      "weight": "",
+      "squatting": "10",
+      "evidenceSources": [],
+      "stairs": false,
+      "kneeTwist": false,
+      "startStop": false,
+      "tightSpace": false,
+      "kneeContact": false,
+      "jumpDown": false
+    }
+  ],
+  "missingWeight": [
+    {
+      "sharedJobId": "job-removed",
+      "weight": "1",
+      "squatting": "1",
+      "evidenceSources": [],
+      "stairs": true,
+      "kneeTwist": false,
+      "startStop": false,
+      "tightSpace": false,
+      "kneeContact": false,
+      "jumpDown": false
+    },
+    {
+      "sharedJobId": "job-a",
+      "weight": "20",
+      "squatting": "30",
+      "evidenceSources": [
+        "면담"
+      ],
+      "stairs": false,
+      "kneeTwist": true,
+      "startStop": false,
+      "tightSpace": false,
+      "kneeContact": false,
+      "jumpDown": false,
+      "extraField": "보존"
+    },
+    {
+      "sharedJobId": "job-b",
+      "weight": "5",
+      "squatting": "",
+      "evidenceSources": [],
+      "stairs": false,
+      "kneeTwist": false,
+      "startStop": false,
+      "tightSpace": false,
+      "kneeContact": false,
+      "jumpDown": false
+    }
+  ],
+  "missingCheckboxOn": [
+    {
+      "sharedJobId": "job-removed",
+      "weight": "1",
+      "squatting": "1",
+      "evidenceSources": [],
+      "stairs": true,
+      "kneeTwist": false,
+      "startStop": false,
+      "tightSpace": false,
+      "kneeContact": false,
+      "jumpDown": false
+    },
+    {
+      "sharedJobId": "job-a",
+      "weight": "20",
+      "squatting": "30",
+      "evidenceSources": [
+        "면담"
+      ],
+      "stairs": false,
+      "kneeTwist": true,
+      "startStop": false,
+      "tightSpace": false,
+      "kneeContact": false,
+      "jumpDown": false,
+      "extraField": "보존"
+    },
+    {
+      "sharedJobId": "job-b",
+      "weight": "",
+      "squatting": "",
+      "evidenceSources": [],
+      "stairs": false,
+      "kneeTwist": false,
+      "startStop": false,
+      "tightSpace": false,
+      "kneeContact": false,
+      "jumpDown": true
+    }
+  ]
+}
