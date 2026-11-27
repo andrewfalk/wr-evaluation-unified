@@ -6,8 +6,8 @@
 //  · 전부 미포함이면 JobTab 대신 안내가 나온다.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
-import { KneeEvaluation } from '../KneeEvaluation.jsx';
-import { ShoulderEvaluation } from '../../shoulder/ShoulderEvaluation.jsx';
+import { KneeEvaluation } from '../KneeEvaluation';
+import { ShoulderEvaluation } from '../../shoulder/ShoulderEvaluation';
 
 vi.mock('../components/JobTab', () => ({
   JobTab: ({ sharedJobs }) => <div data-testid="job-tab">{sharedJobs.map((j) => j.jobName).join('|')}</div>,

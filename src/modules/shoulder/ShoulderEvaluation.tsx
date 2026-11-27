@@ -1,16 +1,30 @@
 import { useEffect } from 'react';
+import type { SharedJob } from '@wr/contracts';
 import { JobTab } from './components/JobTab';
-import { KneeResultPanel } from './components/KneeResultPanel';
-import { createKneeJobExtras } from './utils/data';
+import type { JobTabProps, ShoulderJobExtras } from './components/JobTab';
+import { ShoulderResultPanel } from './components/ShoulderResultPanel';
+import { createShoulderJobExtras } from './utils/data';
 import { NoEvaluableJobsNotice } from '../../core/components/NoEvaluableJobsNotice';
 import { filterAnalysisJobs, hasNoEvaluableJobs } from '@wr/analytics-core/jobScope';
 
-export function KneeEvaluation({ patient, calc, activeTab, updateModule, errors }) {
+interface ShoulderModuleData {
+  jobExtras?: ShoulderJobExtras[];
+  [field: string]: unknown;
+}
+
+export interface ShoulderEvaluationProps {
+  patient: { data: { shared: { jobs?: Array<Pick<SharedJob, 'id' | 'jobName'>> }; module: ShoulderModuleData } };
+  calc: unknown;
+  activeTab?: string;
+  updateModule: (updater: (m: ShoulderModuleData) => ShoulderModuleData) => void;
+  errors?: JobTabProps['errors'];
+}
+
+export function ShoulderEvaluation({ patient, calc, activeTab, updateModule, errors }: ShoulderEvaluationProps) {
   const shared = patient.data.shared;
   const mod = patient.data.module;
   const sharedJobs = shared.jobs || [];
-  // 화면에는 "신체부담평가 미포함" 직력을 보이지 않는다. 아래 jobExtras 자동 생성은 전체 직력 기준으로 두어
-  // 미포함 직력의 입력값을 유지한다(다시 '포함'으로 바꾸면 그대로 돌아와야 함).
+  // 화면에는 "신체부담평가 미포함" 직력을 보이지 않는다(jobExtras 자동 생성은 전체 직력 기준 유지).
   const evaluatedJobs = filterAnalysisJobs(sharedJobs);
 
   // 누락된 직업의 jobExtras 자동 생성
@@ -20,12 +34,12 @@ export function KneeEvaluation({ patient, calc, activeTab, updateModule, errors 
     if (missing.length > 0) {
       updateModule(m => ({
         ...m,
-        jobExtras: [...(m.jobExtras || []), ...missing.map(j => createKneeJobExtras(j.id))]
+        jobExtras: [...(m.jobExtras || []), ...missing.map(j => createShoulderJobExtras(j.id))]
       }));
     }
   }, [sharedJobs.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleJobExtrasChange = (newExtras) => {
+  const handleJobExtrasChange = (newExtras: ShoulderJobExtras[]) => {
     updateModule(m => ({ ...m, jobExtras: newExtras }));
   };
 
@@ -43,7 +57,7 @@ export function KneeEvaluation({ patient, calc, activeTab, updateModule, errors 
           />
         )}
       </div>
-      <KneeResultPanel calc={calc} />
+      <ShoulderResultPanel calc={calc} />
     </>
   );
 }

@@ -1,20 +1,38 @@
+import type { SharedJob } from '@wr/contracts';
 import { calculatePhysicalBurden } from '../utils/calculations';
 import { createKneeJobExtras } from '../utils/data';
 
-export function JobTab({ sharedJobs, jobExtras, onChange, errors }) {
+type KneeCheckKey = 'stairs' | 'kneeTwist' | 'startStop' | 'tightSpace' | 'kneeContact' | 'jumpDown';
+
+/** 직력별 무릎 입력(createKneeJobExtras의 모양 — JS 팩토리의 추론 타입은 evidenceSources가 never[]라 따로 적는다). */
+export interface KneeJobExtras extends Record<KneeCheckKey, boolean> {
+  sharedJobId: string;
+  weight: string;
+  squatting: string;
+  evidenceSources: unknown[];
+}
+
+export interface JobTabProps {
+  sharedJobs: Array<Pick<SharedJob, 'id' | 'jobName'>>;
+  jobExtras: KneeJobExtras[];
+  onChange: (extras: KneeJobExtras[]) => void;
+  errors?: { jobs?: string } | null;
+}
+
+export function JobTab({ sharedJobs, jobExtras, onChange, errors }: JobTabProps) {
   // shared job에 매칭되는 extras 찾기 (없으면 자동 생성)
-  const getExtras = (sharedJobId) => {
+  const getExtras = (sharedJobId: string) => {
     return jobExtras.find(e => e.sharedJobId === sharedJobId);
   };
 
-  const handleExtra = (sharedJobId, field, value) => {
+  const handleExtra = (sharedJobId: string, field: keyof KneeJobExtras, value: string | boolean) => {
     const updated = [...jobExtras];
     const idx = updated.findIndex(e => e.sharedJobId === sharedJobId);
     if (idx >= 0) {
       updated[idx] = { ...updated[idx], [field]: value };
     } else {
       const newExtra = createKneeJobExtras(sharedJobId);
-      newExtra[field] = value;
+      (newExtra as Record<keyof KneeJobExtras, unknown>)[field] = value;
       updated.push(newExtra);
     }
     onChange(updated);
@@ -47,7 +65,7 @@ export function JobTab({ sharedJobs, jobExtras, onChange, errors }) {
               <div className="form-group"><label>중량물 (kg/일)</label><input type="number" value={extras.weight} onChange={e => handleExtra(job.id, 'weight', e.target.value)} min="0" /></div>
             </div>
             <div className="job-check-grid">
-              {[['stairs', '계단오르내리기'], ['kneeTwist', '무릎 비틀림'], ['startStop', '출발/정지 반복'], ['tightSpace', '좁은 공간'], ['kneeContact', '무릎 접촉/충격'], ['jumpDown', '뛰어내리기']].map(([key, label]) => (
+              {([['stairs', '계단오르내리기'], ['kneeTwist', '무릎 비틀림'], ['startStop', '출발/정지 반복'], ['tightSpace', '좁은 공간'], ['kneeContact', '무릎 접촉/충격'], ['jumpDown', '뛰어내리기']] as Array<[KneeCheckKey, string]>).map(([key, label]) => (
                 <label key={key} className="checkbox-label"><input type="checkbox" checked={extras[key] || false} onChange={e => handleExtra(job.id, key, e.target.checked)} /><span>{label}</span></label>
               ))}
             </div>

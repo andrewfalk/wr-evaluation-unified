@@ -74,13 +74,13 @@
       "count": 4
     }
   },
-  "src/modules/knee/KneeEvaluation.jsx": {
-    "no-unused-vars": {
+  "src/modules/knee/KneeEvaluation.tsx": {
+    "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "src/modules/shoulder/ShoulderEvaluation.jsx": {
-    "no-unused-vars": {
+  "src/modules/shoulder/ShoulderEvaluation.tsx": {
+    "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
