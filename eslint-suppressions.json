@@ -19,8 +19,8 @@
       "count": 1
     }
   },
-  "src/core/components/BasicInfoForm.jsx": {
-    "no-unused-vars": {
+  "src/core/components/BasicInfoForm.tsx": {
+    "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
