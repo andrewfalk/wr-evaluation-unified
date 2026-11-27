@@ -74,16 +74,6 @@
       "count": 4
     }
   },
-  "src/modules/knee/KneeEvaluation.tsx": {
-    "@typescript-eslint/no-unused-vars": {
-      "count": 1
-    }
-  },
-  "src/modules/shoulder/ShoulderEvaluation.tsx": {
-    "@typescript-eslint/no-unused-vars": {
-      "count": 1
-    }
-  },
   "src/modules/spine/MddmEvaluation.jsx": {
     "react-hooks/preserve-manual-memoization": {
       "count": 4

@@ -1,5 +1,6 @@
 import type { SharedJob } from '@wr/contracts';
 import { createShoulderJobExtras } from '../utils/data';
+import { upsertJobExtra } from '../../../core/utils/jobExtras';
 
 type ShoulderHourKey = 'overheadHours' | 'repetitiveMediumHours' | 'repetitiveFastHours' | 'vibrationHours';
 
@@ -30,16 +31,7 @@ export function JobTab({ sharedJobs, jobExtras, onChange, errors }: JobTabProps)
     jobExtras.find(e => e.sharedJobId === sharedJobId);
 
   const handleExtra = (sharedJobId: string, field: keyof ShoulderJobExtras, value: string) => {
-    const updated = [...jobExtras];
-    const idx = updated.findIndex(e => e.sharedJobId === sharedJobId);
-    if (idx >= 0) {
-      updated[idx] = { ...updated[idx], [field]: value };
-    } else {
-      const newExtra = createShoulderJobExtras(sharedJobId);
-      (newExtra as Record<keyof ShoulderJobExtras, unknown>)[field] = value;
-      updated.push(newExtra);
-    }
-    onChange(updated);
+    onChange(upsertJobExtra(jobExtras, sharedJobId, createShoulderJobExtras, { [field]: value } as Partial<ShoulderJobExtras>));
   };
 
   return (
