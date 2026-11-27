@@ -22,7 +22,7 @@ export interface WristEvaluationProps {
   errors?: { jobs?: string } | null;
 }
 
-export function WristEvaluation({ patient, calc, updateModule }: WristEvaluationProps) {
+export function WristEvaluation({ patient, calc, updateModule, errors }: WristEvaluationProps) {
   const shared: NonNullable<WristEvaluationProps['patient']['data']['shared']> = patient.data.shared || {};
   const mod: WristModuleDataInput = patient.data.module || {};
   const diagnoses = shared.diagnoses || [];
@@ -130,7 +130,7 @@ export function WristEvaluation({ patient, calc, updateModule }: WristEvaluation
                 jobIndex={index}
                 wristDiagnoses={synced.wristDiagnoses}
                 jobEvaluation={jobEvaluation}
-                errors={null}
+                errors={errors}
                 onChangeEntry={updateDiagnosisEntry}
               />
             );
