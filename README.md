@@ -551,14 +551,14 @@ src/  # (기존 standalone 부분만 발췌)
 │   │   ├── SaveLoadModals.jsx       # 저장/로드 모달
 │   │   ├── BasicInfoForm.jsx        # 기본정보 입력 & 사이드패널
 │   │   ├── DiagnosisForm.jsx        # 상병 입력
-│   │   ├── AssessmentStep.jsx       # 모듈별 평가 스텝
+│   │   ├── AssessmentStep.tsx       # 모듈별 평가 스텝
 │   │   ├── PresetSearch.jsx         # 프리셋 검색/적용
 │   │   ├── PresetManageModal.jsx    # 프리셋 저장/삭제
 │   │   ├── BatchImportModal.jsx     # 일괄입력 (드래그&드롭)
 │   │   ├── SettingsModal.jsx        # 설정 모달 (AI 키, 폰트 등)
 │   │   └── ...
 │   ├── hooks/                       # 사용자 정의 훅
-│   │   ├── useEMRIntegration.js     # EMR 통합 상태 & 동기화
+│   │   ├── useEMRIntegration.ts     # EMR 통합 상태 & 동기화
 │   │   ├── useExportHandlers.js     # 내보내기 (Excel/PDF) 로직
 │   │   ├── useIntakeWizard.js       # 신규 환자 위자드 상태
 │   │   ├── usePatientCrud.js        # 환자 생성/조회/수정/삭제

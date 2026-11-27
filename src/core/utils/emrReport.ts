@@ -178,7 +178,7 @@ function buildConsultReplySlots(shared: Shared): { slot2: string; slot3: string 
 
 // groupOutputOverride: 생략하면 shared.reportOptions.groupAssessmentResults를 따른다.
 // true/false를 명시하면 저장된 설정과 무관하게 그룹/개별 형식을 강제한다 — 미리보기에서
-// 두 형식을 동시에 계산해 보여줄 때 사용한다(AssessmentStep.jsx).
+// 두 형식을 동시에 계산해 보여줄 때 사용한다(AssessmentStep.tsx).
 export function generateUnifiedEMR(patient: PatientRecord, groupOutputOverride?: boolean): UnifiedEmr {
   const shared: Shared = (patient.data as PatientData).shared || {};
   const modules = (patient.data as PatientData).modules || {};
