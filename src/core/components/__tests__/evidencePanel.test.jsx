@@ -3,7 +3,7 @@
 // flatCandidateList.test.jsx는 근거 렌더러를 stub으로 주입하므로 실제 키-값 배치는 여기서만 검증된다.
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, render } from '@testing-library/react';
-import { EvidencePanel } from '../VideoAnalysisStep.jsx';
+import { EvidencePanel } from '../VideoAnalysisStep';
 
 afterEach(cleanup);
 

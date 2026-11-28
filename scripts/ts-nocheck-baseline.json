@@ -8,7 +8,6 @@
   "src/core/components/IntakeWizard.jsx",
   "src/core/components/LoginModal.jsx",
   "src/core/components/SignupRequestModal.jsx",
-  "src/core/components/VideoAnalysisStep.jsx",
   "src/core/components/charts/BoxPlot.jsx",
   "src/core/components/charts/ForestPlot.jsx",
   "src/core/components/charts/Histogram.jsx",
