@@ -38,7 +38,7 @@ export interface ShellController extends
   GuardedDialogs,
   Omit<PatientsContainer, 'store'>,
   Pick<PatientScopeState, 'setPatientScope' | 'setDashboardScope' | 'effectivePatientScope' | 'canUseDashboardScope' | 'effectiveDashboardScope'>,
-  Pick<ModalState, 'modals' | 'setterFor'>,
+  Pick<ModalState, 'modals' | 'setterFor' | 'adminConsoleTab' | 'setAdminConsoleTab'>,
   Pick<ScreenRouter, 'activeScreen' | 'setShowHome' | 'openStatistics' | 'closeStatistics'>,
   UnsavedDraftGuard {
   patientStore: PatientStore;
@@ -76,7 +76,7 @@ export function useShellController(): ShellController {
   const [patientSyncPaused, setPatientSyncPaused] = useState(false);
   // 모달 열림 상태 — 키별 맵 하나(불리언 8 + 프리셋 3, 여러 모달이 동시에 열릴 수 있음): src/app/useModalState.ts(P2-30).
   // 아래 이름들은 예전 개별 useState와 같은 값·setter다(하위 훅은 인자로, 모달은 ModalHost가 작업 공간 Context로 받는다 — P2-45a).
-  const { modals, setterFor } = useModalState();
+  const { modals, setterFor, adminConsoleTab, setAdminConsoleTab } = useModalState();
   const showSaveModal = modals.save; const setShowSaveModal = setterFor('save');
   const showLoadModal = modals.load; const setShowLoadModal = setterFor('load');
   const [errors, setErrors] = useState<Record<string, unknown>>({});
@@ -104,7 +104,7 @@ export function useShellController(): ShellController {
     patients, setPatients, activeId, setActiveId, selectedIds, setSelectedIds, patientStore,
     patientScopeState, setPatientScope, setDashboardScope, effectivePatientScope, canUseDashboardScope, effectiveDashboardScope,
     patientSyncPaused, setPatientSyncPaused,
-    modals, setterFor,
+    modals, setterFor, adminConsoleTab, setAdminConsoleTab,
     showSaveModal, setShowSaveModal, showLoadModal, setShowLoadModal,
     errors, setErrors, showSidebar, setShowSidebar, patientFilters, setPatientFilters,
     showSettings, setShowSettings, showAdminConsole, setShowAdminConsole, showAccountProfile, setShowAccountProfile,
