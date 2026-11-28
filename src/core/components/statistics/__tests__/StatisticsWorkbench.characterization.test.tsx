@@ -103,8 +103,18 @@ function checkbox(name: RegExp) {
   fireEvent.click(screen.getByRole('checkbox', { name }));
 }
 
+/** 기술통계 흐름이 고르는 두 변수(신체부담기여도·대표 직종명)의 결과만 담은 실행 응답. */
 function descriptiveRun(): AnalyzeResponse {
-  return resultCases()[0].response;
+  const base = resultCases()[0].response;
+  const picked = new Set<string>([KEY.relatedness, KEY.job]);
+  return {
+    ...base,
+    result: {
+      ...base.result,
+      continuous: base.result.continuous.filter((r) => picked.has(r.variableKey)),
+      discrete: base.result.discrete.filter((r) => picked.has(r.variableKey)),
+    },
+  };
 }
 
 describe('StatisticsWorkbench 특성화 — 기술통계 흐름', () => {
