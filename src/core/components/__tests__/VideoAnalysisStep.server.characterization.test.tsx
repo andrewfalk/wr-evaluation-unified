@@ -420,7 +420,7 @@ describe('VideoAnalysisStep 특성화 — 서버 경로', () => {
     await expect(goldenJson(h.steps)).toMatchFileSnapshot('./__goldens__/video-server-flow.json');
   });
 
-  it('미동기 환자 · 시험 모드 · 탐지 실패', async () => {
+  it('미동기 환자 · 시험 모드 · 탐지 실패 · 썸네일을 남긴 언마운트', async () => {
     const out: Record<string, unknown> = {};
 
     // ① 인트라넷인데 동기화 안 된 환자 — 적용 막힘(분석은 예시 경로로).
@@ -466,6 +466,24 @@ describe('VideoAnalysisStep 특성화 — 서버 경로', () => {
       h.snap('분석 결과 비어 있음', takeLog());
       cleanup();
       out.fixture = h.steps;
+    }
+
+    // ③ 썸네일이 있는 탐지 결과를 남긴 채 화면을 떠남 — 언마운트 정리가 남은 썸네일 주소를 해제한다(렌더마다 ref에 담는 탐지 상태).
+    {
+      const h = renderVideoStep({ patient: patientWith(EMPTY_VA), activeModules: ['knee'], session: SESSION, settings: SETTINGS, fixtureMode: true });
+      const root = h.view.container;
+      const snapWithRevoked = (step: string) => h.snap(step, [...takeLog(), ...(revoked.length ? [{ revoked: revoked.splice(0) }] : [])]);
+      const nameInput = () => processCard(root, 1).querySelector<HTMLInputElement>('input[placeholder="시험용 영상 파일명"]') as HTMLInputElement;
+      change(nameInput(), 'synthetic_fixture_c.mp4');
+      respond('createClip', () => Promise.resolve({ clipId: 'srv-fixture-3' }));
+      respond('sampleDetectClip', () => Promise.resolve({ frameWidth: 640, frameHeight: 480, persons: [{ id: 'P9', bbox: [5, 5, 50, 90] }] }));
+      respond('fetchSampleFrame', () => Promise.resolve('blob:synthetic-frame-3'));
+      click(buttonByText(processCard(root, 1), '대상자 탐지'));
+      await flush();
+      snapWithRevoked('썸네일 있는 탐지 결과(공정 2 클립)');
+      cleanup();
+      snapWithRevoked('클립을 남긴 채 언마운트(썸네일 해제)');
+      out.unmountWithThumbnail = h.steps;
     }
 
     await expect(goldenJson(out)).toMatchFileSnapshot('./__goldens__/video-server-variants.json');

@@ -3474,5 +3474,388 @@
         }
       ]
     }
+  ],
+  "unmountWithThumbnail": [
+    {
+      "step": "썸네일 있는 탐지 결과(공정 2 클립)",
+      "calls": [
+        {
+          "kind": "updateShared",
+          "videoAnalysis": {
+            "processes": [
+              {
+                "id": "proc-1",
+                "sharedJobId": "job-a",
+                "name": "합성 공정 가",
+                "shiftSharePercent": 100,
+                "activeMinutesPerDay": 240,
+                "analysisProfile": "repetition-upper-limb"
+              },
+              {
+                "id": "proc-2",
+                "sharedJobId": "job-b",
+                "name": "합성 공정 나",
+                "shiftSharePercent": 100,
+                "activeMinutesPerDay": null,
+                "analysisProfile": "posture-basic"
+              }
+            ],
+            "clips": [
+              {
+                "id": "clip-1",
+                "processId": "proc-1",
+                "viewpoint": "sagittal",
+                "analysisProfile": "posture-basic"
+              },
+              {
+                "id": "clip-2",
+                "processId": "proc-1",
+                "viewpoint": "frontal",
+                "analysisProfile": "posture-basic"
+              },
+              {
+                "id": "clip-3",
+                "processId": "proc-2",
+                "viewpoint": "sagittal",
+                "analysisProfile": "posture-basic",
+                "fixtureClipName": "synthetic_fixture_c.mp4"
+              }
+            ],
+            "processFeatures": [],
+            "jobFeatures": [],
+            "candidateFeatures": [],
+            "appliedInputs": []
+          }
+        }
+      ],
+      "state": {
+        "videoAnalysis": {
+          "processes": [
+            {
+              "id": "proc-1",
+              "sharedJobId": "job-a",
+              "name": "합성 공정 가",
+              "shiftSharePercent": 100,
+              "activeMinutesPerDay": 240,
+              "analysisProfile": "repetition-upper-limb"
+            },
+            {
+              "id": "proc-2",
+              "sharedJobId": "job-b",
+              "name": "합성 공정 나",
+              "shiftSharePercent": 100,
+              "activeMinutesPerDay": null,
+              "analysisProfile": "posture-basic"
+            }
+          ],
+          "clips": [
+            {
+              "id": "clip-1",
+              "processId": "proc-1",
+              "viewpoint": "sagittal",
+              "analysisProfile": "posture-basic"
+            },
+            {
+              "id": "clip-2",
+              "processId": "proc-1",
+              "viewpoint": "frontal",
+              "analysisProfile": "posture-basic"
+            },
+            {
+              "id": "clip-3",
+              "processId": "proc-2",
+              "viewpoint": "sagittal",
+              "analysisProfile": "posture-basic",
+              "fixtureClipName": "synthetic_fixture_c.mp4"
+            }
+          ],
+          "processFeatures": [],
+          "jobFeatures": [],
+          "candidateFeatures": [],
+          "appliedInputs": []
+        },
+        "modules": {
+          "spine": {
+            "tasks": [
+              {
+                "id": "sp-1",
+                "sharedJobId": "job-a",
+                "name": "합성 들기"
+              },
+              {
+                "id": "sp-u",
+                "name": "합성 미연결 작업"
+              }
+            ]
+          },
+          "cervical": {
+            "tasks": [
+              {
+                "id": "cv-1",
+                "sharedJobId": "job-a",
+                "name": "합성 목 작업"
+              }
+            ]
+          }
+        }
+      },
+      "dom": [
+        "<div class=\"panel\">",
+        "  <section class=\"section pattern-surface form-section\">",
+        "    <div class=\"section-header\">",
+        "      <div class=\"section-title-row\">",
+        "        <h2 class=\"section-title\">",
+        "          <span class=\"section-icon\">",
+        "            \"🎥\"",
+        "          \"작업 영상 인간공학 분석 (시험)\"",
+        "        <p class=\"section-description\">",
+        "          \"조사 서류 기반으로 공정을 정리하고 영상 분석을 실행합니다. 결과는 항상\"",
+        "          <b>",
+        "            \"제안값\"",
+        "          \"이며 전문의가 확정합니다. 적용 내역은 서버에 기록됩니다.\"",
+        "    <div role=\"note\" style=\"margin: 4px 0px 12px; padding: 8px 12px; font-size: 13px; line-height: 1.5; border: 1px solid var(--color-warning); border-radius: 6px; background: rgba(240, 173, 78, 0.1);\">",
+        "      \"⚠\"",
+        "      <b>",
+        "        \"시범 운영\"",
+        "      \"— 영상 분석값은 정확도 검증 전입니다. 모든 값은\"",
+        "      <b>",
+        "        \"참고용\"",
+        "      \"이며, 전문의가 직접 확인·확정해야 합니다. 어긋나거나 이상한 제안은 적용 시\"",
+        "      <b>",
+        "        \"수정 사유 메모\"",
+        "      \"로 남겨주시면 검증·개선에 활용됩니다.\"",
+        "    <div class=\"va-statusbar\">",
+        "      <span class=\"va-status-chip\">",
+        "        \"공정\"",
+        "        <span class=\"va-status-chip-num\">",
+        "          \"2\"",
+        "      <span class=\"va-status-chip\">",
+        "        \"클립\"",
+        "        <span class=\"va-status-chip-num\">",
+        "          \"3\"",
+        "      <span class=\"va-status-chip\">",
+        "        \"분석 전\"",
+        "    <div class=\"va-layout\">",
+        "      <div class=\"va-col\">",
+        "        <div class=\"va-col-title\">",
+        "          \"셋업 — 공정·클립\"",
+        "        <div class=\"va-process-card\">",
+        "          <div class=\"va-process-fields\">",
+        "            <div class=\"form-group va-pf-job\">",
+        "              <label>",
+        "                \"직업\"",
+        "              <select>",
+        "                <option value=\"job-a\">",
+        "                  \"합성 조립원\"",
+        "                <option value=\"job-b\">",
+        "                  \"합성 운반원\"",
+        "            <div class=\"form-group va-pf-name\">",
+        "              <label>",
+        "                \"공정명\"",
+        "              <input placeholder=\"공정명\" value=\"합성 공정 가\" />",
+        "            <div class=\"va-pf-pair\">",
+        "              <div class=\"form-group va-pf-share\">",
+        "                <label>",
+        "                  \"점유율(%)\"",
+        "                <input type=\"number\" min=\"0\" max=\"100\" value=\"100\" />",
+        "              <div class=\"form-group va-pf-active\">",
+        "                <label title=\"공정활동분/일(수기). 비우면 모름(적용 불가).\">",
+        "                  \"활동시간(분/일)\"",
+        "                <input type=\"number\" min=\"0\" max=\"1440\" placeholder=\"분/일\" value=\"240\" />",
+        "            <div class=\"form-group va-pf-profile\">",
+        "              <label>",
+        "                \"분석 프로필\"",
+        "              <select>",
+        "                <option value=\"posture-basic\">",
+        "                  \"자세시간(5~10fps)\"",
+        "                <option value=\"repetition-upper-limb\">",
+        "                  \"상지반복(10~15fps)\"",
+        "            <div class=\"va-pf-rest\">",
+        "              <div class=\"va-pf-desc\">",
+        "                \"어깨·팔꿈치 반복 빈도와 속도 구간별 시간 추정\"",
+        "              <button type=\"button\" class=\"btn btn-secondary btn-sm va-pf-del\">",
+        "                \"공정 삭제\"",
+        "          <div class=\"va-process-clips\">",
+        "            <div class=\"va-clip-row\">",
+        "              <select>",
+        "                <option value=\"sagittal\">",
+        "                  \"측면(sagittal)\"",
+        "                <option value=\"frontal\">",
+        "                  \"정면(frontal)\"",
+        "                <option value=\"other\">",
+        "                  \"기타\"",
+        "              <input type=\"text\" placeholder=\"시험용 영상 파일명\" style=\"width: 150px;\" value=\"\" />",
+        "              <input type=\"file\" accept=\"video/*\" />",
+        "              <button type=\"button\" class=\"btn btn-secondary btn-xs\">",
+        "                \"×\"",
+        "            <div class=\"va-clip-row\">",
+        "              <select>",
+        "                <option value=\"sagittal\">",
+        "                  \"측면(sagittal)\"",
+        "                <option value=\"frontal\">",
+        "                  \"정면(frontal)\"",
+        "                <option value=\"other\">",
+        "                  \"기타\"",
+        "              <input type=\"text\" placeholder=\"시험용 영상 파일명\" style=\"width: 150px;\" value=\"\" />",
+        "              <input type=\"file\" accept=\"video/*\" />",
+        "              <button type=\"button\" class=\"btn btn-secondary btn-xs\">",
+        "                \"×\"",
+        "            <div>",
+        "              <button type=\"button\" class=\"btn btn-secondary btn-sm\">",
+        "                \"+ 클립\"",
+        "        <div class=\"va-process-card\">",
+        "          <div class=\"va-process-fields\">",
+        "            <div class=\"form-group va-pf-job\">",
+        "              <label>",
+        "                \"직업\"",
+        "              <select>",
+        "                <option value=\"job-a\">",
+        "                  \"합성 조립원\"",
+        "                <option value=\"job-b\">",
+        "                  \"합성 운반원\"",
+        "            <div class=\"form-group va-pf-name\">",
+        "              <label>",
+        "                \"공정명\"",
+        "              <input placeholder=\"공정명\" value=\"합성 공정 나\" />",
+        "            <div class=\"va-pf-pair\">",
+        "              <div class=\"form-group va-pf-share\">",
+        "                <label>",
+        "                  \"점유율(%)\"",
+        "                <input type=\"number\" min=\"0\" max=\"100\" value=\"100\" />",
+        "              <div class=\"form-group va-pf-active\">",
+        "                <label title=\"공정활동분/일(수기). 비우면 모름(적용 불가).\">",
+        "                  \"활동시간(분/일)\"",
+        "                <input type=\"number\" min=\"0\" max=\"1440\" placeholder=\"분/일\" value=\"\" />",
+        "            <div class=\"form-group va-pf-profile\">",
+        "              <label>",
+        "                \"분석 프로필\"",
+        "              <select>",
+        "                <option value=\"posture-basic\">",
+        "                  \"자세시간(5~10fps)\"",
+        "                <option value=\"repetition-upper-limb\">",
+        "                  \"상지반복(10~15fps)\"",
+        "            <div class=\"va-pf-rest\">",
+        "              <div class=\"va-pf-desc\">",
+        "                \"쪼그려앉기·허리 구부리기·오버헤드 자세시간 추정\"",
+        "              <button type=\"button\" class=\"btn btn-secondary btn-sm va-pf-del\">",
+        "                \"공정 삭제\"",
+        "          <div class=\"va-process-clips\">",
+        "            <div class=\"va-clip-row\">",
+        "              <select>",
+        "                <option value=\"sagittal\">",
+        "                  \"측면(sagittal)\"",
+        "                <option value=\"frontal\">",
+        "                  \"정면(frontal)\"",
+        "                <option value=\"other\">",
+        "                  \"기타\"",
+        "              <input type=\"text\" placeholder=\"시험용 영상 파일명\" style=\"width: 150px;\" value=\"synthetic_fixture_c.mp4\" />",
+        "              <button type=\"button\" class=\"btn btn-secondary btn-sm\">",
+        "                \"재탐지\"",
+        "              <button type=\"button\" class=\"btn btn-secondary btn-xs\">",
+        "                \"×\"",
+        "              <div class=\"va-clip-detect\">",
+        "                <div>",
+        "                  <div class=\"va-media-box\">",
+        "                    <svg viewBox=\"0 0 640 480\" preserveAspectRatio=\"xMidYMid meet\" role=\"group\" aria-label=\"대상자 선택\">",
+        "                      <image href=\"blob:synthetic-frame-3\" x=\"0\" y=\"0\" width=\"640\" height=\"480\" preserveAspectRatio=\"none\" />",
+        "                      <g style=\"cursor: pointer;\">",
+        "                        <rect x=\"5\" y=\"5\" width=\"50\" height=\"90\" fill=\"rgba(255,255,255,0.06)\" stroke=\"#90caf9\" stroke-width=\"3.2\" />",
+        "                        <text x=\"11.857142857142858\" y=\"27.857142857142858\" fill=\"#fff\" font-size=\"22.857142857142858\">",
+        "                          \"P9\"",
+        "                <p class=\"muted\" style=\"font-size: 12px;\">",
+        "                  \"박스를 클릭해 대상 작업자를 선택하세요(미선택 시 자동=주요 인물).\"",
+        "            <div>",
+        "              <button type=\"button\" class=\"btn btn-secondary btn-sm\">",
+        "                \"+ 클립\"",
+        "        <div style=\"display: flex; gap: 8px; flex-wrap: wrap; align-items: center;\">",
+        "          <button type=\"button\" class=\"btn btn-secondary btn-sm\">",
+        "            \"+ 공정 추가\"",
+        "          <button type=\"button\" class=\"btn btn-primary\">",
+        "            \"영상 분석 실행\"",
+        "        <div class=\"va-pipeline\">",
+        "          <span class=\"va-pipeline-step is-active\">",
+        "            \"▶ 클립 준비\"",
+        "          <span class=\"va-pipeline-step\">",
+        "            \"대상자 확인\"",
+        "          <span class=\"va-pipeline-step\">",
+        "            \"분석 중\"",
+        "          <span class=\"va-pipeline-step\">",
+        "            \"검수대기/제안생성\"",
+        "      <div class=\"va-col va-review-col\">",
+        "        <div class=\"va-col-title\">",
+        "          \"검토 — 제안\"",
+        "          <small>",
+        "            \"분석 실행 후 표시됩니다\"",
+        "        <p class=\"evaluation-empty-state\">",
+        "          \"공정·클립을 정리하고\"",
+        "          <b>",
+        "            \"분석 실행\"",
+        "          \"을 누르면 제안이 여기에 표시됩니다.\""
+      ],
+      "form": [
+        "#0 select value=\"job-a\"",
+        "#1 input type=\"text\" value=\"합성 공정 가\"",
+        "#2 input type=\"number\" value=\"100\"",
+        "#3 input type=\"number\" value=\"240\"",
+        "#4 select value=\"repetition-upper-limb\"",
+        "#5 select value=\"sagittal\"",
+        "#8 select value=\"frontal\"",
+        "#11 select value=\"job-b\"",
+        "#12 input type=\"text\" value=\"합성 공정 나\"",
+        "#13 input type=\"number\" value=\"100\"",
+        "#15 select value=\"posture-basic\"",
+        "#16 select value=\"sagittal\"",
+        "#17 input type=\"text\" value=\"synthetic_fixture_c.mp4\""
+      ],
+      "events": [
+        {
+          "fn": "createClip",
+          "args": [
+            "<patient pt-server-1>",
+            {
+              "processId": "proc-2",
+              "purpose": "fixture",
+              "fixtureClipName": "synthetic_fixture_c.mp4",
+              "session": "<session>",
+              "settings": "<settings>"
+            }
+          ]
+        },
+        {
+          "fn": "sampleDetectClip",
+          "args": [
+            "srv-fixture-3",
+            {
+              "session": "<session>",
+              "settings": "<settings>"
+            }
+          ]
+        },
+        {
+          "fn": "fetchSampleFrame",
+          "args": [
+            "srv-fixture-3",
+            {
+              "session": "<session>",
+              "settings": "<settings>"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "step": "클립을 남긴 채 언마운트(썸네일 해제)",
+      "calls": [],
+      "state": "unchanged",
+      "dom": [],
+      "form": [],
+      "events": [
+        {
+          "revoked": [
+            "blob:synthetic-frame-3"
+          ]
+        }
+      ]
+    }
   ]
 }

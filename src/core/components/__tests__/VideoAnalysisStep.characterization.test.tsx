@@ -173,7 +173,11 @@ describe('VideoAnalysisStep 특성화 — 예시 분석 경로', () => {
       processes,
       clips: [{ id: 'clip-1', processId: 'proc-1', viewpoint: 'sagittal', analysisProfile: 'posture-basic' }],
       processFeatures,
-      jobFeatures: buildJobFeatures(processes, processFeatures),
+      // 본체가 JS든 TS든 같은 줄로 붙도록 인자 모양은 본체의 매개변수 타입으로 단언한다(예시 분석 값은 JS에서 Object로 추론된다).
+      jobFeatures: buildJobFeatures(
+        processes as Parameters<typeof buildJobFeatures>[0],
+        processFeatures as Parameters<typeof buildJobFeatures>[1],
+      ),
       candidateFeatures: [],
       appliedInputs: [],
     };
