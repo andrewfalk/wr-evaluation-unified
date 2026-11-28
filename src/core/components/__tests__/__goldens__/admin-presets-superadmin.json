@@ -1,0 +1,153 @@
+{
+  "steps": [
+    {
+      "step": "탭 열기 — 조직 열",
+      "requests": [
+        {
+          "method": "GET",
+          "url": "https://admin.synthetic.test/api/admin/presets",
+          "headers": {
+            "Content-Type": "application/json",
+            "X-WR-User-Id": "admin-0001",
+            "X-WR-Auth-Mode": "intranet"
+          }
+        }
+      ],
+      "dom": [
+        "<div class=\"admin-toolbar\">",
+        "  <input class=\"admin-search\" placeholder=\"직종명 검색\" value=\"\" />",
+        "  <select>",
+        "    <option value=\"all\">",
+        "      \"전체\"",
+        "    <option value=\"organization\">",
+        "      \"조직 공유\"",
+        "    <option value=\"private\">",
+        "      \"비공개(소유자만)\"",
+        "  <button class=\"btn btn-secondary btn-sm\">",
+        "    \"새로 고침\"",
+        "  <span class=\"admin-toolbar-spacer\" />",
+        "  <button class=\"btn btn-primary btn-sm\" disabled=\"\">",
+        "    \"선택 → 조직 공유\"",
+        "  <button class=\"btn btn-secondary btn-sm\" disabled=\"\">",
+        "    \"선택 → 비공개(소유자만)\"",
+        "<div class=\"admin-table-wrap\">",
+        "  <table class=\"admin-table\">",
+        "    <thead>",
+        "      <tr>",
+        "        <th>",
+        "          <input type=\"checkbox\" aria-label=\"전체 선택\" />",
+        "        <th>",
+        "          \"직종명\"",
+        "        <th>",
+        "          \"카테고리\"",
+        "        <th>",
+        "          \"소유자\"",
+        "        <th>",
+        "          \"조직\"",
+        "        <th>",
+        "          \"공개 범위\"",
+        "    <tbody>",
+        "      <tr>",
+        "        <td>",
+        "          <input type=\"checkbox\" aria-label=\"합성 용접공 선택\" />",
+        "        <td>",
+        "          \"합성 용접공\"",
+        "        <td>",
+        "          \"제조\"",
+        "        <td>",
+        "          \"합성 의사 1\"",
+        "        <td class=\"admin-cell-mono\">",
+        "          \"org-synthetic-1\"",
+        "        <td>",
+        "          <span class=\"admin-badge admin-badge--connected\">",
+        "            \"조직 공유\"",
+        "      <tr>",
+        "        <td>",
+        "          <input type=\"checkbox\" aria-label=\"합성 간호 직무 선택\" />",
+        "        <td>",
+        "          \"합성 간호 직무\"",
+        "        <td>",
+        "          \"보건\"",
+        "        <td>",
+        "          \"-\"",
+        "        <td class=\"admin-cell-mono\">",
+        "          \"org-synthetic-1\"",
+        "        <td>",
+        "          <span class=\"admin-badge admin-badge--fallback\">",
+        "            \"비공개(소유자만)\"",
+        "      <tr>",
+        "        <td>",
+        "          <input type=\"checkbox\" aria-label=\"합성 사무직 선택\" />",
+        "        <td>",
+        "          \"합성 사무직\"",
+        "        <td>",
+        "          \"사무\"",
+        "        <td>",
+        "          \"합성 의사 1\"",
+        "        <td class=\"admin-cell-mono\">",
+        "          \"org-synthetic-2\"",
+        "        <td>",
+        "          <span class=\"admin-badge admin-badge--fallback\">",
+        "            \"비공개(소유자만)\""
+      ],
+      "form": [
+        "#1 select value=\"all\""
+      ]
+    },
+    {
+      "step": "빈 목록 — 칸 6개",
+      "requests": [
+        {
+          "method": "GET",
+          "url": "https://admin.synthetic.test/api/admin/presets",
+          "headers": {
+            "Content-Type": "application/json",
+            "X-WR-User-Id": "admin-0001",
+            "X-WR-Auth-Mode": "intranet"
+          }
+        }
+      ],
+      "dom": [
+        "<div class=\"admin-toolbar\">",
+        "  <input class=\"admin-search\" placeholder=\"직종명 검색\" value=\"\" />",
+        "  <select>",
+        "    <option value=\"all\">",
+        "      \"전체\"",
+        "    <option value=\"organization\">",
+        "      \"조직 공유\"",
+        "    <option value=\"private\">",
+        "      \"비공개(소유자만)\"",
+        "  <button class=\"btn btn-secondary btn-sm\">",
+        "    \"새로 고침\"",
+        "  <span class=\"admin-toolbar-spacer\" />",
+        "  <button class=\"btn btn-primary btn-sm\" disabled=\"\">",
+        "    \"선택 → 조직 공유\"",
+        "  <button class=\"btn btn-secondary btn-sm\" disabled=\"\">",
+        "    \"선택 → 비공개(소유자만)\"",
+        "<div class=\"admin-table-wrap\">",
+        "  <table class=\"admin-table\">",
+        "    <thead>",
+        "      <tr>",
+        "        <th>",
+        "          <input type=\"checkbox\" aria-label=\"전체 선택\" disabled=\"\" />",
+        "        <th>",
+        "          \"직종명\"",
+        "        <th>",
+        "          \"카테고리\"",
+        "        <th>",
+        "          \"소유자\"",
+        "        <th>",
+        "          \"조직\"",
+        "        <th>",
+        "          \"공개 범위\"",
+        "    <tbody>",
+        "      <tr>",
+        "        <td colspan=\"6\" class=\"admin-empty\">",
+        "          \"표시할 프리셋이 없습니다.\""
+      ],
+      "form": [
+        "#1 select value=\"all\""
+      ]
+    }
+  ]
+}
