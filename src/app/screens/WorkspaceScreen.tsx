@@ -27,7 +27,7 @@ export function WorkspaceScreen() {
     openLoadModal, opsBannerMessage, patientFilters, patients, presetError, presetMeta, presets, removePatient,
     removeSelectedPatients, selectedIds, serverConfig, session, setConflictPatientId, setDashboardScope, setExportDropdown,
     setExtractProgress, setPatientFilters, setPatientScope, setPatientSyncPaused, setPresetBrowseJobId, setPresetModalJobId,
-    setSelectedIds, setShowAccountProfile, setShowAdminConsole, setShowBatchImport, setShowChangePassword, setShowSaveModal,
+    setAdminConsoleTab, setSelectedIds, setShowAccountProfile, setShowAdminConsole, setShowBatchImport, setShowChangePassword, setShowSaveModal,
     setShowSettings, setShowSidebar, settings, showOpsBanner, showSidebar, statsAvailable, steps, syncState, syncSummary,
     unifiedPreviewText, updateActiveModules, updateDiagnoses, updateModule, updateModuleById, updatePatient, updateShared,
   } = useWorkspace();
@@ -155,7 +155,7 @@ export function WorkspaceScreen() {
           <button
             className="ops-alert-banner"
             type="button"
-            onClick={() => setShowAdminConsole(true)}
+            onClick={() => { setAdminConsoleTab('ops'); setShowAdminConsole(true); }}
           >
             {opsBannerMessage}
           </button>

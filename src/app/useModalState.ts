@@ -2,7 +2,7 @@
 // 3칸을 **키별 맵 하나**로 모은다. 단일 슬롯(`modal: {name, payload}`)이 아니라 키별인 이유: 모달들이 서로 독립 조건이라
 // 동시에 열릴 수 있다(계획 F4 — 예: 프리셋 조회 → 관리 전환 중 두 칸이 함께 차 있음, 충돌 해결 모달 + 다른 모달).
 // 단일 슬롯으로 바꾸면 동작이 바뀐다. 모달은 src/app/modals/ModalHost.tsx가 작업 공간 Context로 받는다(C3-C P2-45a).
-import { useCallback, useMemo, useState, type SetStateAction } from 'react';
+import { useCallback, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 
 export interface ModalSlots {
   save: boolean;
@@ -45,10 +45,17 @@ export interface ModalState {
   setModal: <K extends ModalKey>(key: K, value: SetStateAction<ModalSlots[K]>) => void;
   /** 키 하나의 setter(안정된 참조) — 예전 setShowXxx·setPresetXxx 자리에 그대로 넘긴다. */
   setterFor: <K extends ModalKey>(key: K) => SlotSetter<K>;
+  /**
+   * 관리자 콘솔을 열 탭(P2-83e) — 운영 경고 배너가 'ops'로 정하고 콘솔을 연다. null이면 콘솔의 기본 탭(감사 로그).
+   * 콘솔을 닫을 때 null로 되돌린다(ModalHost) — 배너로 연 뒤 닫고 계정 메뉴로 다시 열면 기본 탭이다.
+   */
+  adminConsoleTab: string | null;
+  setAdminConsoleTab: Dispatch<SetStateAction<string | null>>;
 }
 
 export function useModalState(): ModalState {
   const [modals, setModals] = useState<ModalSlots>(INITIAL_MODAL_SLOTS);
+  const [adminConsoleTab, setAdminConsoleTab] = useState<string | null>(null);
 
   const setModal = useCallback(<K extends ModalKey>(key: K, value: SetStateAction<ModalSlots[K]>) => {
     setModals((prev) => {
@@ -70,5 +77,5 @@ export function useModalState(): ModalState {
 
   const setterFor = useCallback(<K extends ModalKey>(key: K) => setters[key] as SlotSetter<K>, [setters]);
 
-  return { modals, setModal, setterFor };
+  return { modals, setModal, setterFor, adminConsoleTab, setAdminConsoleTab };
 }

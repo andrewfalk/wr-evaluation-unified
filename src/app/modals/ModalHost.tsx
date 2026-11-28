@@ -38,7 +38,7 @@ export function ModalHost() {
     setActiveId, setCurrentStepIndex, setShowHome,
     dirtyAssessmentPatientId, blockedByUnsavedDraftAlert,
 
-    showAdminConsole, setShowAdminConsole,
+    showAdminConsole, setShowAdminConsole, adminConsoleTab, setAdminConsoleTab, refreshOpsStatus,
     showAccountProfile, setShowAccountProfile,
     showChangePassword, setShowChangePassword,
     showSettings, setShowSettings, handleSaveSettingsAndClose,
@@ -66,8 +66,10 @@ export function ModalHost() {
       {showAdminConsole && (
         <AdminConsoleModal
           session={session}
-          onClose={() => setShowAdminConsole(false)}
+          initialTab={adminConsoleTab}
+          onClose={() => { setShowAdminConsole(false); setAdminConsoleTab(null); }}
           onPatientAssignmentChanged={() => syncNow({ pull: true, reason: 'assignment-change' })}
+          onOpsStatusChanged={refreshOpsStatus}
         />
       )}
       {showAccountProfile && (

@@ -25,7 +25,7 @@ describe('useOpsStatus', () => {
     const { result } = renderHook(() => useOpsStatus({ session: SESSION, enabled: false }), { wrapper: StrictMode });
     await Promise.resolve();
     expect(requestJson).not.toHaveBeenCalled();
-    expect(result.current).toEqual({ opsStatus: null, showBanner: false, bannerMessage: null });
+    expect(result.current).toEqual({ opsStatus: null, showBanner: false, bannerMessage: null, refresh: expect.any(Function) });
   });
 
   it('활성: 정규화한 기준 URL로 조회하고 문제 요약이면 배너', async () => {

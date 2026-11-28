@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useCallback, useEffect } from 'react';
 import { requestJson } from '../services/httpClient';
 import { resolveApiBaseUrl } from '../../platform/dataMode';
 import type { SessionLike } from '../../platform/dataMode';
@@ -32,7 +32,12 @@ export interface OpsStatusBanner {
   opsStatus: OpsBackupStatus | null;
   showBanner: boolean;
   bannerMessage: string | null;
+  /** 다음 폴링을 기다리지 않고 지금 다시 불러온다(운영 상태 탭에서 알림을 처리한 뒤 — P2-83e). 꺼져 있으면 아무것도 안 함. */
+  refresh: () => void;
 }
+
+const requestBackupStatus = (session: SessionLike | null | undefined) =>
+  requestJson('/api/admin/ops/backup-status', { baseUrl: resolveApiBaseUrl({ session }), session });
 
 export function useOpsStatus({ session, enabled = false }: UseOpsStatusArgs): OpsStatusBanner {
   // P2-19: 손으로 쓰던 opsStatus state + cancelled 플래그 → useAsync(늦은 응답·언마운트 뒤 응답은 버림).
@@ -43,17 +48,21 @@ export function useOpsStatus({ session, enabled = false }: UseOpsStatusArgs): Op
   useEffect(() => {
     if (!enabled) return undefined;
 
-    const baseUrl = resolveApiBaseUrl({ session });
-    const poll = () => { run(() => requestJson('/api/admin/ops/backup-status', { baseUrl, session })); };
+    const poll = () => { run(() => requestBackupStatus(session)); };
 
     poll();
     const id = setInterval(poll, POLL_INTERVAL_MS);
     return () => { cancel(); clearInterval(id); };
   }, [enabled, session, run, cancel]);
 
+  const refresh = useCallback(() => {
+    if (!enabled) return;
+    run(() => requestBackupStatus(session));
+  }, [enabled, session, run]);
+
   const summary = opsStatus?.monitorReport?.summary ?? null;
   const showBanner = enabled && WARN_SUMMARIES.has(summary);
   const bannerMessage = showBanner ? BANNER_MESSAGES[summary as string] : null;
 
-  return { opsStatus, showBanner, bannerMessage };
+  return { opsStatus, showBanner, bannerMessage, refresh };
 }

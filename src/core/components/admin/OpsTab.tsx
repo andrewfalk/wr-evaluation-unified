@@ -39,7 +39,11 @@ interface OpsStatus {
   } | null;
 }
 
-export function OpsTab({ session }: TabProps) {
+interface OpsTabProps extends TabProps {
+  onOpsStatusChanged?: () => void;
+}
+
+export function OpsTab({ session, onOpsStatusChanged }: OpsTabProps) {
   const [data, setData]     = useState<OpsStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError]   = useState<string | null>(null);
@@ -68,6 +72,7 @@ export function OpsTab({ session }: TabProps) {
     setActing(runId);
     try {
       await ackBackupAlert({ baseUrl, session }, runId);
+      onOpsStatusChanged?.();
       await load();
     } catch (e) {
       setError((e as Error).message || '확인 처리 실패');
@@ -80,6 +85,7 @@ export function OpsTab({ session }: TabProps) {
     setActing(runId);
     try {
       await resolveBackupAlert({ baseUrl, session }, runId);
+      onOpsStatusChanged?.();
       await load();
     } catch (e) {
       setError((e as Error).message || '해결 처리 실패');

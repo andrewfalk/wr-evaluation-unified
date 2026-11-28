@@ -26,12 +26,18 @@ const TABS = [
 
 export interface AdminConsoleModalProps {
   session: AdminSession;
+  /** 처음 열 탭(운영 경고 배너는 'ops'). 없으면 감사 로그. */
+  initialTab?: string | null;
   onClose: () => void;
   onPatientAssignmentChanged?: () => unknown;
+  /** 운영 상태 탭에서 알림을 처리한 뒤 — 앱이 운영 경고 배너를 다시 판정한다. */
+  onOpsStatusChanged?: () => void;
 }
 
-export function AdminConsoleModal({ session, onClose, onPatientAssignmentChanged }: AdminConsoleModalProps) {
-  const [activeTab, setActiveTab] = useState('audit');
+export function AdminConsoleModal({
+  session, initialTab, onClose, onPatientAssignmentChanged, onOpsStatusChanged,
+}: AdminConsoleModalProps) {
+  const [activeTab, setActiveTab] = useState(initialTab ?? 'audit');
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -63,7 +69,7 @@ export function AdminConsoleModal({ session, onClose, onPatientAssignmentChanged
         {activeTab === 'assignment' && <PatientAssignmentTab  session={session} onPatientAssignmentChanged={onPatientAssignmentChanged} />}
         {activeTab === 'inference'  && <InferenceDeviceTab    session={session} />}
         {activeTab === 'capabilities' && <CapabilitiesTab     session={session} />}
-        {activeTab === 'ops'        && <OpsTab                session={session} />}
+        {activeTab === 'ops'        && <OpsTab                session={session} onOpsStatusChanged={onOpsStatusChanged} />}
 
         <div className="modal-actions">
           <button className="btn btn-secondary" onClick={onClose}>닫기</button>

@@ -45,6 +45,8 @@ export interface EditingController extends
   resetMigration: MigrationApi['reset'];
   showOpsBanner: boolean;
   opsBannerMessage: string | null;
+  /** 운영 경고 배너를 지금 다시 판정한다(관리자 콘솔의 운영 상태 탭이 알림을 처리한 뒤). */
+  refreshOpsStatus: () => void;
 }
 
 export function useEditingController({
@@ -87,7 +89,7 @@ export function useEditingController({
   } = (useMigration as unknown as UseMigration)({ session, settings });
 
   const isAdmin = session?.user?.role === 'admin' && isAuthenticated;
-  const { showBanner: showOpsBanner, bannerMessage: opsBannerMessage } = (useOpsStatus as unknown as UseOpsStatus)({ session, enabled: isAdmin });
+  const { showBanner: showOpsBanner, bannerMessage: opsBannerMessage, refresh: refreshOpsStatus } = (useOpsStatus as unknown as UseOpsStatus)({ session, enabled: isAdmin });
 
   const {
     exportDropdown, setExportDropdown,
@@ -110,7 +112,7 @@ export function useEditingController({
     reloadPresets,
     handlePresetSelect, handleSaveCustomPreset, closePresetManageModal, handleDeleteCustomPreset,
     migrationStatus, migrationResult, startMigration, retryMigration, resetMigration,
-    showOpsBanner, opsBannerMessage,
+    showOpsBanner, opsBannerMessage, refreshOpsStatus,
     exportDropdown, setExportDropdown,
     handleExportSingle, handleExportSelected, handleExportBatch,
     handleExportBatchFormatSingle, handleExportBatchFormatSelected, handleExportBatchFormatAll,
