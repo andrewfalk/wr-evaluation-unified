@@ -1,17 +1,71 @@
-// @ts-nocheck
 import { useEffect, useMemo, useState } from 'react';
 import { inspectIntegrationStatus } from '../services/integrationStatus';
 import { detectRuntime } from '../../platform/runtime';
 import { PresetsSection } from './PresetsSection';
 
 import { hasIntranetSession, isIntranetContext } from '../../platform/dataMode';
+
+/** 설정 값(settingsStore) — 이 창이 읽고 쓰는 필드. 부모는 Record<string, unknown>으로 넘긴다. */
+export interface SettingsDraft {
+  theme?: string;
+  fontSize?: string;
+  hospitalName?: string;
+  department?: string;
+  doctorName?: string;
+  autoSaveInterval?: number;
+  integrationMode?: string | null;
+  apiBaseUrl?: string | null;
+  geminiApiKey?: string;
+  claudeApiKey?: string;
+  [field: string]: unknown;
+}
+
+/** 세션 — 이 창이 읽는 필드(나머지 필드는 '연결 확인'의 미리보기 세션에 그대로 펼쳐 넘긴다). */
+export interface SettingsSession {
+  mode?: string | null;
+  apiBaseUrl?: string | null;
+}
+
+// integrationStatus.js(JS)의 상태 객체 가운데 이 창이 읽는 필드. 런타임 보장은 없다 — 기존 `?.`·`||`를 지우지 않는다.
+interface DiagnosticStatus {
+  connectivity?: string;
+  mock?: boolean;
+  baseUrl?: string;
+  message?: string;
+  lastCheckedAt?: string | null;
+  lastError?: string | null;
+  activeStore?: string;
+  sessionInfo?: { userId?: string | null; organizationId?: string | null } | null;
+  meDetails?: { userName?: string | null; userRole?: string | null; orgName?: string | null; capabilities?: { ai?: boolean } | null } | null;
+  mockDetails?: {
+    scopeKey?: string | null;
+    userId?: string | null;
+    organizationId?: string | null;
+    workspaceCount?: number | null;
+    hasAutosave?: boolean | null;
+    storageFile?: string | null;
+  } | null;
+  remoteDetails?: { workspaceCount?: number | null } | null;
+}
+
+export interface SettingsModalProps {
+  settings: SettingsDraft;
+  session: SettingsSession | null | undefined;
+  /** 부모(useEnvController)는 unknown으로 들고 있다 — 이 창이 DiagnosticStatus로 읽는다. */
+  integrationStatus: unknown;
+  onSave: (draft: SettingsDraft) => void;
+  onClose: () => void;
+  onLogout?: () => Promise<boolean | undefined | void>;
+  onMigrate?: () => void;
+  onPresetsImported?: (...args: never[]) => unknown;
+}
 const DEFAULT_INTRANET_URL = 'https://wr.hospital.local';
 
-function normalizeUrl(value = '') {
+function normalizeUrl(value: string | null | undefined = '') {
   return String(value || '').trim().replace(/\/$/, '');
 }
 
-function getEffectiveServerUrl({ session, diagnostic, draft } = {}) {
+function getEffectiveServerUrl({ session, diagnostic, draft }: { session?: SettingsSession | null; diagnostic?: DiagnosticStatus | null; draft?: SettingsDraft } = {}) {
   return normalizeUrl(
     session?.apiBaseUrl ||
     diagnostic?.baseUrl ||
@@ -20,7 +74,7 @@ function getEffectiveServerUrl({ session, diagnostic, draft } = {}) {
   );
 }
 
-function buildPreviewSession(session, draft) {
+function buildPreviewSession(session: SettingsSession | null | undefined, draft: SettingsDraft) {
   const draftUrl = normalizeUrl(draft.apiBaseUrl || '');
   return {
     ...session,
@@ -33,7 +87,7 @@ function buildPreviewSession(session, draft) {
   };
 }
 
-function formatCheckedAt(value) {
+function formatCheckedAt(value: string | null | undefined) {
   if (!value) return '-';
 
   try {
@@ -43,13 +97,13 @@ function formatCheckedAt(value) {
   }
 }
 
-function formatBoolean(value) {
+function formatBoolean(value: boolean | null | undefined) {
   if (value === true) return '있음';
   if (value === false) return '없음';
   return '-';
 }
 
-function getStatusTitle(status) {
+function getStatusTitle(status: DiagnosticStatus | null | undefined) {
   if (status?.connectivity === 'fallback') return '로컬 폴백';
   if (status?.connectivity === 'connected' && status?.mock) return 'Mock 인트라넷 연결됨';
   if (status?.connectivity === 'connected') return '인트라넷 연결됨';
@@ -57,7 +111,7 @@ function getStatusTitle(status) {
   return '로컬 저장소';
 }
 
-function getStatusTone(status) {
+function getStatusTone(status: DiagnosticStatus | null | undefined) {
   if (status?.connectivity === 'fallback') return 'fallback';
   if (status?.connectivity === 'connected' && status?.mock) return 'mock';
   if (status?.connectivity === 'connected') return 'connected';
@@ -65,7 +119,7 @@ function getStatusTone(status) {
   return 'local';
 }
 
-function DiagnosticItem({ label, value }) {
+function DiagnosticItem({ label, value }: { label: string; value: string | null | undefined }) {
   return (
     <div className="settings-diagnostic-item">
       <div className="settings-diagnostic-label">{label}</div>
@@ -74,10 +128,10 @@ function DiagnosticItem({ label, value }) {
   );
 }
 
-export function SettingsModal({ settings, session, integrationStatus, onSave, onClose, onLogout, onMigrate, onPresetsImported }) {
+export function SettingsModal({ settings, session, integrationStatus, onSave, onClose, onLogout, onMigrate, onPresetsImported }: SettingsModalProps) {
   const isIntranetLocked = hasIntranetSession(session);
-  const [draft, setDraft] = useState({ ...settings });
-  const [diagnostic, setDiagnostic] = useState(integrationStatus);
+  const [draft, setDraft] = useState<SettingsDraft>({ ...settings });
+  const [diagnostic, setDiagnostic] = useState(integrationStatus as DiagnosticStatus | null | undefined);
   const [isCheckingConnection, setIsCheckingConnection] = useState(false);
 
   useEffect(() => {
@@ -85,10 +139,10 @@ export function SettingsModal({ settings, session, integrationStatus, onSave, on
   }, [settings]);
 
   useEffect(() => {
-    setDiagnostic(integrationStatus);
+    setDiagnostic(integrationStatus as DiagnosticStatus | null | undefined);
   }, [integrationStatus]);
 
-  const update = (key, value) => setDraft(prev => ({ ...prev, [key]: value }));
+  const update = (key: string, value: unknown) => setDraft(prev => ({ ...prev, [key]: value }));
 
   const hasConnectionDraftChanges = useMemo(() => (
     draft.integrationMode !== settings.integrationMode

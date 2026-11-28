@@ -9,7 +9,6 @@
   "src/core/components/DiagnosisForm.jsx",
   "src/core/components/IntakeWizard.jsx",
   "src/core/components/LoginModal.jsx",
-  "src/core/components/SettingsModal.jsx",
   "src/core/components/SignupRequestModal.jsx",
   "src/core/components/VideoAnalysisStep.jsx",
   "src/core/components/charts/BoxPlot.jsx",
