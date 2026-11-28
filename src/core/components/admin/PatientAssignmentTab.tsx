@@ -1,6 +1,6 @@
 // 관리자 콘솔 — 환자 배정 탭. P2-82b에서 AdminConsoleModal.tsx의 선언을 본문 그대로 옮겼다.
 import { useState, useRef, useEffect } from 'react';
-import { requestJson } from '../../services/httpClient';
+import { assignPatient, fetchAdminUsers, fetchPatientsPage } from '../../services/adminRepository';
 import { resolveApiBaseUrl } from '../../../platform/dataMode';
 import type { TabProps, UserRow, UsersResponse } from './shared';
 
@@ -39,8 +39,8 @@ export function PatientAssignmentTab({ session, onPatientAssignmentChanged }: Pa
 
   // Load doctors once on mount.
   useEffect(() => {
-    requestJson('/api/admin/users', { baseUrl, session })
-      .then((data: UsersResponse) => setDoctors((data.users || []).filter(u => u.role === 'doctor' && !u.disabled)))
+    fetchAdminUsers({ baseUrl, session })
+      .then(data => setDoctors(((data as UsersResponse).users || []).filter(u => u.role === 'doctor' && !u.disabled)))
       .catch(err => setError(err.message));
     return () => { controllerRef.current?.abort(); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -61,10 +61,7 @@ export function PatientAssignmentTab({ session, onPatientAssignmentChanged }: Pa
       let all: ServerPatientRow[] = [];
       let offset = 0;
       while (true) {
-        const data: PatientsPage = await requestJson(
-          `/api/patients?scope=all&limit=${LIMIT}&offset=${offset}${qParam}`,
-          { baseUrl, session, signal }
-        );
+        const data = await fetchPatientsPage({ baseUrl, session }, LIMIT, offset, qParam, signal) as PatientsPage;
         all = [...all, ...(data.items || [])];
         if (all.length >= (data.total ?? 0)) break;
         offset += LIMIT;
@@ -94,9 +91,7 @@ export function PatientAssignmentTab({ session, onPatientAssignmentChanged }: Pa
     const assignedUserId = selectedVal === '' ? null : (selectedVal ?? null);
     setActioning(patientId);
     try {
-      await requestJson(`/api/patients/${patientId}/assignment`, {
-        baseUrl, session, method: 'POST', body: { assignedUserId },
-      });
+      await assignPatient({ baseUrl, session }, patientId, assignedUserId);
       onPatientAssignmentChanged?.();
       await loadPatients(search);
     } catch (err) {

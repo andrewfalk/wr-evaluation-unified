@@ -4,11 +4,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
-vi.mock('../../services/httpClient', () => ({
+vi.mock('../../api/client', () => ({
   requestJson: vi.fn(),
 }));
 
-import { requestJson } from '../../services/httpClient';
+import { requestJson } from '../../api/client';
 import { AdminConsoleModal } from '../AdminConsoleModal';
 import { emrAuditNote, devicesPerPc, deviceActionErrorMessage, EMR_AUDIT_FLAG_LABELS } from '../adminAuditNotes';
 

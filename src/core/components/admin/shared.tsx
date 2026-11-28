@@ -1,6 +1,6 @@
 // 관리자 콘솔 탭들이 함께 쓰는 조각(비밀번호 규칙·시각 서식·상태·역할 배지)과 타입 — P2-82a에서 AdminConsoleModal.tsx의 선언을 본문 그대로 옮겼다.
 
-// 서버 응답·세션 타입은 이 화면이 읽는 필드만 적는다(런타임 검증 없음 — 요청 클라이언트 shim의 반환이 any라 주석으로 받는다).
+// 서버 응답·세션 타입은 이 화면이 읽는 필드만 적는다(런타임 검증 없음 — 서버 호출 함수(services/adminRepository)는 unknown을 돌려주고 탭이 단언으로 받는다).
 export type AdminSession = {
   mode?: string | null;
   apiBaseUrl?: string | null;

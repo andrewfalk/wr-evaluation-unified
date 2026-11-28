@@ -1,6 +1,6 @@
 // 관리자 콘솔 — 운영 상태 탭. P2-82b에서 AdminConsoleModal.tsx의 선언을 본문 그대로 옮겼다.
 import { useState, useEffect } from 'react';
-import { requestJson } from '../../services/httpClient';
+import { ackBackupAlert, fetchBackupStatus, resolveBackupAlert } from '../../services/adminRepository';
 import { resolveApiBaseUrl } from '../../../platform/dataMode';
 import { fmt } from './shared';
 import type { TabProps } from './shared';
@@ -49,7 +49,7 @@ export function OpsTab({ session }: TabProps) {
     setLoading(true);
     setError(null);
     try {
-      const result: OpsStatus | null = await requestJson('/api/admin/ops/backup-status', { baseUrl, session });
+      const result = await fetchBackupStatus({ baseUrl, session }) as OpsStatus | null;
       setData(result);
     } catch (e) {
       setError((e as Error).message || '불러오기 실패');
@@ -63,7 +63,7 @@ export function OpsTab({ session }: TabProps) {
   const handleAck = async (runId: string) => {
     setActing(runId);
     try {
-      await requestJson(`/api/admin/ops/backup-alerts/${runId}/ack`, { baseUrl, session, method: 'POST' });
+      await ackBackupAlert({ baseUrl, session }, runId);
       await load();
     } catch (e) {
       setError((e as Error).message || '확인 처리 실패');
@@ -75,7 +75,7 @@ export function OpsTab({ session }: TabProps) {
   const handleResolve = async (runId: string) => {
     setActing(runId);
     try {
-      await requestJson(`/api/admin/ops/backup-alerts/${runId}/resolve`, { baseUrl, session, method: 'POST' });
+      await resolveBackupAlert({ baseUrl, session }, runId);
       await load();
     } catch (e) {
       setError((e as Error).message || '해결 처리 실패');
