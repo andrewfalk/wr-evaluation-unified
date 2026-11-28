@@ -3,12 +3,13 @@
 // processFeatures를 구성한다. "제안 적용"(videoServerApply)과 분리되어 적용마다 추론이 재실행되지 않는다.
 // D2b: 클립에 대상자 선택(detection: serverClipId+selectedId)이 있으면 그 serverClipId로 job을 돌려
 // 서버에 보존된 target을 쓴다(새 clip 미생성). 선택 없으면 createClip(fixtureClipName)→job(dominant).
-import { VIDEO_FEATURE_TARGETS } from '@wr/contracts/index';
 import { analysisCancelledError, createClip, createJob, pollJob } from './videoAnalysisClient';
 import { convertClipFeaturesToPerDay, buildRecipeVersion } from './videoPerDayConversion';
 import { fuseClipFeatureSetsWithEvidence } from './videoViewpointFusion';
 import { REPETITION_BAND_FEATURE_KEYS } from './videoFeatureProfiles';
-import type { AnalysisRecipe, FeatureKey } from '@wr/contracts/index';
+// 활성 모듈로 매핑되는 featureKey 목록 — 화면과 같은 헬퍼(videoStepState는 영상 서비스를 import하지 않아 순환이 없다, P2-75h).
+import { requestedFeaturesForModules } from './videoStepState';
+import type { AnalysisRecipe } from '@wr/contracts/index';
 import type {
   ContributionEvidence, InferenceDevice, ProcessEvidence, ProcessFeatures, SuppressedCandidate, VideoClip, VideoFeatureMap, VideoProcess,
 } from './videoStepTypes';
@@ -50,13 +51,6 @@ interface PerDayResult {
 
 /** 취소·폴링 시간 초과 오류(analysisCancelledError·pollJob). */
 type RunError = Error & { code?: string; timeoutPhase?: string };
-
-// 활성 모듈로 매핑되는 featureKey 목록(컴포넌트 헬퍼와 동일 정의 — 순환 import 회피 위해 인라인).
-function requestedFeaturesForModules(activeModules: string[] = []): string[] {
-  return Object.keys(VIDEO_FEATURE_TARGETS).filter(
-    (k) => activeModules.includes(VIDEO_FEATURE_TARGETS[k as FeatureKey].moduleId)
-  );
-}
 
 // 6.0-16: 어깨 반복 밴드별 시간합(main 2키+Left/Right 4키)은 repetition-upper-limb 공정에서만 요청한다.
 // 활성 모듈 기준 requested는 공정 profile과 무관하게 전역 1회 계산되므로, 여기서 공정별로 한 번 더 걸러

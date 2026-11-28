@@ -5,10 +5,10 @@ import { applyFeatureToModule } from './videoProvenance';
 import { analysisCancelledError, createClip, createJob } from './videoAnalysisClient';
 import { applyVideoAnalysisJob } from './patientServerRepository';
 import { getLockToken } from './lockTokenStore';
+import { MOCK_BUNDLE } from './videoStepState';
 import type { AnalysisRecipe } from '@wr/contracts/index';
 import type { ProvenancePatient } from './videoProvenance';
 
-const MOCK_BUNDLE = 'mock-6.0-2';
 
 // 오류 문구에 서버 job 상태 코드를 그대로 노출하지 않기 위한 한글 라벨(모르는 상태는 원문 폴백).
 const JOB_STATUS_LABELS: Record<string, string> = {
