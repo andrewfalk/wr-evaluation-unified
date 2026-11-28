@@ -380,7 +380,7 @@
       "events": []
     },
     {
-      "step": "배정 성공 — 알림·다시 불러옴(선택 비움, 그 행 변경 버튼은 계속 잠김)",
+      "step": "배정 성공 — 알림·다시 불러옴(선택 비움, 처리 중 표시 되돌림)",
       "requests": [
         {
           "method": "GET",
@@ -510,7 +510,7 @@
       ]
     },
     {
-      "step": "같은 환자를 다시 바꾸려 함 — 변경 버튼 잠긴 채",
+      "step": "같은 환자를 다시 바꾸려 함 — 변경 버튼 풀림",
       "requests": [],
       "dom": [
         "<div class=\"admin-filter-row\">",
@@ -566,7 +566,7 @@
         "            <option value=\"user-0003\">",
         "              \"합성 의사 2\"",
         "        <td class=\"admin-actions-cell\">",
-        "          <button class=\"btn btn-primary btn-sm\" disabled=\"\">",
+        "          <button class=\"btn btn-primary btn-sm\">",
         "            \"변경\"",
         "      <tr>",
         "        <td>",
@@ -615,7 +615,7 @@
       "events": []
     },
     {
-      "step": "다른 환자 배정 해제(미배정) — 본문 null, 처리 중 표시는 이 환자로 옮겨 감",
+      "step": "다른 환자 배정 해제(미배정) — 본문 null",
       "requests": [
         {
           "method": "POST",

@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { useLatestGuard } from '../../hooks/useLatestGuard';
 import { approveSignupRequest, fetchSignupRequests, rejectSignupRequest } from '../../services/adminRepository';
 import { resolveApiBaseUrl } from '../../../platform/dataMode';
+import { showConfirm } from '../../../platform/dialogs';
 import { RoleBadge, fmt } from './shared';
 import type { TabProps } from './shared';
 
@@ -32,6 +33,7 @@ export function SignupRequestsTab({ session }: TabProps) {
   // 승인·거절 뒤 다시 불러오기는 이 값을 올려 effect가 **지금 필터**로 부르게 한다 — 클릭 때의 load(그때 필터)를 부르면
   // 그사이 필터를 바꾼 경우 순번 가드가 지금 필터의 응답을 버린다.
   const [reloadTick, setReloadTick] = useState(0);
+  const [actioning, setActioning] = useState<string | null>(null); // 승인·거절을 처리 중인 신청 id(그 행 버튼을 잠근다)
   const beginLoad = useLatestGuard();
   const baseUrl = resolveApiBaseUrl({ session });
 
@@ -54,22 +56,29 @@ export function SignupRequestsTab({ session }: TabProps) {
   useEffect(() => { load(); }, [statusFilter, reloadTick]);
 
   const handleApprove = async (id: string) => {
+    setActioning(id);
     try {
       const data = await approveSignupRequest({ baseUrl, session }, id) as ApprovalResult;
       setApprovalResult(data);
       setReloadTick(t => t + 1);
     } catch (err) {
       setError((err as Error).message);
+    } finally {
+      setActioning(null);
     }
   };
 
   const handleReject = async (id: string) => {
-    if (!confirm('이 신청을 거절하시겠습니까?')) return;
+    // 확인창을 띄우는 동안에도 잠근다(셸의 확인창은 비동기다).
+    setActioning(id);
     try {
+      if (!(await showConfirm('이 신청을 거절하시겠습니까?'))) return;
       await rejectSignupRequest({ baseUrl, session }, id);
       setReloadTick(t => t + 1);
     } catch (err) {
       setError((err as Error).message);
+    } finally {
+      setActioning(null);
     }
   };
 
@@ -140,6 +149,7 @@ export function SignupRequestsTab({ session }: TabProps) {
                       <button
                         className="btn btn-primary"
                         style={{ fontSize: '0.8rem' }}
+                        disabled={actioning === r.id}
                         onClick={() => handleApprove(r.id)}
                       >
                         승인
@@ -147,6 +157,7 @@ export function SignupRequestsTab({ session }: TabProps) {
                       <button
                         className="btn btn-secondary"
                         style={{ fontSize: '0.8rem' }}
+                        disabled={actioning === r.id}
                         onClick={() => handleReject(r.id)}
                       >
                         거절

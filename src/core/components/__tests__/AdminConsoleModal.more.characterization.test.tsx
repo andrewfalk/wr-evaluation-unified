@@ -135,7 +135,7 @@ const PAGE_1 = [
 const PAGE_2 = [patient(4)];
 
 describe('관리자 콘솔 특성화 ② — 환자 배정', () => {
-  it('열기(의사 목록·쪽 반복) · 배정(성공 뒤 처리 중 표시 남음·해제·실패) · 검색(디바운스·끊기·쪽 반복·빈 결과) · 불러오기 실패 뒤 배정', async () => {
+  it('열기(의사 목록·쪽 반복) · 배정(성공 뒤 처리 중 표시 되돌림·해제·실패) · 검색(디바운스·끊기·쪽 반복·빈 결과) · 불러오기 실패 뒤 배정', async () => {
     const gate = deferred();
     const routes = setupRouter({
       'GET /api/admin/audit': EMPTY_AUDIT,
@@ -172,16 +172,16 @@ describe('관리자 콘솔 특성화 ② — 환자 배정', () => {
     snap('배정 — 처리 중');
     assignGate.release();
     await flush();
-    snap('배정 성공 — 알림·다시 불러옴(선택 비움, 그 행 변경 버튼은 계속 잠김)');
+    snap('배정 성공 — 알림·다시 불러옴(선택 비움, 처리 중 표시 되돌림)');
     fireEvent.change(selectOf('합성 환자 2'), { target: { value: 'user-0003' } });
     await flush();
-    snap('같은 환자를 다시 바꾸려 함 — 변경 버튼 잠긴 채');
+    snap('같은 환자를 다시 바꾸려 함 — 변경 버튼 풀림');
 
     routes.set('POST /api/patients/:id/assignment', () => ({ body: { ok: true } }));
     fireEvent.change(selectOf('합성 환자 1'), { target: { value: '' } });
     fireEvent.click(buttonByText(rowContaining(tabRoot(), '합성 환자 1'), '변경'));
     await flush();
-    snap('다른 환자 배정 해제(미배정) — 본문 null, 처리 중 표시는 이 환자로 옮겨 감');
+    snap('다른 환자 배정 해제(미배정) — 본문 null');
 
     routes.set('POST /api/patients/:id/assignment', () => fail(409, '배정을 바꾸지 못했습니다(합성).'));
     fireEvent.change(selectOf('SYN-0004'), { target: { value: 'user-0003' } });

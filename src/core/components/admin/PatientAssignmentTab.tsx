@@ -99,6 +99,7 @@ export function PatientAssignmentTab({ session, onPatientAssignmentChanged }: Pa
       await assignPatient({ baseUrl, session }, patientId, assignedUserId);
       onPatientAssignmentChanged?.();
       await loadPatients(search);
+      setActioning(null);
     } catch (err) {
       setError((err as Error).message);
       setActioning(null);
