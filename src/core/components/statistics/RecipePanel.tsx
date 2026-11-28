@@ -1,14 +1,87 @@
-// @ts-nocheck
 import { useMemo, useState } from 'react';
 import { describeStatsApiError } from './describeStatsError';
 import { describeMethodReasonCode } from './describeMethodReasonCode';
 import { isGrainCompatible, isPurposeCompatible } from '@wr/analytics-core/common';
 import { PURPOSE_LABELS } from './purposeLabels';
 import { PREDICTION_REGISTERED_AT_KEY } from './workbenchTransitions';
+import type { AvailableMethod, CatalogVariable, PreviewResponse, StatsFilter, StatsFilterOperator } from '@wr/contracts/stats';
+
+type CatalogByKey = Map<string, CatalogVariable>;
+/** 필터 값 입력의 원시 값 — 범위(between)는 [하한, 상한], 그 밖은 글자. */
+type FilterRaw = string | string[];
+/**
+ * buildFilterValue의 결과 — 성공이면 value, 실패면 error. 이 파일은 JS(작업대)가 import해 완화 설정(tsconfig.client.js.json)으로도
+ * 검사되는데, 그 설정은 boolean 판별자(`ok`)로 합집합을 좁히지 않아 한 모양으로 적는다.
+ */
+interface FilterBuildResult {
+  ok: boolean;
+  value?: StatsFilter['value'];
+  error?: string;
+}
+
+/** 작업대의 미리보기 상태(previewState) — 이 패널이 읽는 필드. */
+export interface RecipePreviewState {
+  key: string | null;
+  status: string;
+  result: PreviewResponse | null;
+  error: unknown;
+  /** 실패한 요청의 분석 목적(오류 문구용). */
+  requestPurpose?: string;
+}
+
+/** 모드·목적 전환으로 자동 정리된 변수·필터 안내. */
+export interface RecipeTransitionNotice {
+  removedVariables: string[];
+  removedFilters: StatsFilter[];
+}
+
+export interface RecipePanelProps {
+  catalog: { variables?: CatalogVariable[]; minimumCohort?: number } | null | undefined;
+  grain?: string;
+  supportedGrains?: string[];
+  unsupportedGrains?: Array<{ grain: string }>;
+  onGrainChange?: (grain: string) => void;
+  selectedKeys: string[];
+  onRemoveVariable: (key: string) => void;
+  analysisMode: string;
+  onAnalysisModeChange: (mode: string) => void;
+  modeChangeBlockedNotice: boolean;
+  requestedMethod: string | null;
+  onRequestedMethodChange: (method: string) => void;
+  outcomeKey: string | null;
+  onOutcomeKeyChange: (key: string | null) => void;
+  standardizePredictors?: boolean;
+  onStandardizePredictorsChange?: (value: boolean) => void;
+  interactionTerms?: Array<[string, string]>;
+  onInteractionTermsChange?: (terms: Array<[string, string]>) => void;
+  splineKeys?: string[];
+  onSplineKeysChange?: (keys: string[]) => void;
+  eventLevel?: string;
+  onEventLevelChange?: (level: string) => void;
+  stratifyByKey?: string | null;
+  onStratifyByKeyChange?: (key: string | null) => void;
+  analysisPurpose: string;
+  onAnalysisPurposeChange: (purpose: string) => void;
+  transitionNotice?: RecipeTransitionNotice | null;
+  onDismissTransitionNotice?: () => void;
+  formulaPolicies: Record<string, string>;
+  onFormulaPolicyChange: (family: string, policy: string) => void;
+  filterDraft: StatsFilter[];
+  onFilterDraftChange: (filters: StatsFilter[]) => void;
+  appliedFilters: StatsFilter[];
+  onApplyFilters: () => void;
+  previewState: RecipePreviewState;
+  isPreviewCurrent: boolean;
+  canExecute: boolean;
+  isAnalyzing: boolean;
+  onRunAnalyze: () => void;
+  collapsed: boolean;
+  onToggleCollapse: () => void;
+}
 
 // PR3-A — StatsMethodIdSchema(shared/contracts/stats.ts)와 동일 순서·목록. 실행
 // 가능 8종 + 예약된 unsupported 2종(대응검정, 계획서 §"실행 가능한 방법은 8종").
-const METHOD_LABELS = {
+const METHOD_LABELS: Record<string, string> = {
   welch_t: 'Welch t 검정',
   mann_whitney: 'Mann-Whitney U 검정',
   anova: '일원분산분석(Welch)',
@@ -29,13 +102,13 @@ const METHOD_LABELS = {
 };
 const METHOD_ORDER = Object.keys(METHOD_LABELS);
 
-const STATUS_LABELS = { available: '실행 가능', conditional: '주의', unsupported: '불가' };
+const STATUS_LABELS: Record<string, string> = { available: '실행 가능', conditional: '주의', unsupported: '불가' };
 
 // 통계 배경이 없는 사용자를 위한 방법 카드 툴팁(hover 시 title로 노출) — 이 검정이 뭘
 // 비교하는지·결과를 어떻게 읽는지를 2문장 이내로. "p-값이 작을수록…" 같은 공통 해석은
 // 여기 반복하지 않고 방법 목록 위에 한 번만 둔다(MethodPicker의 METHOD_LIST_PVALUE_NOTE).
 // unsupported 상태는 이미 describeMethodReasonCode()가 title을 채우므로 여기 없음.
-const METHOD_TOOLTIPS = {
+const METHOD_TOOLTIPS: Record<string, string> = {
   welch_t: '두 그룹의 평균을 비교합니다(예: 남/여의 부담점수 평균 차이). 두 그룹의 분산이 달라도 쓸 수 있어 일반 t검정보다 안전합니다.',
   mann_whitney: '두 그룹의 값 순위(분포)를 비교합니다 — 평균 대신 중앙값 차이를 볼 때, 또는 값이 한쪽으로 치우치거나 이상치가 많을 때 Welch t검정보다 안정적입니다.',
   anova: '세 그룹 이상의 평균을 한 번에 비교합니다(예: 직업군 3개의 부담점수). 유의하면 "적어도 한 그룹은 다르다"는 뜻이며, 어느 그룹끼리 다른지는 별도 확인이 필요합니다.',
@@ -54,7 +127,7 @@ const METHOD_LIST_PVALUE_NOTE = 'p-값이 작을수록(보통 0.05 미만) 우�
 
 // server/src/stats/recipe/validate/filters.ts의 TYPE_ALLOWED_OPERATORS와 동일 — 서버가 최종 판정하므로
 // 여기서 어긋나도 안전하지만(400으로 드러남), UI가 애초에 무효한 조합을 안 보여주기 위해 미러링.
-const TYPE_ALLOWED_OPERATORS = {
+const TYPE_ALLOWED_OPERATORS: Record<string, StatsFilterOperator[]> = {
   continuous: ['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'between', 'is_missing', 'not_missing'],
   date: ['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'between', 'is_missing', 'not_missing'],
   categorical: ['eq', 'neq', 'in', 'is_missing', 'not_missing'],
@@ -63,7 +136,7 @@ const TYPE_ALLOWED_OPERATORS = {
   boolean: ['eq', 'neq', 'is_missing', 'not_missing'],
 };
 
-const OPERATOR_LABELS = {
+const OPERATOR_LABELS: Record<string, string> = {
   eq: '=', neq: '≠', gt: '>', gte: '≥', lt: '<', lte: '≤',
   between: '범위', in: '포함', is_missing: '결측', not_missing: '결측 아님',
 };
@@ -74,7 +147,7 @@ const OPERATOR_LABELS = {
 // 지적된 불일치). disease는 이름만 바뀐 게 아니라 행 단위 자체가 "상병 건수"가 아니라
 // "상병×측"이다(양측 상병=2행, enumerateDiseaseEntities/grainEntities.ts 참고) — 그
 // 설명은 라벨이 아니라 아래 disease 전용 안내 문구(관측 행 기준 note)에서 다룬다.
-const GRAIN_LABELS = {
+const GRAIN_LABELS: Record<string, string> = {
   case: '사례(case)',
   job: '직업(job)',
   disease: '상병(disease)',
@@ -85,7 +158,7 @@ const GRAIN_LABELS = {
 // 화면에서만 재배열한다(서버 순서에 의존하는 테스트·계약을 건드리지 않기 위함).
 const GRAIN_DISPLAY_ORDER = ['case', 'disease', 'job'];
 
-function sortGrainsForDisplay(grains) {
+function sortGrainsForDisplay(grains: string[]): string[] {
   return [...grains].sort((a, b) => {
     const ia = GRAIN_DISPLAY_ORDER.indexOf(a);
     const ib = GRAIN_DISPLAY_ORDER.indexOf(b);
@@ -95,7 +168,7 @@ function sortGrainsForDisplay(grains) {
 
 // server/src/stats/dataset/snapshotColumnVariables.ts의 REGISTERED_AT_KEY와 동일 리터럴.
 
-function needsValue(operator) {
+function needsValue(operator: string): boolean {
   return operator !== 'is_missing' && operator !== 'not_missing';
 }
 
@@ -104,7 +177,7 @@ function needsValue(operator) {
 // 빈 숫자는 Number('')===0으로 조용히 통과했다. 연산자·타입별로 원시 UI 입력을 서버 계약이
 // 요구하는 정확한 형태로 변환하고, 빈/잘못된 입력은 여기서 막는다(server/src/stats/recipe/validate
 // 의 isValueOfType·between·in 검증과 대응).
-function buildFilterValue(variable, operator, raw) {
+function buildFilterValue(variable: CatalogVariable, operator: string, raw: FilterRaw): FilterBuildResult {
   if (!needsValue(operator)) return { ok: true, value: undefined };
 
   if (variable.type === 'boolean') {
@@ -145,14 +218,14 @@ function buildFilterValue(variable, operator, raw) {
 // 3차 리뷰가 잡은 결함 — 배열 길이만 보고 판단하면 in:['low','high'](값 2개, 목록)도
 // between처럼 "low ~ high"(범위)로 표시돼 포함 조건을 구간 조건으로 오해하게 만든다.
 // 연산자를 함께 받아 between만 범위로, in은 항상 쉼표 목록으로 표시한다.
-function formatFilterValue(operator, value) {
+function formatFilterValue(operator: string, value: StatsFilter['value']): string {
   if (value === undefined) return '';
   if (operator === 'between' && Array.isArray(value)) return `${value[0]} ~ ${value[1]}`;
   if (Array.isArray(value)) return value.join(', ');
   return String(value);
 }
 
-function emptyRawValueFor(operator) {
+function emptyRawValueFor(operator: string): FilterRaw {
   return operator === 'between' ? ['', ''] : '';
 }
 
@@ -160,13 +233,15 @@ function emptyRawValueFor(operator) {
 // 형식이 섞여 들어온다 — 서버(server/src/stats/recipe/validate/filters.ts)는 YYYY-MM-DD만 엄격히 허용하므로
 // (실제 값 비교도 그 형식 기준), 브라우저 네이티브 <input type="date">로 입력 자체를 그
 // 형식으로 고정한다(네이티브 date input의 value는 항상 YYYY-MM-DD).
-function inputTypeFor(variableType) {
+function inputTypeFor(variableType: string): string {
   if (variableType === 'continuous') return 'number';
   if (variableType === 'date') return 'date';
   return 'text';
 }
 
-function FilterValueInput({ variable, operator, raw, onChange }) {
+function FilterValueInput({ variable, operator, raw, onChange }: {
+  variable: CatalogVariable; operator: string; raw: FilterRaw; onChange: (raw: FilterRaw) => void;
+}) {
   if (!needsValue(operator)) return null;
 
   if (variable.type === 'boolean') {
@@ -224,15 +299,15 @@ function FilterValueInput({ variable, operator, raw, onChange }) {
   );
 }
 
-function FilterEditor({ catalogByKey, onAdd }) {
+function FilterEditor({ catalogByKey, onAdd }: { catalogByKey: CatalogByKey; onAdd: (filter: StatsFilter) => void }) {
   const keys = Array.from(catalogByKey.keys());
   const [pickedKey, setKey] = useState(keys[0] || '');
   // 후보 목록이 바뀌어(카탈로그 재조회·모드 전환) 고른 키가 사라지면 첫 후보로 대체한다 —
   // 그대로 두면 variable이 undefined가 되어 FilterValueInput이 렌더 중 예외를 던진다.
   const key = catalogByKey.has(pickedKey) ? pickedKey : (keys[0] || '');
-  const [operator, setOperator] = useState('eq');
-  const [raw, setRaw] = useState('');
-  const [error, setError] = useState(null);
+  const [operator, setOperator] = useState<StatsFilterOperator>('eq');
+  const [raw, setRaw] = useState<FilterRaw>('');
+  const [error, setError] = useState<string | null | undefined>(null);
   const variable = catalogByKey.get(key);
   const allowedOps = variable ? (TYPE_ALLOWED_OPERATORS[variable.type] || []) : [];
 
@@ -245,16 +320,16 @@ function FilterEditor({ catalogByKey, onAdd }) {
         value={key}
         onChange={(e) => { setKey(e.target.value); setOperator('eq'); setRaw(''); setError(null); }}
       >
-        {keys.map((k) => <option key={k} value={k}>{catalogByKey.get(k).label}</option>)}
+        {keys.map((k) => <option key={k} value={k}>{(catalogByKey.get(k) as CatalogVariable).label}</option>)}
       </select>
       <select
         className="swb-search"
         value={operator}
-        onChange={(e) => { setOperator(e.target.value); setRaw(emptyRawValueFor(e.target.value)); setError(null); }}
+        onChange={(e) => { setOperator(e.target.value as StatsFilterOperator); setRaw(emptyRawValueFor(e.target.value)); setError(null); }}
       >
         {allowedOps.map((op) => <option key={op} value={op}>{OPERATOR_LABELS[op] || op}</option>)}
       </select>
-      <FilterValueInput variable={variable} operator={operator} raw={raw} onChange={(v) => { setRaw(v); setError(null); }} />
+      <FilterValueInput variable={variable as CatalogVariable} operator={operator} raw={raw} onChange={(v) => { setRaw(v); setError(null); }} />
       {error && <p className="swb-status-danger" style={{ margin: '4px 0' }}>{error}</p>}
       <button
         type="button"
@@ -284,6 +359,12 @@ function RegressionAdvancedOptions({
   interactionTerms, onInteractionTermsChange,
   splineKeys, onSplineKeysChange,
   eventLevel, onEventLevelChange,
+}: {
+  catalogByKey: CatalogByKey; outcomeKey: string | null; predictorKeys: string[];
+  standardizePredictors: boolean; onStandardizePredictorsChange: (value: boolean) => void;
+  interactionTerms: Array<[string, string]>; onInteractionTermsChange: (terms: Array<[string, string]>) => void;
+  splineKeys: string[]; onSplineKeysChange: (keys: string[]) => void;
+  eventLevel: string; onEventLevelChange: (level: string) => void;
 }) {
   const [pendingPairA, setPendingPairA] = useState('');
   const [pendingPairB, setPendingPairB] = useState('');
@@ -305,7 +386,7 @@ function RegressionAdvancedOptions({
     const normalized = [pendingPairA, pendingPairB].sort().join('\u0000');
     const exists = interactionTerms.some(([a, b]) => [a, b].sort().join('\u0000') === normalized);
     if (exists) return;
-    onInteractionTermsChange([...interactionTerms, [pendingPairA, pendingPairB]]);
+    onInteractionTermsChange([...interactionTerms, [pendingPairA, pendingPairB] as [string, string]]);
     setPendingPairA('');
     setPendingPairB('');
   }
@@ -413,7 +494,7 @@ export function RecipePanel({
   previewState, isPreviewCurrent,
   canExecute, isAnalyzing, onRunAnalyze,
   collapsed, onToggleCollapse,
-}) {
+}: RecipePanelProps) {
   const catalogByKey = useMemo(
     () => new Map((catalog?.variables ?? []).map((v) => [v.key, v])),
     [catalog],
@@ -623,7 +704,7 @@ export function RecipePanel({
                 type="button"
                 className={`swb-seg-opt${analysisPurpose === p ? ' swb-seg-opt--active' : ''}`}
                 onClick={() => onAnalysisPurposeChange(p)}
-              >{PURPOSE_LABELS[p]}</button>
+              >{PURPOSE_LABELS[p as keyof typeof PURPOSE_LABELS]}</button>
             ))}
           </div>
         )}
@@ -890,11 +971,14 @@ export function RecipePanel({
 // 인원수 관련 차단 사유(B)는 서버가 애초에 세분화해서 안 보낸다 — 그래서 이 UI는
 // "왜 안 되는지" 대신 결과가 표본 크기에 따라 표시되지 않을 수 있다는 고정 문구만
 // 상시 노출한다(데이터 의존 아님, 계획서 §"방법 가용성 판정").
-function MethodPicker({ previewState, isPreviewCurrent, requestedMethod, onRequestedMethodChange, onApplyRemedy, notReadyMessage }) {
+function MethodPicker({ previewState, isPreviewCurrent, requestedMethod, onRequestedMethodChange, onApplyRemedy, notReadyMessage }: {
+  previewState: RecipePreviewState; isPreviewCurrent: boolean; requestedMethod: string | null;
+  onRequestedMethodChange: (method: string) => void; onApplyRemedy: (patch: AvailableMethod['remedyRecipePatch']) => void; notReadyMessage: string;
+}) {
   const ready = isPreviewCurrent && previewState.status === 'ready' && !previewState.result?.counts?.suppressed;
   const methods = ready ? (previewState.result?.availableMethods ?? []) : [];
-  const byId = new Map(methods.map((m) => [m.id, m]));
-  const orderedMethods = METHOD_ORDER.map((id) => byId.get(id)).filter(Boolean);
+  const byId = new Map<string, AvailableMethod>(methods.map((m) => [m.id, m]));
+  const orderedMethods = METHOD_ORDER.map((id) => byId.get(id)).filter(Boolean) as AvailableMethod[];
 
   return (
     <>
@@ -953,7 +1037,7 @@ function MethodPicker({ previewState, isPreviewCurrent, requestedMethod, onReque
   );
 }
 
-function PreviewSummary({ previewState, isPreviewCurrent, catalogByKey }) {
+function PreviewSummary({ previewState, isPreviewCurrent, catalogByKey }: { previewState: RecipePreviewState; isPreviewCurrent: boolean; catalogByKey: CatalogByKey }) {
   if (!isPreviewCurrent || previewState.status === 'idle') {
     return <p className="swb-suppressed-note">변수를 선택하면 미리보기가 표시됩니다.</p>;
   }
@@ -963,7 +1047,7 @@ function PreviewSummary({ previewState, isPreviewCurrent, catalogByKey }) {
   if (previewState.status === 'error') {
     return <p className="swb-status-danger" style={{ whiteSpace: 'pre-wrap' }}>미리보기 실패: {describeStatsApiError(previewState.error, { catalogByKey, analysisPurpose: previewState.requestPurpose })}</p>;
   }
-  const { counts, estimability } = previewState.result;
+  const { counts, estimability } = previewState.result as PreviewResponse;
   if (counts.suppressed) {
     const reason = counts.reasonCode === 'DIFFERENCING_RATE_LIMIT'
       ? '짧은 시간 내 반복 조회 제한에 걸렸습니다.'
@@ -971,7 +1055,7 @@ function PreviewSummary({ previewState, isPreviewCurrent, catalogByKey }) {
     return <p className="swb-status-warn">{reason}</p>;
   }
   // 제한데이터 권한자가 소수 셀 억제를 실제로 푼 미리보기(서버가 풀 것이 있었을 때만 표시한다).
-  const limitedApplied = previewState.result.limitedDisclosure === 'applied';
+  const limitedApplied = (previewState.result as PreviewResponse).limitedDisclosure === 'applied';
   // 추정가능성의 `—`/`비공개`는 소수 인원(1~9명) 보호로 숨겨진 값이다. 0명인 경우와는 서버 응답으로 구분되지
   // 않으므로(같은 null) "숨겨질 수 있다"는 중립 문구만 쓴다.
   const hasHiddenEstimability = estimability.completeCaseN === null
