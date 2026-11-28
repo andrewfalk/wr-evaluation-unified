@@ -9,8 +9,9 @@ import { useViewportWidth } from './useViewportWidth';
 import { describeStatsApiError, getUnknownVariableKeys, REMOVED_VARIABLES, UNKNOWN_VARIABLE_FALLBACK } from './describeStatsError';
 import { planModePurposeTransition, pruneStaleSelections } from './workbenchTransitions';
 import type { RecipeDraft } from './workbenchTransitions';
+import { useRecipeDraft } from './useRecipeDraft';
 import type { RecipePreviewState, RecipeTransitionNotice } from './RecipePanel';
-import type { AnalyzeResponse, CatalogResponse, StatsFilter } from '@wr/contracts/stats';
+import type { AnalyzeResponse, CatalogResponse } from '@wr/contracts/stats';
 import { buildConditionKey, buildRecipe, isRecipeComplete } from './recipeBuild';
 import type { WorkbenchRecipe } from './recipeBuild';
 import './statistics-workbench.css';
@@ -108,30 +109,18 @@ export function StatisticsWorkbench({
   const supportedGrains = catalogState.data?.supportedGrains ?? ['case'];
 
   // ---- draft recipe state ----
-  const [grain, setGrain] = useState('case');
-  const [variableKeys, setVariableKeys] = useState<string[]>([]);
-  const [analysisPurpose, setAnalysisPurpose] = useState('association');
-  const [formulaPolicies, setFormulaPolicies] = useState<Record<string, string>>({});
-  const [filterDraft, setFilterDraft] = useState<StatsFilter[]>([]);
-  const [appliedFilters, setAppliedFilters] = useState<StatsFilter[]>([]);
-  // PR3-A — 이변량 모드 draft state(계획서 §클라이언트배선).
-  const [analysisMode, setAnalysisMode] = useState('descriptive');
-  const [requestedMethod, setRequestedMethod] = useState<string | null>(null);
+  // P2-77b — 레시피 초안 14개 상태는 useRecipeDraft의 reducer 하나로 둔다(workbenchTransitions.ts의 recipeDraftReducer).
+  // 패널에 그대로 내려가는 setter는 옛 useState setter처럼 값·갱신 함수를 받고 참조가 같다.
+  const {
+    draft, dispatch,
+    setRequestedMethod, setStandardizePredictors, setInteractionTerms, setSplineKeys, setEventLevel, setStratifyByKey,
+    setFilterDraft, setAppliedFilters, setFormulaPolicies,
+  } = useRecipeDraft();
+  const {
+    grain, variableKeys, analysisPurpose, formulaPolicies, filterDraft, appliedFilters, analysisMode, requestedMethod,
+    outcomeKey, standardizePredictors, interactionTerms, splineKeys, eventLevel, stratifyByKey,
+  } = draft;
   const [modeChangeBlockedNotice, setModeChangeBlockedNotice] = useState(false);
-  // PR4-A1 §5 — 회귀 outcome 선택 상태. predictor는 selectedKeys(=variableKeys)에서
-  // outcomeKey를 뺀 나머지로 파생한다(별도 배열을 두면 두 벌 진실원이 생긴다).
-  const [outcomeKey, setOutcomeKey] = useState<string | null>(null);
-  // PR4-A2 — 회귀 고급 옵션. interactionTerms는 [predictorA, predictorB] 쌍의
-  // 배열, splineKeys는 continuous predictor 키 배열. eventLevel은 categorical
-  // outcome에서만 의미 있다(observed 레벨을 클라이언트가 알 방법이 없어 —
-  // CatalogVariableSchema에 선언 레벨 필드 자체가 없다 — A1의 referenceLevels와
-  // 같은 원칙으로 자유 입력을 받고, 비워두면 서버가 결정적으로 자동 선택한다).
-  const [standardizePredictors, setStandardizePredictors] = useState(false);
-  const [interactionTerms, setInteractionTerms] = useState<Array<[string, string]>>([]);
-  const [splineKeys, setSplineKeys] = useState<string[]>([]);
-  const [eventLevel, setEventLevel] = useState('');
-  // Table1 — descriptive 전용 그룹 변수 선택 상태(§3-대). variableKeys와 별개 축.
-  const [stratifyByKey, setStratifyByKey] = useState<string | null>(null);
   // 모드·목적 전환으로 자동 정리된 변수·필터 안내(RecipePanel 상단에 표시, 닫기 가능).
   const [transitionNotice, setTransitionNotice] = useState<RecipeTransitionNotice | null>(null);
   // 카탈로그 재조회 후 사라진 키를 초안에서 정리했다는 안내.
@@ -140,15 +129,6 @@ export function StatisticsWorkbench({
   // 복구 버튼이 사라지지 않게 오류 상태에서 파생하지 않고 별도 state로 둔다).
   const [recoveryKeys, setRecoveryKeys] = useState<string[]>([]);
 
-  const draftSetters = {
-    analysisMode: setAnalysisMode, analysisPurpose: setAnalysisPurpose, variableKeys: setVariableKeys,
-    outcomeKey: setOutcomeKey, eventLevel: setEventLevel, standardizePredictors: setStandardizePredictors,
-    interactionTerms: setInteractionTerms, splineKeys: setSplineKeys, stratifyByKey: setStratifyByKey,
-    requestedMethod: setRequestedMethod, filterDraft: setFilterDraft, appliedFilters: setAppliedFilters,
-  };
-  function applyDraftPatch(patch: Partial<RecipeDraft>) {
-    for (const [k, v] of Object.entries(patch)) (draftSetters as Record<string, ((value: unknown) => void) | undefined>)[k]?.(v);
-  }
   function currentDraft(): RecipeDraft {
     return {
       analysisMode, analysisPurpose, variableKeys, outcomeKey, eventLevel, standardizePredictors,
@@ -165,7 +145,7 @@ export function StatisticsWorkbench({
     setRecoveryKeys([]); // 재조회 성공 — 복구 필요 상태 해제(실패·로딩 중에는 유지)
     const pruned = pruneStaleSelections(currentDraft(), catalogByKey);
     if (!pruned) return;
-    applyDraftPatch(pruned.patch);
+    dispatch({ type: 'pruneCatalog', catalogByKey });
     setCatalogPruneNotice(pruned.removed.map((k) => (REMOVED_VARIABLES as Record<string, string>)[k] ? `${k} — ${(REMOVED_VARIABLES as Record<string, string>)[k]}` : k));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [catalogState]);
@@ -174,48 +154,15 @@ export function StatisticsWorkbench({
   // 안 맞을 수 있어 전부 초기화한다(후보 목록을 grain으로 거르는 것과는 별개 — 후보를
   // 숨기는 것만으로는 이미 선택된 상태가 지워지지 않는다).
   function handleGrainChange(nextGrain: string) {
-    if (nextGrain === grain) return;
-    setGrain(nextGrain);
-    setVariableKeys([]);
-    setFilterDraft([]);
-    setAppliedFilters([]);
-    // PR4-B2 — 예측은 l2_logistic 하나뿐이라 requestedMethod를 null로 비우면
-    // (다른 모드처럼 사용자가 다시 고를 UI가 없어) canExecute가 영영 막힌다 —
-    // 현재 모드가 prediction이면 그대로 유지한다.
-    setRequestedMethod(analysisMode === 'prediction' ? 'l2_logistic' : null);
-    setOutcomeKey(null);
-    setStandardizePredictors(false);
-    setInteractionTerms([]);
-    setSplineKeys([]);
-    setEventLevel('');
-    setStratifyByKey(null);
+    // 같은 grain이면 아무것도 바꾸지 않는다. 예측은 l2_logistic 하나뿐이라(다시 고를 UI가 없어) 모드가
+    // prediction이면 requestedMethod를 그대로 둔다 — 둘 다 reducer(changeGrain)가 지킨다.
+    dispatch({ type: 'changeGrain', grain: nextGrain });
   }
 
   function toggleVariable(key: string) {
-    setVariableKeys((prev) => {
-      if (prev.includes(key)) return prev.filter((k) => k !== key);
-      const cap = analysisMode === 'bivariate' ? 2 : 20; // 서버 상한(§ recipe 계약) — 조용히 무시
-      if (prev.length >= cap) return prev;
-      return [...prev, key];
-    });
-    // 변수 구성이 바뀌면 이전에 고른 method가 새 쌍에 더 이상 안 맞을 수 있어 초기화한다
-    // (계획서 §클라이언트배선 "변수 변경 시 requestedMethod 초기화" — 조용히 유지하면
-    // 사용자가 뭘 실행했는지 오해할 수 있음). PR4-B2 — 예측은 방법이 l2_logistic
-    // 하나뿐이라(선택 UI 없음) 변수 토글로 초기화하면 다시 채워줄 곳이 없다.
-    setRequestedMethod(analysisMode === 'prediction' ? 'l2_logistic' : null);
-    // PR4-A1 — 지금 outcome으로 지정된 변수를 해제하면 outcome도 함께 비운다(더 이상
-    // 선택 목록에 없는 변수를 outcome으로 남겨두면 predictor 파생 로직이 깨진다).
-    setOutcomeKey((prev) => (prev === key ? null : prev));
-    // PR4-A2 — 해제된 변수가 interactionTerms/splineKeys에 남아 있으면 서버가
-    // "predictor 집합에 없다"로 400을 낸다 — 선택 해제 시 함께 정리한다.
-    setInteractionTerms((prev) => prev.filter(([a, b]) => a !== key && b !== key));
-    setSplineKeys((prev) => prev.filter((k) => k !== key));
-    // 해제된 변수가 categorical outcome이었다면 eventLevel도 그 변수의 레벨 값이므로
-    // 함께 비운다(handleOutcomeKeyChange와 동일 원칙 — 리뷰 지적).
-    setEventLevel((prev) => (key === outcomeKey ? '' : prev));
-    // Table1 — 토글된 키가 현재 stratifyByKey와 같을 때만 해제한다(무조건 초기화하면
-    // 표에 변수 하나만 추가해도 담당의 선택이 사라지는 버그가 된다 — 1차 리뷰 지적).
-    setStratifyByKey((prev) => (prev === key ? null : prev));
+    // 변수 구성이 바뀌면(상한에 걸려 그대로여도) 방법 선택을 초기화하고, 해제된 변수가 결과변수·interaction·
+    // spline·그룹 변수였다면 함께 정리한다 — reducer(toggleVariable)의 주석 ①② 참고.
+    dispatch({ type: 'toggleVariable', key });
   }
 
   function handleAnalysisModeChange(nextMode: string) {
@@ -246,8 +193,9 @@ export function StatisticsWorkbench({
   // 모드·목적 전환 공통 경로: 순수 계산(planModePurposeTransition)이 새 모드/목적을 인자로
   // 받아 requestedMethod·비호환 변수·예측 필터·고급 옵션을 한 번에 정리한다.
   function applyTransition(nextMode: string, nextPurpose: string) {
-    const { patch, notice } = planModePurposeTransition(currentDraft(), nextMode, nextPurpose, catalogByKey);
-    applyDraftPatch(patch);
+    // 안내(notice)는 reducer 밖 상태다 — 같은 순수 함수로 계산해 정하고, 초안 정리는 액션으로 보낸다.
+    const { notice } = planModePurposeTransition(currentDraft(), nextMode, nextPurpose, catalogByKey);
+    dispatch({ type: 'transition', nextMode, nextPurpose, catalogByKey });
     setTransitionNotice(notice);
   }
 
@@ -260,14 +208,8 @@ export function StatisticsWorkbench({
   // 안 그러면 continuous/boolean outcome으로 바뀐 뒤에도 값이 남아 서버가
   // EVENT_LEVEL_REQUIRES_CATEGORICAL_OUTCOME으로 거부한다(리뷰 지적).
   function handleOutcomeKeyChange(nextOutcomeKey: string | null) {
-    setOutcomeKey(nextOutcomeKey);
-    setInteractionTerms((prev) => prev.filter(([a, b]) => a !== nextOutcomeKey && b !== nextOutcomeKey));
-    setSplineKeys((prev) => prev.filter((k) => k !== nextOutcomeKey));
-    // PR4-B2 — 예측의 boolean outcome은 eventLevel을 자동 'true'로 채운다(계획서
-    // §6단계 "boolean outcome이면 eventLevel 'true'를 자동 설정"). 그 외(회귀,
-    // 또는 예측의 categorical outcome)는 비워 사용자가 select로 다시 고르게 한다.
-    const nextVariable = catalogByKey.get(nextOutcomeKey as string);
-    setEventLevel(analysisMode === 'prediction' && nextVariable?.type === 'boolean' ? 'true' : '');
+    // 새 결과변수를 참조하는 interaction·spline을 정리하고, eventLevel은 예측의 boolean 결과변수면 'true', 그 밖은 비운다.
+    dispatch({ type: 'changeOutcomeKey', outcomeKey: nextOutcomeKey, catalogByKey });
   }
 
   // ---- preview: 조건-key(무엇을 위한 결과인가) + 요청세대(그 요청 인스턴스가 최신인가) ----

@@ -175,3 +175,126 @@ export function pruneStaleSelections(prev: RecipeDraft, catalogByKey: ReadonlyMa
     removed: removedKeys,
   };
 }
+
+// ---- 레시피 초안 reducer(P2-77b) ----
+// 작업대의 레시피 초안 14개 상태(옛 useState)를 한 reducer로 둔다. 순수 함수다(StrictMode에서 두 번 불려도 같은 결과).
+// 옛 핸들러의 지금 동작을 그대로 옮긴다:
+//  ① toggleVariable — 변수 상한에 걸려 변수가 늘지 않아도 requestedMethod는 초기화한다(조건 키가 바뀌어 미리보기가 한 번 더 나간다).
+//  ② toggleVariable의 eventLevel 판정은 그 액션 직전의 outcomeKey로 한다.
+//  ③ changeGrain은 formulaPolicies와 (reducer 밖의) 안내 상태를 건드리지 않는다. 같은 grain이면 아무것도 바꾸지 않는다.
+//  ④ catalogByKey가 필요한 액션(목적·모드 전환 · 결과변수 변경 · 카탈로그 정리)은 액션에 실어 받는다.
+//  ⑤ 전환의 notice와 정리의 removed는 이 reducer가 다루지 않는다 — 호출부가 같은 순수 함수로 계산해 알림 상태를 정한다.
+//  'set'은 옛 useState setter처럼 값이나 갱신 함수를 받고, 결과가 지금 값과 같으면(Object.is) state를 그대로 돌려준다.
+
+/** 레시피 초안 전체(전환 함수가 다루는 12필드 + grain · formulaPolicies). */
+export interface RecipeDraftState extends RecipeDraft {
+  grain: string;
+  formulaPolicies: Record<string, string>;
+}
+
+export type RecipeDraftField = keyof RecipeDraftState;
+
+export type RecipeDraftAction =
+  | { [K in RecipeDraftField]: { type: 'set'; field: K; value: RecipeDraftState[K] | ((prev: RecipeDraftState[K]) => RecipeDraftState[K]) } }[RecipeDraftField]
+  | { type: 'changeGrain'; grain: string }
+  | { type: 'toggleVariable'; key: string }
+  | { type: 'changeOutcomeKey'; outcomeKey: string | null; catalogByKey: CatalogByKey }
+  | { type: 'transition'; nextMode: string; nextPurpose: string; catalogByKey: CatalogByKey }
+  | { type: 'pruneCatalog'; catalogByKey: ReadonlyMap<string, unknown> };
+
+/** 옛 useState 초기값과 같다(마운트마다 새 배열·객체). */
+export function createInitialRecipeDraft(): RecipeDraftState {
+  return {
+    grain: 'case',
+    variableKeys: [],
+    analysisPurpose: 'association',
+    formulaPolicies: {},
+    filterDraft: [],
+    appliedFilters: [],
+    analysisMode: 'descriptive',
+    requestedMethod: null,
+    outcomeKey: null,
+    standardizePredictors: false,
+    interactionTerms: [],
+    splineKeys: [],
+    eventLevel: '',
+    stratifyByKey: null,
+  };
+}
+
+export function recipeDraftReducer(state: RecipeDraftState, action: RecipeDraftAction): RecipeDraftState {
+  switch (action.type) {
+    case 'set': {
+      const prev = state[action.field];
+      const next = typeof action.value === 'function'
+        ? (action.value as (p: typeof prev) => typeof prev)(prev)
+        : action.value;
+      if (Object.is(next, prev)) return state;
+      return { ...state, [action.field]: next };
+    }
+    case 'changeGrain': {
+      // 옛 handleGrainChange — 같은 grain이면 아무것도 하지 않는다. formulaPolicies는 그대로(③).
+      if (action.grain === state.grain) return state;
+      return {
+        ...state,
+        grain: action.grain,
+        variableKeys: [],
+        filterDraft: [],
+        appliedFilters: [],
+        // 예측은 l2_logistic 하나뿐이라(선택 UI 없음) 현재 모드가 prediction이면 그대로 둔다.
+        requestedMethod: state.analysisMode === 'prediction' ? 'l2_logistic' : null,
+        outcomeKey: null,
+        standardizePredictors: false,
+        interactionTerms: [],
+        splineKeys: [],
+        eventLevel: '',
+        stratifyByKey: null,
+      };
+    }
+    case 'toggleVariable': {
+      // 옛 toggleVariable — 변수 목록이 그대로여도(상한) 나머지는 아래대로 다시 정한다(①).
+      const { key } = action;
+      let variableKeys: string[];
+      if (state.variableKeys.includes(key)) variableKeys = state.variableKeys.filter((k) => k !== key);
+      else {
+        const cap = state.analysisMode === 'bivariate' ? 2 : 20; // 서버 상한(§ recipe 계약) — 조용히 무시
+        variableKeys = state.variableKeys.length >= cap ? state.variableKeys : [...state.variableKeys, key];
+      }
+      return {
+        ...state,
+        variableKeys,
+        requestedMethod: state.analysisMode === 'prediction' ? 'l2_logistic' : null,
+        outcomeKey: state.outcomeKey === key ? null : state.outcomeKey,
+        interactionTerms: state.interactionTerms.filter(([a, b]) => a !== key && b !== key),
+        splineKeys: state.splineKeys.filter((k) => k !== key),
+        // ② 이 액션 직전의 outcomeKey로 판정한다.
+        eventLevel: key === state.outcomeKey ? '' : state.eventLevel,
+        stratifyByKey: state.stratifyByKey === key ? null : state.stratifyByKey,
+      };
+    }
+    case 'changeOutcomeKey': {
+      // 옛 handleOutcomeKeyChange — 새 결과변수를 참조하는 interaction·spline만 정리하고 eventLevel은 다시 정한다.
+      const next = action.outcomeKey;
+      const nextVariable = action.catalogByKey.get(next as string);
+      return {
+        ...state,
+        outcomeKey: next,
+        interactionTerms: state.interactionTerms.filter(([a, b]) => a !== next && b !== next),
+        splineKeys: state.splineKeys.filter((k) => k !== next),
+        eventLevel: state.analysisMode === 'prediction' && nextVariable?.type === 'boolean' ? 'true' : '',
+      };
+    }
+    case 'transition': {
+      // 옛 applyTransition — notice는 호출부가 정한다(⑤).
+      const { patch } = planModePurposeTransition(state, action.nextMode, action.nextPurpose, action.catalogByKey);
+      return { ...state, ...patch };
+    }
+    case 'pruneCatalog': {
+      // 옛 카탈로그 정리 effect — removed 안내는 호출부가 정한다(⑤).
+      const pruned = pruneStaleSelections(state, action.catalogByKey);
+      return pruned ? { ...state, ...pruned.patch } : state;
+    }
+    default:
+      return state;
+  }
+}
