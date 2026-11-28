@@ -53,6 +53,8 @@ registerModule({
   name: '표시 이름',
   icon: '아이콘',
   description: '설명',
+  shortName: '짧은 이름',                  // 선택 — 대시보드 모듈 칸·최근 활동 표(없으면 칸은 name, 표는 id)
+  color: 'var(--accent)',                  // 선택 — 대시보드 모듈 칸의 숫자 색(없으면 var(--accent))
   createModuleData: () => ({ /* 초기 데이터 */ }),
   EvaluationComponent: MyComponent,
   computeCalc: computeFn,
