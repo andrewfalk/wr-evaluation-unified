@@ -19,7 +19,6 @@
   "src/core/components/charts/discreteLevels.js",
   "src/core/components/charts/edgeLabels.js",
   "src/core/components/statistics/RecipePanel.jsx",
-  "src/core/components/statistics/ResultPanel.jsx",
   "src/core/components/statistics/StatisticsWorkbench.jsx",
   "src/core/components/statistics/describeStatsError.js",
   "src/core/fixtures/createTestPatients.js",

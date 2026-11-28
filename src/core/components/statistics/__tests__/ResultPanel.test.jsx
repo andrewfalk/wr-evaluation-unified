@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-import { ResultPanel } from '../ResultPanel.jsx';
+import { ResultPanel } from '../ResultPanel';
 
 afterEach(cleanup);
 
