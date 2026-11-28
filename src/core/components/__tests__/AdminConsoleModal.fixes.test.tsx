@@ -181,4 +181,76 @@ describe('관리자 콘솔 고치기 ①', () => {
     await flush();
     expect(content().querySelector('.admin-inline-modal')).toBeNull();
   });
+
+  it('③ 두 신청을 함께 처리할 때 하나가 먼저 끝나도 다른 신청은 잠긴 채이고, 시작하는 쪽이 다른 행의 잠금을 풀지 않는다', async () => {
+    const gates: Record<string, ReturnType<typeof deferred>> = { 'req-1': deferred(), 'req-2': deferred() };
+    const router = createFetchRouter({
+      'GET /api/admin/audit': { total: 0, items: [] },
+      'GET /api/admin/signup-requests': { requests: REQUESTS },
+      'POST /api/admin/signup-requests/:id/approve': async (req: { params: Record<string, string> }) => {
+        await gates[req.params.id].promise;
+        return { body: { name: req.params.id, loginId: `synthetic-${req.params.id}`, tempPassword: 'tmp-tmp-01' } };
+      },
+    });
+    globalThis.fetch = router.fetch as typeof fetch;
+    const { view, content } = renderModal();
+    await openTab(view, '가입 요청');
+    const approve = (id: string) => buttonByText(rowContaining(content(), `synthetic-${id}`), '승인');
+    fireEvent.click(approve('req-1'));
+    await flush();
+    fireEvent.click(approve('req-2'));
+    await flush();
+    expect(approve('req-1').disabled).toBe(true);
+    fireEvent.click(approve('req-1'));
+    await flush();
+    gates['req-2'].release();
+    await flush();
+    expect(approve('req-1').disabled).toBe(true);
+    fireEvent.click(approve('req-1'));
+    await flush();
+    expect(router.count('POST /api/admin/signup-requests/:id/approve')).toBe(2);
+    gates['req-1'].release();
+    await flush();
+    expect(approve('req-1').disabled).toBe(false);
+  });
+
+  it('② 두 환자를 함께 배정할 때 하나가 먼저 끝나도 다른 환자의 변경 버튼은 잠긴 채다', async () => {
+    const patients = [1, 2].map(n => ({
+      id: `patient-000${n}`, assignedDoctorUserId: null, data: { shared: { name: `합성 환자 ${n}`, patientNo: `SYN-000${n}` } },
+    }));
+    const slowSecond = deferred();
+    const router = createFetchRouter({
+      'GET /api/admin/audit': { total: 0, items: [] },
+      'GET /api/admin/users': {
+        users: [
+          { id: 'user-0002', loginId: 'synthetic-doc1', name: '합성 의사 1', role: 'doctor', disabled: false },
+          { id: 'user-0003', loginId: 'synthetic-doc2', name: '합성 의사 2', role: 'doctor', disabled: false },
+        ],
+      },
+      'GET /api/patients': { items: patients, total: 2 },
+      'POST /api/patients/:id/assignment': async (req: { params: Record<string, string> }) => {
+        if (req.params.id === 'patient-0002') await slowSecond.promise;
+        return { body: { ok: true } };
+      },
+    });
+    globalThis.fetch = router.fetch as typeof fetch;
+    const { view, content } = renderModal();
+    await openTab(view, '환자 배정');
+    const select = (name: string) => rowContaining(content(), name).querySelector('select') as HTMLSelectElement;
+    const changeButton = (name: string) => buttonByText(rowContaining(content(), name), '변경');
+    fireEvent.change(select('합성 환자 2'), { target: { value: 'user-0002' } });
+    fireEvent.click(changeButton('합성 환자 2'));                // 느린 배정
+    await flush();
+    fireEvent.change(select('합성 환자 1'), { target: { value: 'user-0002' } });
+    fireEvent.click(changeButton('합성 환자 1'));                // 빠른 배정 → 끝나고 다시 불러옴
+    await flush();
+    fireEvent.change(select('합성 환자 2'), { target: { value: 'user-0003' } });
+    expect(changeButton('합성 환자 2').disabled).toBe(true);
+    expect(changeButton('합성 환자 1').disabled).toBe(true);    // 선택 비움(바뀐 값 없음)
+    fireEvent.change(select('합성 환자 1'), { target: { value: 'user-0003' } });
+    expect(changeButton('합성 환자 1').disabled).toBe(false);   // 끝난 환자는 풀림
+    slowSecond.release();
+    await flush();
+    expect(router.count('POST /api/patients/:id/assignment')).toBe(2);
+  });
 });

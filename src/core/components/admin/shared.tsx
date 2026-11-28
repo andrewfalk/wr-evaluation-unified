@@ -39,6 +39,17 @@ export function RoleBadge({ role }: { role: string }) {
   return <span className={`admin-badge admin-badge--role admin-badge--role-${role}`}>{label}</span>;
 }
 
+// 행별 처리 중 표시(처리 중인 id 묶음) — 여러 행을 함께 처리할 때 한 행이 끝나거나 시작해도 다른 행의 잠금이 풀리지 않게.
+export function withId(ids: ReadonlySet<string>, id: string): ReadonlySet<string> {
+  return new Set(ids).add(id);
+}
+
+export function withoutId(ids: ReadonlySet<string>, id: string): ReadonlySet<string> {
+  const next = new Set(ids);
+  next.delete(id);
+  return next;
+}
+
 export interface UserRow {
   id: string;
   loginId: string;

@@ -3,6 +3,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useLatestGuard } from '../../hooks/useLatestGuard';
 import { assignPatient, fetchAdminUsers, fetchPatientsPage } from '../../services/adminRepository';
 import { resolveApiBaseUrl } from '../../../platform/dataMode';
+import { withId, withoutId } from './shared';
 import type { TabProps, UserRow, UsersResponse } from './shared';
 
 // ── Patient Assignment Tab ────────────────────────────────────────────────────
@@ -33,7 +34,7 @@ export function PatientAssignmentTab({ session, onPatientAssignmentChanged }: Pa
   const [loading, setLoading]     = useState(false);
   const [error, setError]         = useState<string | null>(null);
   const [pending, setPending]     = useState<Record<string, string>>({}); // { patientId: userId | '' }
-  const [actioning, setActioning] = useState<string | null>(null);
+  const [actioning, setActioning] = useState<ReadonlySet<string>>(() => new Set()); // 배정을 처리 중인 환자 id들
   const [search, setSearch]       = useState('');
   const controllerRef             = useRef<AbortController | null>(null);
   const beginLoad = useLatestGuard();
@@ -94,15 +95,15 @@ export function PatientAssignmentTab({ session, onPatientAssignmentChanged }: Pa
   const handleAssign = async (patientId: string) => {
     const selectedVal  = pending[patientId];
     const assignedUserId = selectedVal === '' ? null : (selectedVal ?? null);
-    setActioning(patientId);
+    setActioning(ids => withId(ids, patientId));
     try {
       await assignPatient({ baseUrl, session }, patientId, assignedUserId);
       onPatientAssignmentChanged?.();
       await loadPatients(search);
-      setActioning(null);
+      setActioning(ids => withoutId(ids, patientId));
     } catch (err) {
       setError((err as Error).message);
-      setActioning(null);
+      setActioning(ids => withoutId(ids, patientId));
     }
   };
 
@@ -159,7 +160,7 @@ export function PatientAssignmentTab({ session, onPatientAssignmentChanged }: Pa
                     <td className="admin-actions-cell">
                       <button
                         className="btn btn-primary btn-sm"
-                        disabled={!hasChange || actioning === p.id}
+                        disabled={!hasChange || actioning.has(p.id)}
                         onClick={() => handleAssign(p.id)}
                       >
                         변경
