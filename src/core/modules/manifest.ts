@@ -144,7 +144,7 @@ export interface ModuleManifest {
   devFixtures?: ModuleDevFixtures;
   batchExport?: BatchExportConfig;
   narrative?: ModuleNarrative;
-  /** 짧은 표시 이름(대시보드 모듈 칸·최근 활동 표). 없으면 name을 쓴다. */
+  /** 짧은 표시 이름(대시보드 모듈 칸·최근 활동 표). 없으면 모듈 칸은 name, 최근 활동 표는 id를 쓴다. */
   shortName?: string;
   /** 대시보드 모듈 칸의 숫자 색(CSS 색 값). 없으면 var(--accent). */
   color?: string;
