@@ -7,7 +7,7 @@ vi.mock('../videoAnalysisClient', () => ({
 }));
 
 import { createClip, createJob, pollJob } from '../videoAnalysisClient';
-import { runServerAnalysis } from '../videoAnalysisRun.js';
+import { runServerAnalysis } from '../videoAnalysisRun';
 
 const patient = { id: 'l1', sync: { serverId: 'srv-1', revision: 2, syncStatus: 'synced' } };
 const env = { activeModules: ['knee'], session: { mode: 'intranet' }, settings: {} };

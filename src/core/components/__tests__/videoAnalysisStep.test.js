@@ -26,7 +26,7 @@ import {
   hasAnyFlatEvidence,
 } from '../VideoAnalysisStep';
 import { getAggregationMethod } from '../../services/videoAggregate.js';
-import { getModuleSuggestions, getModuleCandidates, collectCandidateFeatures } from '../../services/videoProvenance.js';
+import { getModuleSuggestions, getModuleCandidates, collectCandidateFeatures } from '../../services/videoProvenance';
 import { gateFeaturesByViewpoint } from '../../services/videoViewpointConfig.js';
 import { generateMockFeatures } from '../../services/videoMock.js';
 import { frameActive } from '../SkeletonOverlay.jsx';

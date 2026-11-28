@@ -1,4 +1,3 @@
-// @ts-nocheck
 // 서버 분석 실행 오케스트레이터 (6.0-6b, PR D1/D2b). "분석 실행" 단계 — 공정별로 실제 추론 job을
 // 돌려(fixture) intrinsic clipFeatures를 받고, 수기 activeMinutesPerDay로 per-day 환산해
 // processFeatures를 구성한다. "제안 적용"(videoServerApply)과 분리되어 적용마다 추론이 재실행되지 않는다.
@@ -9,18 +8,60 @@ import { analysisCancelledError, createClip, createJob, pollJob } from './videoA
 import { convertClipFeaturesToPerDay, buildRecipeVersion } from './videoPerDayConversion';
 import { fuseClipFeatureSetsWithEvidence } from './videoViewpointFusion';
 import { REPETITION_BAND_FEATURE_KEYS } from './videoFeatureProfiles';
+import type { AnalysisRecipe, FeatureKey } from '@wr/contracts/index';
+import type {
+  ContributionEvidence, InferenceDevice, ProcessEvidence, ProcessFeatures, SuppressedCandidate, VideoClip, VideoFeatureMap, VideoProcess,
+} from './videoStepTypes';
+
+// ── 타입(P2-75g-ts) — 이 파일이 읽고 쓰는 필드만 적는다. 실행 코드는 그대로다. ──
+export interface RunServerAnalysisOptions {
+  activeModules?: string[];
+  session?: unknown;
+  settings?: unknown;
+  /** { [clipMetaId]: { serverClipId, selectedId } } — 대상자 선택·업로드 완료 클립은 그 serverClipId 재사용. */
+  detections?: Record<string, { serverClipId?: string; selectedId?: string }>;
+  serverConfig?: { videoAnalysisQueueWaitMs?: number; videoAnalysisJobDeadlineMs?: number } | null;
+  shouldContinue?: () => boolean;
+}
+
+export interface ServerRunResult {
+  processFeatures: ProcessFeatures[];
+  processEvidence: ProcessEvidence[];
+  missingActiveTime: Record<string, string[]>;
+  bundleVersion: string | null;
+  recipesByJobId: Record<string, AnalysisRecipe>;
+  errors: Array<{ processId: string; message: string }>;
+}
+
+/** 시점 융합 결과(videoViewpointFusion — JS의 JSDoc은 object로만 적혀 있다). */
+interface FusionResult {
+  fused: object | null;
+  evidenceByFeatureKey: Record<string, ContributionEvidence['fusion']> | null;
+  suppressedCandidates: SuppressedCandidate[];
+}
+
+/** per-day 환산 결과(videoPerDayConversion — JS의 JSDoc은 object로만 적혀 있다). */
+interface PerDayResult {
+  features: VideoFeatureMap;
+  evidenceByFeatureKey?: Record<string, ContributionEvidence>;
+  missingActiveTime: string[];
+  featureConfigVersion: string;
+}
+
+/** 취소·폴링 시간 초과 오류(analysisCancelledError·pollJob). */
+type RunError = Error & { code?: string; timeoutPhase?: string };
 
 // 활성 모듈로 매핑되는 featureKey 목록(컴포넌트 헬퍼와 동일 정의 — 순환 import 회피 위해 인라인).
-function requestedFeaturesForModules(activeModules = []) {
+function requestedFeaturesForModules(activeModules: string[] = []): string[] {
   return Object.keys(VIDEO_FEATURE_TARGETS).filter(
-    (k) => activeModules.includes(VIDEO_FEATURE_TARGETS[k].moduleId)
+    (k) => activeModules.includes(VIDEO_FEATURE_TARGETS[k as FeatureKey].moduleId)
   );
 }
 
 // 6.0-16: 어깨 반복 밴드별 시간합(main 2키+Left/Right 4키)은 repetition-upper-limb 공정에서만 요청한다.
 // 활성 모듈 기준 requested는 공정 profile과 무관하게 전역 1회 계산되므로, 여기서 공정별로 한 번 더 걸러
 // posture-basic/hand-wrist 공정이 6키를 requested로 보내지 않도록 한다(요청 생성 지점의 프로필 게이트).
-function requestedFeaturesForProcess(requested, profile) {
+function requestedFeaturesForProcess(requested: string[], profile: string): string[] {
   if (profile === 'repetition-upper-limb') return requested;
   return requested.filter((k) => !REPETITION_BAND_FEATURE_KEYS.has(k));
 }
@@ -38,7 +79,10 @@ function requestedFeaturesForProcess(requested, profile) {
  *   errors: [{ processId, message }]
  */
 // shouldContinue(선택): 공정·클립마다, 그리고 폴링마다 확인 — false면 ANALYSIS_CANCELLED로 멈춘다(계정 전환 수정 AS-4).
-export async function runServerAnalysis(patient, va, { activeModules = [], session, settings, detections = {}, serverConfig = null, shouldContinue } = {}) {
+export async function runServerAnalysis(
+  patient: unknown, va: { processes?: VideoProcess[]; clips?: Array<VideoClip & { serverClipId?: string }> },
+  { activeModules = [], session, settings, detections = {}, serverConfig = null, shouldContinue }: RunServerAnalysisOptions = {},
+): Promise<ServerRunResult> {
   const ensureContinue = () => { if (shouldContinue && !shouldContinue()) throw analysisCancelledError(); };
   // 6.0-12: 폴링 상한을 서버 deadline에서 파생(공개 config). 미전달 시 pollJob 기본값(안전 600s)으로 폴백.
   const pollOpts = {
@@ -47,13 +91,13 @@ export async function runServerAnalysis(patient, va, { activeModules = [], sessi
     ...(serverConfig?.videoAnalysisJobDeadlineMs ? { processingDeadlineMs: serverConfig.videoAnalysisJobDeadlineMs } : {}),
   };
   const requested = requestedFeaturesForModules(activeModules);
-  const processFeatures = [];
-  const processEvidence = []; // [{ processId, analysisJobIds, evidenceByFeatureKey }] — 영속화 안 함(렌더 lookup)
-  const missingActiveTime = {};
-  const errors = [];
-  let bundleVersion = null;
+  const processFeatures: ProcessFeatures[] = [];
+  const processEvidence: ProcessEvidence[] = []; // [{ processId, analysisJobIds, evidenceByFeatureKey }] — 영속화 안 함(렌더 lookup)
+  const missingActiveTime: Record<string, string[]> = {};
+  const errors: ServerRunResult['errors'] = [];
+  let bundleVersion: string | null = null;
   // jobId → 서버 산출 recipe(§8.11). 적용 시 buildAppliedRecipe로 entry recipe를 만든다(서버 검증 대조).
-  const recipesByJobId = {};
+  const recipesByJobId: Record<string, AnalysisRecipe> = {};
 
   for (const p of va.processes || []) {
     ensureContinue();
@@ -72,10 +116,10 @@ export async function runServerAnalysis(patient, va, { activeModules = [], sessi
     try {
       // 클립별 추론(시점별) → fusionEntries. 하나라도 실패하면 공정 전체 실패 처리.
       const fusionEntries = [];
-      const jobIds = [];
+      const jobIds: string[] = [];
       let failed = false;
       // 6.0-12: 실제 실행 디바이스(검토 UI 배지). 공정 내 클립은 동일 org 설정 → fallback은 하나라도 있으면 true.
-      let inferenceDevice = null;
+      let inferenceDevice: InferenceDevice | null = null;
       for (const clipMeta of clipMetas) {
         ensureContinue();
         // 업로드 완료/대상자 선택 클립은 기존 serverClipId 재사용. 없으면(fixture만) 새 clip 생성.
@@ -101,8 +145,8 @@ export async function runServerAnalysis(patient, va, { activeModules = [], sessi
         if (done.inferenceDeviceUsed) {
           inferenceDevice = {
             used: done.inferenceDeviceUsed,
-            fallback: (inferenceDevice?.fallback || done.inferenceDeviceFallback === true),
-            reason: done.inferenceDeviceFallbackReason || inferenceDevice?.reason || null,
+            fallback: ((inferenceDevice as InferenceDevice | null)?.fallback || done.inferenceDeviceFallback === true),
+            reason: done.inferenceDeviceFallbackReason || (inferenceDevice as InferenceDevice | null)?.reason || null,
           };
         }
         // 융합 evidence가 채택/탈락 클립을 참조할 수 있도록 식별자를 함께 운반(clipMetaId/serverClipId/jobId).
@@ -116,12 +160,12 @@ export async function runServerAnalysis(patient, va, { activeModules = [], sessi
       }
       if (failed) continue;
       // 시점 융합(§8.6.1, intrinsic 단계) → per-day 1회 환산(공정의 다중 시점 클립은 동일 activeMinutesPerDay).
-      const { fused, evidenceByFeatureKey: fusionEvidence, suppressedCandidates } = fuseClipFeatureSetsWithEvidence(fusionEntries);
-      const conv = convertClipFeaturesToPerDay(fused, p.activeMinutesPerDay, { allowedFeatureKeys: requestedForProcess });
+      const { fused, evidenceByFeatureKey: fusionEvidence, suppressedCandidates } = fuseClipFeatureSetsWithEvidence(fusionEntries) as FusionResult;
+      const conv = convertClipFeaturesToPerDay(fused as object, p.activeMinutesPerDay, { allowedFeatureKeys: requestedForProcess }) as PerDayResult;
       // analysisJobIds[]로 provenance 운반(D3b — 융합 시 복수 job). jobId는 하위호환(첫 job).
       processFeatures.push({ processId: p.id, jobId: jobIds[0], analysisJobIds: jobIds, features: conv.features });
       // 근거: 환산 evidence(산출식·breakdown·segments) + 융합 evidence(채택/탈락 클립·시점) 병합.
-      const evidenceByFeatureKey = {};
+      const evidenceByFeatureKey: Record<string, ContributionEvidence> = {};
       for (const [key, ev] of Object.entries(conv.evidenceByFeatureKey || {})) {
         evidenceByFeatureKey[key] = fusionEvidence && fusionEvidence[key] ? { ...ev, fusion: fusionEvidence[key] } : ev;
       }
@@ -131,15 +175,15 @@ export async function runServerAnalysis(patient, va, { activeModules = [], sessi
       bundleVersion = buildRecipeVersion(conv.featureConfigVersion);
     } catch (e) {
       // 취소는 공정 오류로 바꾸지 않고 그대로 던진다(다음 공정으로 넘어가지 않는다).
-      if (e?.code === 'ANALYSIS_CANCELLED') throw e;
+      if ((e as RunError)?.code === 'ANALYSIS_CANCELLED') throw e;
       // 6.0-12: 폴링 타임아웃은 status로 뭉개지 않고 phase별 명확한 메시지로 안내(서버는 계속 처리 중일 수 있음).
-      if (e?.code === 'POLL_TIMEOUT') {
-        const msg = e.timeoutPhase === 'queued'
+      if ((e as RunError)?.code === 'POLL_TIMEOUT') {
+        const msg = (e as RunError).timeoutPhase === 'queued'
           ? `공정 "${p.name}" 대기열 적체 — 분석이 큐에서 대기 중입니다. 잠시 후 다시 시도하세요.`
           : `공정 "${p.name}" 분석 시간 초과 — 서버 처리가 지연되고 있습니다(영상이 길거나 부하). 잠시 후 다시 시도하세요.`;
         errors.push({ processId: p.id, message: msg });
       } else {
-        errors.push({ processId: p.id, message: e?.message || '분석 중 오류가 발생했습니다.' });
+        errors.push({ processId: p.id, message: (e as RunError)?.message || '분석 중 오류가 발생했습니다.' });
       }
     }
   }

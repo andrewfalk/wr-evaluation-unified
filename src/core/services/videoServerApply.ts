@@ -1,4 +1,3 @@
-// @ts-nocheck
 // 영상 분석 서버 적용 오케스트레이터 (6.0-4 UI). 인트라넷+synced 환자에서 제안 1건을
 // 서버 경로로 적용한다: clip 생성 → job 생성(review_pending) → 환자 data 계산 → apply(영속화).
 // 별도 모듈인 이유: videoAnalysisClient ↔ patientServerRepository 순환 import 회피.
@@ -6,18 +5,20 @@ import { applyFeatureToModule } from './videoProvenance';
 import { analysisCancelledError, createClip, createJob } from './videoAnalysisClient';
 import { applyVideoAnalysisJob } from './patientServerRepository';
 import { getLockToken } from './lockTokenStore';
+import type { AnalysisRecipe } from '@wr/contracts/index';
+import type { ProvenancePatient } from './videoProvenance';
 
 const MOCK_BUNDLE = 'mock-6.0-2';
 
 // 오류 문구에 서버 job 상태 코드를 그대로 노출하지 않기 위한 한글 라벨(모르는 상태는 원문 폴백).
-const JOB_STATUS_LABELS = {
+const JOB_STATUS_LABELS: Record<string, string> = {
   queued: '대기 중', running: '분석 중', processing: '분석 중', review_pending: '검수 대기',
   applied: '적용됨', failed: '실패', cancelled: '취소됨', canceled: '취소됨',
 };
 
 // 멱등 해시 — 서버는 text 동등비교만 하므로 결정적 canonical 문자열이면 충분(§8.12).
 // previousValue는 제외(재시도 시 변동 방지) — jobId + targetPath + appliedValue 기준.
-export function computeAppliedInputsHash(jobId, appliedInput) {
+export function computeAppliedInputsHash(jobId: string, appliedInput: { targetPath: string; appliedValue: unknown }): string {
   return JSON.stringify({
     jobId,
     items: [{ targetPath: appliedInput.targetPath, appliedValue: appliedInput.appliedValue }],
@@ -32,14 +33,39 @@ export function computeAppliedInputsHash(jobId, appliedInput) {
  * @returns {Promise<object>} 서버 동기화된 환자(로컬 id 보존)
  */
 // env.shouldContinue(선택): 서버 요청 단계마다 확인 — false면 멈춘다(계정 전환 수정 AS-4).
-export async function applyVideoFeatureViaServer(patient, opts, env) {
+/** 서버 적용 대상 환자(동기화된 환자 — 락 토큰은 로컬 id로 찾는다). */
+export type ServerApplyPatient = ProvenancePatient & { id: string };
+
+export interface ServerApplyOptions {
+  moduleId: string;
+  ctx: unknown;
+  featureKey: string;
+  suggestedValue?: unknown;
+  confidence?: number;
+  processIds?: string[];
+  processId?: string | null;
+  analysisJobIds?: string[];
+  analysisBundleVersion?: string;
+  recipe?: AnalysisRecipe | null;
+  editReason?: string;
+  analysisProfile?: string;
+}
+
+export interface ServerApplyEnv {
+  session?: unknown;
+  settings?: unknown;
+  appliedBy?: string;
+  shouldContinue?: () => boolean;
+}
+
+export async function applyVideoFeatureViaServer(patient: ServerApplyPatient, opts: ServerApplyOptions, env: ServerApplyEnv): Promise<unknown> {
   const { session, settings, appliedBy, shouldContinue } = env;
   const ensureContinue = () => { if (shouldContinue && !shouldContinue()) throw analysisCancelledError(); };
   // 서버 적용은 원본 분석 job 추적이 필수(D3b) — 빈 provenance면 거부(이 경로는 서버모드 real-apply 전용,
   // 로컬/mock은 updatePatient로 처리되어 여기 오지 않는다). UI에서도 1차 차단하나 직접 호출 방어.
   const sourceAnalysisJobIds = opts.analysisJobIds || [];
   if (sourceAnalysisJobIds.length === 0) {
-    const err = new Error('원본 분석 정보(provenance)가 없어 서버 적용을 거부합니다.');
+    const err = new Error('원본 분석 정보(provenance)가 없어 서버 적용을 거부합니다.') as Error & { code?: string };
     err.code = 'EMPTY_PROVENANCE';
     throw err;
   }
@@ -55,7 +81,7 @@ export async function applyVideoFeatureViaServer(patient, opts, env) {
   );
   // 방어: 분석이 검수 대기(review_pending)가 아니면 적용하지 않는다(서버 apply가 409로 거부하기 전 조기 차단).
   if (job.status && job.status !== 'review_pending') {
-    const err = new Error(`분석이 아직 검수 대기 상태가 아닙니다(${JOB_STATUS_LABELS[job.status] || job.status}).`);
+    const err = new Error(`분석이 아직 검수 대기 상태가 아닙니다(${JOB_STATUS_LABELS[job.status] || job.status}).`) as Error & { code?: string };
     err.code = 'JOB_NOT_READY';
     throw err;
   }
@@ -73,7 +99,11 @@ export async function applyVideoFeatureViaServer(patient, opts, env) {
   // 4) apply(영속화) — If-Match 단일 트랜잭션. 서버가 payload 저장·revision+1·audit + source job consumed.
   const hash = computeAppliedInputsHash(job.jobId, appliedInput);
   ensureContinue();
-  return applyVideoAnalysisJob(job.jobId, patient, nextLocal.data, {
+  // patientServerRepository.js(타입 검사 꺼진 JS)는 옵션의 기본값(sourceAnalysisJobIds = [])으로 옵션 타입을 never[]로 좁혀 추론해 겹치는 타입이 없다 — 받는 옵션 모양을 적는다(unknown 경유).
+  return (applyVideoAnalysisJob as unknown as (jobId: string, patient: ServerApplyPatient, computedData: unknown, options: {
+    appliedInputsHash: string; appliedInputsCount: number; sourceAnalysisJobIds: string[]; session: unknown; settings: unknown;
+    leaseToken: string | null;
+  }) => Promise<unknown>)(job.jobId, patient, nextLocal.data, {
     appliedInputsHash: hash, appliedInputsCount: 1, sourceAnalysisJobIds, session, settings,
     leaseToken: getLockToken(patient.id),
   });

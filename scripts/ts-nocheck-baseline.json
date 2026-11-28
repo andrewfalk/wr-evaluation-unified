@@ -35,8 +35,6 @@
   "src/core/services/presetRepository.js",
   "src/core/services/statsRepository.js",
   "src/core/services/videoAnalysisClient.js",
-  "src/core/services/videoAnalysisRun.js",
-  "src/core/services/videoServerApply.js",
   "src/core/services/workspaceRepository.js",
   "src/core/utils/dashboardStats.js",
   "src/core/utils/patientScope.js",
