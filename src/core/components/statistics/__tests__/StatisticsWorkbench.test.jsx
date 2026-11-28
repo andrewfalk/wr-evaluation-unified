@@ -24,7 +24,7 @@ vi.mock('../../../services/statsRepository', () => ({
   cancelStatsRun: (...a) => cancelStatsRun(...a),
 }));
 
-import { StatisticsWorkbench } from '../StatisticsWorkbench.jsx';
+import { StatisticsWorkbench } from '../StatisticsWorkbench';
 import { installDefaultPreview } from '../../../fixtures/statsPreviewFixture';
 
 const SESSION = { apiBaseUrl: 'https://intranet.local', accessToken: 'tok' };

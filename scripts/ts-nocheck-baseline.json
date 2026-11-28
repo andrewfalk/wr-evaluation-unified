@@ -18,7 +18,6 @@
   "src/core/components/charts/SplinePartialEffectChart.jsx",
   "src/core/components/charts/discreteLevels.js",
   "src/core/components/charts/edgeLabels.js",
-  "src/core/components/statistics/StatisticsWorkbench.jsx",
   "src/core/components/statistics/describeStatsError.js",
   "src/core/fixtures/createTestPatients.js",
   "src/core/hooks/useAIAnalysis.js",
