@@ -481,11 +481,15 @@ describe('관리자 콘솔 특성화 ② — 통계 권한', () => {
     fireEvent.click(buttonByText(tabRoot(), '새로 고침'));
     await flush();
     routes.set('GET /api/capabilities/grants', () => ({ body: {} }));
-    routes.set('POST /api/capabilities/grants', () => ({ status: 201, body: { id: 'grant-7' } }));
+    const lateGate = deferred();
+    routes.set('POST /api/capabilities/grants', async () => { await lateGate.promise; return { status: 201, body: { id: 'grant-7' } }; });
     fillForm('user-0002', 'stats.export', '합성 사유 3');
     fireEvent.click(buttonByText(tabRoot(), '부여'));
     await flush();
-    rec.snap('불러오기 실패 뒤 부여 — 오류 칸은 다시 불러오며 지워짐(grants 없는 응답 → 빈 목록)');
+    rec.snap('불러오기 실패 뒤 부여 — 처리 중에는 불러오기 오류 칸이 남음');
+    lateGate.release();
+    await flush();
+    rec.snap('불러오기 실패 뒤 부여 성공 — 오류 칸은 다시 불러오며 지워짐(grants 없는 응답 → 빈 목록)');
 
     expect(routes.unhandled).toEqual([]);
     await expect(goldenJson({ steps: rec.steps })).toMatchFileSnapshot('./__goldens__/admin-capabilities.json');

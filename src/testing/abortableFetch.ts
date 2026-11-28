@@ -41,10 +41,12 @@ export function createAbortableFetch(inner: FetchLike): AbortableFetch {
 
   function fetch(input: string | URL | Request, init: RequestInit = {}): Promise<Response> {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    const signal = init.signal ?? null;
+    const request = typeof input === 'object' && !(input instanceof URL) ? input : null;
+    // fetch와 같이 init이 우선, 없으면 Request 객체의 signal·메서드.
+    const signal = init.signal ?? request?.signal ?? null;
     const sent = !signal?.aborted;
     const call: AbortableCall = {
-      method: (init.method || 'GET').toUpperCase(),
+      method: (init.method || request?.method || 'GET').toUpperCase(),
       url,
       ...(init.body !== undefined && init.body !== null ? { body: parseBody(init.body) } : {}),
       headers: init.headers ?? {},

@@ -45,6 +45,24 @@ describe('createAbortableFetch', () => {
     expect(wrapped.calls[0]).toMatchObject({ sent: false, signal: 'aborted' });
   });
 
+  it('Request 객체로 불러도 그 signal을 따른다(init이 없을 때)', async () => {
+    const { inner, pending } = controllable();
+    const wrapped = createAbortableFetch(inner);
+    const done = new AbortController();
+    done.abort();
+    await expect(wrapped.fetch(new Request('https://x.test/req', { method: 'POST', signal: done.signal })))
+      .rejects.toMatchObject({ name: 'AbortError' });
+    expect(pending).toHaveLength(0);
+    expect(wrapped.calls[0]).toMatchObject({ method: 'POST', sent: false, signal: 'aborted' });
+
+    const live = new AbortController();
+    const promise = wrapped.fetch(new Request('https://x.test/req2', { signal: live.signal }));
+    expect(wrapped.calls[1].signal).toBe('live');
+    live.abort();
+    await expect(promise).rejects.toMatchObject({ name: 'AbortError' });
+    expect(wrapped.calls[1].signal).toBe('aborted');
+  });
+
   it('응답이 온 뒤의 끊김은 무시하고, 안쪽 실패는 그대로 전한다', async () => {
     const { inner, pending } = controllable();
     const wrapped = createAbortableFetch(inner);
