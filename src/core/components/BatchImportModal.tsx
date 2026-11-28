@@ -1,10 +1,11 @@
-// @ts-nocheck
 import { useRef, useState } from 'react';
+import type { RefObject } from 'react';
 import { readFirstSheetRows } from '../utils/xlsxIo';
 import { useAuth } from '../auth/AuthContext';
 import { showAlert, showConfirm } from '../utils/platform';
 import { collectImportDateErrors } from '../utils/batchImportHelpers';
 import { runBatchImport } from '../services/batchImport';
+import type { BatchImportChange, BatchImportStats, ImportPatient } from '../services/batchImport';
 import { loadChunk } from '../utils/loadChunk';
 
 const IMPORT_FIELD_GROUPS = [
@@ -97,19 +98,35 @@ const IMPORT_FIELD_GROUPS = [
   },
 ];
 
+/** collectImportDateErrors(utils/batchImportHelpers.js)가 돌려주는 날짜 오류 한 건. */
+interface ImportDateError {
+  rowIndex: number;
+  rowLabel: number;
+  name: string;
+  field: string;
+  rawValue: string;
+  message: string;
+}
+
+export interface BatchImportModalProps {
+  onClose(): void;
+  onImport(result: { newPatients: ImportPatient[]; changed: BatchImportChange[] }, stats: BatchImportStats): void;
+  existingPatients?: readonly ImportPatient[];
+}
+
 const IMPORT_FIELD_COUNT = IMPORT_FIELD_GROUPS.reduce((sum, group) => sum + group.fields.length, 0);
 
-export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
+export function BatchImportModal({ onClose, onImport, existingPatients = [] }: BatchImportModalProps) {
   const { session } = useAuth();
-  const [file, setFile] = useState(null);
-  const [preview, setPreview] = useState(null);
-  const [columns, setColumns] = useState([]);
+  const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<unknown[][] | null>(null);
+  const [columns, setColumns] = useState<unknown[]>([]);
   const [dragover, setDragover] = useState(false);
   // 미리보기 단계에서 검출한 날짜 오류. 기본적으로 가져오기를 차단하고,
   // 사용자가 명시적으로 확인한 경우에만(allowPartialImport) 정상 행만 반영한다.
-  const [rowErrors, setRowErrors] = useState([]);
+  const [rowErrors, setRowErrors] = useState<ImportDateError[]>([]);
   const [allowPartialImport, setAllowPartialImport] = useState(false);
-  const fileRef = useRef();
+  const fileRef = useRef<HTMLInputElement>();
 
   const errorRowIndexes = new Set(rowErrors.map(e => e.rowIndex));
   const blockedByErrors = rowErrors.length > 0 && !allowPartialImport;
@@ -118,10 +135,10 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
     try {
       const { exportBatchTemplate } = await loadChunk(() => import('../utils/exportService'));
       exportBatchTemplate();
-    } catch (err) { await showAlert(err.message); }
+    } catch (err) { await showAlert((err as Error).message); }
   };
 
-  const handleFile = (selectedFile) => {
+  const handleFile = (selectedFile: File | undefined) => {
     if (!selectedFile) return;
     setFile(selectedFile);
     // 새 파일을 고르면 이전 파일의 오류/부분허용 상태가 남지 않도록 초기화한다.
@@ -131,7 +148,7 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
     const reader = new FileReader();
     reader.onload = event => {
       try {
-        const rows = readFirstSheetRows(event.target.result);
+        const rows = readFirstSheetRows((event.target as FileReader).result);
         if (rows.length > 0) {
           setPreview(rows);
           setColumns(rows[0]);
@@ -140,7 +157,7 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
           setRowErrors(collectImportDateErrors(rows));
         }
       } catch (error) {
-        showAlert(`파일 읽기 오류: ${error.message}`);
+        showAlert(`파일 읽기 오류: ${(error as Error).message}`);
       }
     };
     reader.readAsArrayBuffer(selectedFile);
@@ -202,7 +219,7 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
 
           <div
             className={`import-zone ${dragover ? 'dragover' : ''}`}
-            onClick={() => fileRef.current.click()}
+            onClick={() => (fileRef.current as HTMLInputElement).click()}
             onDragOver={event => { event.preventDefault(); setDragover(true); }}
             onDragLeave={() => setDragover(false)}
             onDrop={event => {
@@ -212,11 +229,11 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
             }}
           >
             <input
-              ref={fileRef}
+              ref={fileRef as RefObject<HTMLInputElement>}
               type="file"
               accept=".xlsx,.xls,.csv"
               style={{ display: 'none' }}
-              onChange={event => handleFile(event.target.files[0])}
+              onChange={event => handleFile((event.target.files as FileList)[0])}
             />
             <p>클릭하거나 파일을 드래그하세요</p>
             <p className="import-zone-note">현재 내보내기 템플릿과 호환되는 헤더를 우선 지원합니다.</p>

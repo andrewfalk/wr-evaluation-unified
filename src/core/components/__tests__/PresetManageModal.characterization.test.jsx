@@ -11,7 +11,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import '../../../modules/knee';
 import '../../../modules/spine';
 import '../../../modules/cervical';
-import { PresetManageModal } from '../PresetManageModal.jsx';
+import { PresetManageModal } from '../PresetManageModal';
 
 afterEach(cleanup);
 
