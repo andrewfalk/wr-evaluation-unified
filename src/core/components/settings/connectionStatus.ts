@@ -3,7 +3,8 @@
 import { isIntranetContext, normalizeBaseUrl } from '../../../platform/dataMode';
 import type { DiagnosticStatus, SettingsDraft, SettingsSession } from './types';
 
-export const DEFAULT_INTRANET_URL = 'https://wr.hospital.local';
+// 기본 인트라넷 주소 — Electron 셸(electron/main.js·preload-intranet.js)의 기본 주소와 같은 값이어야 한다(P2-87, 일치 테스트: settings/__tests__/defaultIntranetUrl.consistency.test.ts).
+export const DEFAULT_INTRANET_URL = 'https://wr.hospital.local:8443';
 
 export function getEffectiveServerUrl({ session, diagnostic, draft }: { session?: SettingsSession | null; diagnostic?: DiagnosticStatus | null; draft?: SettingsDraft } = {}) {
   return normalizeBaseUrl(
