@@ -23,3 +23,53 @@ export interface RecipePreviewState {
   /** 실패한 요청의 분석 목적(오류 문구용). */
   requestPurpose?: string;
 }
+
+/** 모드·목적 전환으로 자동 정리된 변수·필터 안내. */
+export interface RecipeTransitionNotice {
+  removedVariables: string[];
+  removedFilters: StatsFilter[];
+}
+
+export interface RecipePanelProps {
+  catalog: { variables?: CatalogVariable[]; minimumCohort?: number } | null | undefined;
+  grain?: string;
+  supportedGrains?: string[];
+  unsupportedGrains?: Array<{ grain: string }>;
+  onGrainChange?: (grain: string) => void;
+  selectedKeys: string[];
+  onRemoveVariable: (key: string) => void;
+  analysisMode: string;
+  onAnalysisModeChange: (mode: string) => void;
+  modeChangeBlockedNotice: boolean;
+  requestedMethod: string | null;
+  onRequestedMethodChange: (method: string) => void;
+  outcomeKey: string | null;
+  onOutcomeKeyChange: (key: string | null) => void;
+  standardizePredictors?: boolean;
+  onStandardizePredictorsChange?: (value: boolean) => void;
+  interactionTerms?: Array<[string, string]>;
+  onInteractionTermsChange?: (terms: Array<[string, string]>) => void;
+  splineKeys?: string[];
+  onSplineKeysChange?: (keys: string[]) => void;
+  eventLevel?: string;
+  onEventLevelChange?: (level: string) => void;
+  stratifyByKey?: string | null;
+  onStratifyByKeyChange?: (key: string | null) => void;
+  analysisPurpose: string;
+  onAnalysisPurposeChange: (purpose: string) => void;
+  transitionNotice?: RecipeTransitionNotice | null;
+  onDismissTransitionNotice?: () => void;
+  formulaPolicies: Record<string, string>;
+  onFormulaPolicyChange: (family: string, policy: string) => void;
+  filterDraft: StatsFilter[];
+  onFilterDraftChange: (filters: StatsFilter[]) => void;
+  appliedFilters: StatsFilter[];
+  onApplyFilters: () => void;
+  previewState: RecipePreviewState;
+  isPreviewCurrent: boolean;
+  canExecute: boolean;
+  isAnalyzing: boolean;
+  onRunAnalyze: () => void;
+  collapsed: boolean;
+  onToggleCollapse: () => void;
+}

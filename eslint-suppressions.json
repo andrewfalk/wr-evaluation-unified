@@ -44,11 +44,6 @@
       "count": 2
     }
   },
-  "src/core/components/statistics/RecipePanel.tsx": {
-    "react/no-unescaped-entities": {
-      "count": 10
-    }
-  },
   "src/core/components/statistics/StatisticsWorkbench.tsx": {
     "@typescript-eslint/no-unused-vars": {
       "count": 2
