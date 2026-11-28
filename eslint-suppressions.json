@@ -31,7 +31,7 @@
   },
   "src/core/components/VideoAnalysisStep.tsx": {
     "react/no-unescaped-entities": {
-      "count": 4
+      "count": 2
     }
   },
   "src/core/components/charts/CurveChart.jsx": {

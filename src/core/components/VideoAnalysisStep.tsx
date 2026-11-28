@@ -21,15 +21,12 @@ import { isVideoAnalysisSupported, createClip, uploadClip, sampleDetectClip, sel
 import { applyVideoFeatureViaServer } from '../services/videoServerApply';
 import { runServerAnalysis } from '../services/videoAnalysisRun';
 import { useWorkspaceLifetime } from '../../app/useWorkspaceLifetime';
-import { TargetPicker } from './TargetPicker';
 import { SkeletonOverlay } from './SkeletonOverlay';
 import { getModule } from '../moduleRegistry';
 import { resolveAnalysisJobIds, buildAppliedRecipe } from '@wr/contracts/index';
-import { isJobExcludedFromAnalysis } from '@wr/analytics-core/jobScope';
 import type { ReactNode } from 'react';
-import type { SampleDetectResult } from './TargetPicker';
 import type {
-  AppliedInputEntry, EvidenceByFeatureKey, FeatureEvidence, InferenceDevice, ModuleTask, ProcessEvidence, ProcessFeatures,
+  AppliedInputEntry, FeatureEvidence, InferenceDevice, ModuleTask, ProcessEvidence, ProcessFeatures,
   SharedJob, SuppressedCandidate, UploadState, VideoAnalysisData, VideoClip, VideoFeatureMap, VideoProcess,
 } from '../services/videoStepTypes';
 import {
@@ -38,11 +35,13 @@ import {
 } from '../services/videoStepEvidence';
 import { candidateMinutesPerDay, excludeTaskScopeCandidates } from '../services/videoStepCandidates';
 import {
-  VIEWPOINTS, PROFILES, MOCK_BUNDLE, canDetectClip, requestedFeaturesForModules, tasksForJob, resolveTargetTaskId,
+  MOCK_BUNDLE, requestedFeaturesForModules, tasksForJob, resolveTargetTaskId,
   shareTotalsByJob, clearDerived, addProcessVA, editProcessVA, removeProcessVA, addClipVA, editClipVA, removeClipVA, resolveApplyMode,
 } from '../services/videoStepState';
 import { EvidencePanel } from './video/EvidencePanel';
 import { FlatCandidateList } from './video/FlatCandidateList';
+import { SetupColumn } from './video/SetupColumn';
+import type { AnalysisEvidenceState, DetectionState } from './video/types';
 
 // 순수 헬퍼와 타입은 services/videoStep*.ts로(P2-75c), 하위 화면은 video/로(P2-75d) 옮겼다 — 테스트 등이 이 파일에서 가져가므로
 // 지금 이름 그대로 다시 내보낸다.
@@ -66,26 +65,11 @@ export type {
 } from '../services/videoStepTypes';
 
 // ── 이 화면의 상태·props 타입(P2-75b-ts) ──
-interface DetectionState {
-  serverClipId: string;
-  result: SampleDetectResult;
-  selectedId: string | null;
-  clipKey: string | null;
-  frameUrl: string | null;
-}
-
 interface OverlayState {
   loading?: boolean;
   data?: object;
   error?: string;
   closed?: boolean;
-}
-
-interface AnalysisEvidenceState {
-  jobEvidenceBySharedJobId: Record<string, EvidenceByFeatureKey>;
-  processEvidenceByProcessId: Record<string, EvidenceByFeatureKey>;
-  suppressedCandidates: SuppressedCandidate[];
-  deviceByProcessId: Record<string, InferenceDevice>;
 }
 
 type SourceRecipe = Parameters<typeof buildAppliedRecipe>[0][number];
@@ -729,128 +713,14 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
 
         <div className="va-layout">
           {/* 왼쪽: 공정·클립 셋업 */}
-          <div className="va-col">
-            <div className="va-col-title">셋업 — 공정·클립</div>
-            {va.processes.length === 0 && <p className="evaluation-empty-state">공정을 추가하세요. 공정 구조·시간 점유율은 조사 서류 기반 수기 입력입니다.</p>}
-            {va.processes.map((p) => {
-              const clips = va.clips.filter((c) => c.processId === p.id);
-              const total = shareTotals[p.sharedJobId] || 0;
-              return (
-                <div key={p.id} className="va-process-card">
-                  <div className="va-process-fields">
-                    <div className="form-group va-pf-job"><label>직업</label>
-                      <select value={p.sharedJobId} onChange={(e) => editProcess(p.id, { sharedJobId: e.target.value })}>
-                        {jobs.map((j) => <option key={j.id} value={j.id}>{`${j.jobName || '(직업 미지정)'}${isJobExcludedFromAnalysis(j) ? ' (신체부담평가 미포함)' : ''}`}</option>)}
-                      </select></div>
-                    <div className="form-group va-pf-name"><label>공정명</label>
-                      <input value={p.name} onChange={(e) => editProcess(p.id, { name: e.target.value })} placeholder="공정명" /></div>
-                    {/* 점유율·활동시간은 한 묶음 — 폭이 좁아 한 줄에 안 들어가면 묶음째 다음 줄로 넘어간다. */}
-                    <div className="va-pf-pair">
-                      <div className="form-group va-pf-share"><label>점유율(%)</label>
-                        <input type="number" min="0" max="100" value={p.shiftSharePercent}
-                          onChange={(e) => editProcess(p.id, { shiftSharePercent: Number(e.target.value) })} /></div>
-                      <div className="form-group va-pf-active"><label title="공정활동분/일(수기). 비우면 모름(적용 불가).">활동시간(분/일)</label>
-                        <input type="number" min="0" max="1440" placeholder="분/일" value={p.activeMinutesPerDay ?? ''}
-                          onChange={(e) => editProcess(p.id, { activeMinutesPerDay: e.target.value === '' ? null : Number(e.target.value) })} /></div>
-                    </div>
-                    <div className="form-group va-pf-profile"><label>분석 프로필</label>
-                      {/* 손목·손(고프레임)은 wholebody 추론이 무거워(처리 느림·서버 부하) 손목 모듈 활성 시에만 노출.
-                          단, 이미 그 프로필로 저장된 공정은 폴백으로 옵션 유지(선택 보존). 6.0-10. */}
-                      <select value={p.analysisProfile} onChange={(e) => editProcess(p.id, { analysisProfile: e.target.value })}>
-                        {PROFILES.filter((pr) => pr.value !== 'hand-wrist'
-                          || activeModules.includes('wrist') || p.analysisProfile === 'hand-wrist')
-                          .map((pr) => <option key={pr.value} value={pr.value}>{pr.label}</option>)}
-                      </select></div>
-                    <div className="va-pf-rest">
-                      <div className="va-pf-desc">
-                        {PROFILES.find((pr) => pr.value === p.analysisProfile)?.desc}
-                        {p.analysisProfile === 'hand-wrist' && (
-                          <div className="va-pf-warn">고부담(처리 느림·서버 부하) — 손목·손 분석이 필요한 공정에만 사용</div>
-                        )}
-                      </div>
-                      <button type="button" className="btn btn-secondary btn-sm va-pf-del" onClick={() => removeProcess(p.id)}>공정 삭제</button>
-                    </div>
-                  </div>
-                  {/* 6.0-12: 실제 실행된 추론 디바이스 배지(분석 후). auto에서 cuda→cpu 폴백 시 사유 tooltip. */}
-                  {(() => {
-                    const dev = analysisEvidence.deviceByProcessId[p.id];
-                    if (!dev) return null;
-                    const label = dev.used === 'cuda' ? 'GPU(CUDA)' : (dev.fallback ? 'CPU(폴백)' : 'CPU');
-                    return (
-                      <p className="muted" style={{ fontSize: 11, marginTop: 4 }} title={dev.reason || ''}>
-                        실행: <b>{label}</b>
-                      </p>
-                    );
-                  })()}
-                  {total !== 100 && <p className="muted" style={{ color: 'var(--color-warning)', marginTop: 6 }}>⚠ "{jobName(p.sharedJobId)}" 공정 점유율 합 {total}% (100% 권장)</p>}
-                  <div className="va-process-clips">
-                    {clips.map((c) => {
-                      const up = uploads[c.id];
-                      const canDetect = canDetectClip({ serverMode, fixtureMode, clip: c, upload: up });
-                      const det = canDetect ? validDetection(c) : null;
-                      return (
-                        <div key={c.id} className="va-clip-row">
-                          <select value={c.viewpoint} onChange={(e) => editClip(c.id, { viewpoint: e.target.value })}>
-                            {VIEWPOINTS.map((vp) => <option key={vp.value} value={vp.value}>{vp.label}</option>)}
-                          </select>
-                          {fixtureMode && (
-                            <input type="text" placeholder="시험용 영상 파일명" value={c.fixtureClipName || ''}
-                              onChange={(e) => editClip(c.id, { fixtureClipName: e.target.value })} style={{ width: 150 }} />
-                          )}
-                          {serverMode && !c.fixtureClipName && (
-                            <>
-                              <input type="file" accept="video/*" disabled={up?.status === 'uploading'}
-                                onChange={(e) => uploadClipFile(c, p.id, e.target.files && e.target.files[0])} />
-                              {up?.status === 'uploading' && <span className="muted" style={{ fontSize: 12 }}>업로드 {Math.round((up.progress || 0) * 100)}%</span>}
-                              {up?.status === 'done' && <span className="va-flag-pill tone-positive">업로드 완료</span>}
-                              {up?.status === 'error' && <span className="va-flag-pill tone-warning">업로드 실패</span>}
-                            </>
-                          )}
-                          {canDetect && (
-                            <button type="button" className="btn btn-secondary btn-sm" disabled={detecting === c.id} onClick={() => detectTarget(c, p.id)}>
-                              {detecting === c.id ? '탐지 중…' : (det ? '재탐지' : '대상자 탐지')}
-                            </button>
-                          )}
-                          <button type="button" className="btn btn-secondary btn-xs" onClick={() => removeClip(c.id)}>×</button>
-                          {det && (
-                            <div className="va-clip-detect">
-                              <TargetPicker result={det.result} selectedId={det.selectedId} frameUrl={det.frameUrl} onSelect={(id: string) => chooseTarget(c, id)} />
-                              <p className="muted" style={{ fontSize: 12 }}>
-                                {det.selectedId ? `대상자: ${det.selectedId}` : '박스를 클릭해 대상 작업자를 선택하세요(미선택 시 자동=주요 인물).'}
-                              </p>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                    <div>
-                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => addClip(p.id)}>+ 클립</button>
-                      {clips.length === 0 && <span className="muted"> 클립(시점) 미태깅</span>}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-              <button type="button" className="btn btn-secondary btn-sm" onClick={addProcess}>+ 공정 추가</button>
-              <button type="button" className="btn btn-primary" onClick={runAnalysis} disabled={va.processes.length === 0 || analyzing}>
-                {analyzing ? '분석 중…' : (serverMode ? '영상 분석 실행' : '예시 분석 실행')}
-              </button>
-            </div>
-
-            {/* 파이프라인 진행바(coarse) */}
-            <div className="va-pipeline">
-              {PIPELINE_STEPS.map((label, i) => {
-                const done = i < pipelineIndex;
-                const active = i === pipelineIndex;
-                return (
-                  <span key={label} className={`va-pipeline-step${done ? ' is-done' : ''}${active ? ' is-active' : ''}`}>
-                    {done ? '✓ ' : (active ? '▶ ' : '')}{label}
-                  </span>
-                );
-              })}
-            </div>
-          </div>
+          <SetupColumn
+            va={va} jobs={jobs} activeModules={activeModules} shareTotals={shareTotals} analysisEvidence={analysisEvidence}
+            jobName={jobName} uploads={uploads} serverMode={serverMode} fixtureMode={fixtureMode} detecting={detecting}
+            analyzing={analyzing} pipelineSteps={PIPELINE_STEPS} pipelineIndex={pipelineIndex} validDetection={validDetection}
+            addProcess={addProcess} editProcess={editProcess} removeProcess={removeProcess} addClip={addClip} editClip={editClip}
+            removeClip={removeClip} uploadClipFile={uploadClipFile} detectTarget={detectTarget} chooseTarget={chooseTarget}
+            runAnalysis={runAnalysis}
+          />
 
           {/* 오른쪽: 제안 검토 */}
           <div className="va-col va-review-col">
