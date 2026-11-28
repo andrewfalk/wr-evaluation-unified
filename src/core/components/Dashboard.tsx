@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { computeDashboardStats, getDoctorPatientCounts, getDoctorOptionsFromRoster, UNASSIGNED_GROUP_KEY } from '../utils/dashboardStats';
-import { getAllModules } from '../moduleRegistry';
+import { getAllModules, getModule } from '../moduleRegistry';
 import { isMyPatient, getOwnerGroupKey } from '../utils/patientOwnership';
 import { isRedactedPatientRecord } from '../services/patientRecords';
 import { isPatientComplete } from '../utils/patientCompletion';
@@ -15,9 +15,6 @@ import { StackedBarChart } from './dashboard/StackedBarChart';
 import type { StackedBarDatum } from './dashboard/StackedBarChart';
 import { Top5List } from './dashboard/Top5List';
 import type { Top5Item } from './dashboard/Top5List';
-const MODULE_LABELS: Record<string, string> = { knee: '무릎', spine: '허리', shoulder: '어깨', elbow: '팔꿈치', wrist: '손목', cervical: '목' };
-const MODULE_COLORS: Record<string, string> = { knee: 'var(--accent)', spine: '#f59e0b', shoulder: 'var(--color-safe)', elbow: '#8b5cf6', wrist: '#ec4899', cervical: '#06b6d4' };
-
 interface DashboardSessionUser {
   id?: string;
   role?: string;
@@ -271,10 +268,10 @@ const Dashboard = ({
             <div className="stat-module-grid">
               {allModules.map(m => (
                 <div className="stat-module-cell" key={m.id}>
-                  <div className="stat-module-label">{MODULE_LABELS[m.id] || m.name}</div>
+                  <div className="stat-module-label">{m.shortName || m.name}</div>
                   <div
                     className="stat-module-value stat-module-value-tip"
-                    style={{ color: MODULE_COLORS[m.id] || 'var(--accent)' }}
+                    style={{ color: m.color || 'var(--accent)' }}
                   >
                     {stats.moduleUsage[m.id] || 0}
                     <div className="module-usage-tooltip">
@@ -493,7 +490,7 @@ const Dashboard = ({
                     <td>{item.totalDiagnoses}</td>
                     <td style={{ color: 'var(--color-safe)' }}>{item.highCount}</td>
                     <td style={{ color: '#f59e0b' }}>{item.lowCount}</td>
-                    <td>{item.moduleIds.map(id => MODULE_LABELS[id] || id).join(', ') || '-'}</td>
+                    <td>{item.moduleIds.map(id => getModule(id)?.shortName || id).join(', ') || '-'}</td>
                     <td>
                       <span className={`dashboard-status ${item.status === '완료' ? 'complete' : 'in-progress'}`}>
                         {item.status}

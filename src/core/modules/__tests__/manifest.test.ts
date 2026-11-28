@@ -24,12 +24,12 @@ describe('validateManifest', () => {
     expect(validateManifest(validManifest())).toEqual([]);
   });
 
-  it('필수 키는 9개이고 허용 키는 필수 9 + 선택 6이다', () => {
+  it('필수 키는 9개이고 허용 키는 필수 9 + 선택 8이다', () => {
     expect([...REQUIRED_MANIFEST_KEYS]).toEqual([
       'id', 'name', 'icon', 'description', 'EvaluationComponent', 'createModuleData', 'computeCalc', 'isComplete', 'tabs',
     ]);
     expect([...MANIFEST_KEYS].slice(9)).toEqual([
-      'presetConfig', 'batchImportConfig', 'videoMappingConfig', 'devFixtures', 'batchExport', 'narrative',
+      'presetConfig', 'batchImportConfig', 'videoMappingConfig', 'devFixtures', 'batchExport', 'narrative', 'shortName', 'color',
     ]);
   });
 
@@ -67,6 +67,19 @@ describe('validateManifest', () => {
       'tabs는 비어 있지 않은 배열이어야 합니다',
     ]);
     expect(validateManifest(validManifest({ tabs: [{ id: 'a' }] }))).toEqual(['tabs[0]는 { id, label } 문자열 객체여야 합니다']);
+  });
+
+  it('선택 키 shortName·color(P2-85b, 대시보드 표시)는 문자열이면 받고 아니면 거부한다', () => {
+    expect(validateManifest(validManifest({ shortName: '데', color: 'var(--accent)' }))).toEqual([]);
+    expect(validateManifest(validManifest({ shortName: '', color: '#000000' }))).toEqual([]);
+    expect(validateManifest(validManifest({ shortName: 1, color: null }))).toEqual([
+      'shortName은 문자열이어야 합니다',
+      'color는 문자열이어야 합니다',
+    ]);
+    expect(validateManifest(validManifest({ shortName: ['데'], color: { r: 0 } }))).toEqual([
+      'shortName은 문자열이어야 합니다',
+      'color는 문자열이어야 합니다',
+    ]);
   });
 
   it('memo·lazy·forwardRef 객체 컴포넌트는 받고, JSX 요소·가짜 태그는 막는다', () => {

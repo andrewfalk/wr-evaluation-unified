@@ -98,6 +98,9 @@ registerModule({
   name: '손목/손가락',
   icon: '✋',
   description: '손목 및 손가락 질환 공통 노출 평가',
+  // 대시보드의 짧은 이름·색(P2-85b — 예전 Dashboard의 MODULE_LABELS·MODULE_COLORS 값 그대로).
+  shortName: '손목',
+  color: '#ec4899',
   EvaluationComponent: WristEvaluation as ComponentType<ModuleEvaluationProps>,
   createModuleData: createWristModuleData,
   computeCalc: computeWristCalc,

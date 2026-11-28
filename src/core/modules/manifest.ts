@@ -144,13 +144,17 @@ export interface ModuleManifest {
   devFixtures?: ModuleDevFixtures;
   batchExport?: BatchExportConfig;
   narrative?: ModuleNarrative;
+  /** 짧은 표시 이름(대시보드 모듈 칸·최근 활동 표). 없으면 name을 쓴다. */
+  shortName?: string;
+  /** 대시보드 모듈 칸의 숫자 색(CSS 색 값). 없으면 var(--accent). */
+  color?: string;
 }
 
 export const REQUIRED_MANIFEST_KEYS = [
   'id', 'name', 'icon', 'description', 'EvaluationComponent', 'createModuleData', 'computeCalc', 'isComplete', 'tabs',
 ] as const;
 export const OPTIONAL_MANIFEST_KEYS = [
-  'presetConfig', 'batchImportConfig', 'videoMappingConfig', 'devFixtures', 'batchExport', 'narrative',
+  'presetConfig', 'batchImportConfig', 'videoMappingConfig', 'devFixtures', 'batchExport', 'narrative', 'shortName', 'color',
 ] as const;
 export const MANIFEST_KEYS: readonly string[] = [...REQUIRED_MANIFEST_KEYS, ...OPTIONAL_MANIFEST_KEYS];
 
@@ -337,11 +341,13 @@ export function validateManifest(manifest: unknown): string[] {
   }
   for (const key of unknownKeys(manifest, MANIFEST_KEYS)) problems.push(`모르는 키 '${key}'`);
 
-  const { id, name, icon, description, EvaluationComponent, tabs } = manifest;
+  const { id, name, icon, description, EvaluationComponent, tabs, shortName, color } = manifest;
   if (id !== undefined && !isNonEmptyString(id)) problems.push('id는 빈 문자열이 아닌 문자열이어야 합니다');
   if (name !== undefined && !isNonEmptyString(name)) problems.push('name은 빈 문자열이 아닌 문자열이어야 합니다');
   if (icon !== undefined && typeof icon !== 'string') problems.push('icon은 문자열이어야 합니다');
   if (description !== undefined && typeof description !== 'string') problems.push('description은 문자열이어야 합니다');
+  if (shortName !== undefined && typeof shortName !== 'string') problems.push('shortName은 문자열이어야 합니다');
+  if (color !== undefined && typeof color !== 'string') problems.push('color는 문자열이어야 합니다');
   if (EvaluationComponent !== undefined && !isComponent(EvaluationComponent)) {
     problems.push('EvaluationComponent는 React 컴포넌트여야 합니다');
   }

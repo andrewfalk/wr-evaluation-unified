@@ -118,6 +118,8 @@ registerModule({
   id: 'knee',
   name: '무릎 (슬관절)',
   icon: '🦵',
+  shortName: '무릎',       // (선택) 대시보드 모듈 칸·최근 활동 표의 짧은 이름 — 없으면 name
+  color: 'var(--accent)', // (선택) 대시보드 모듈 칸의 숫자 색(CSS 색 값) — 없으면 var(--accent)
   EvaluationComponent,    // 메인 UI 컴포넌트
   createModuleData,       // 초기 데이터 팩토리
   computeCalc,            // 계산/점수 산출 함수

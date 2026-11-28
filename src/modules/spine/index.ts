@@ -34,6 +34,9 @@ registerModule({
   name: '요추(허리)',
   icon: '\u2695\uFE0F',
   description: 'MDDM 요추 압박력 및 BK2110 전신진동 평가',
+  // 대시보드의 짧은 이름·색(P2-85b — 예전 Dashboard의 MODULE_LABELS·MODULE_COLORS 값 그대로).
+  shortName: '허리',
+  color: '#f59e0b',
   EvaluationComponent: SpineEvaluation as ComponentType<ModuleEvaluationProps>,
   createModuleData: createSpineModuleData,
   computeCalc: computeSpineCalc,
