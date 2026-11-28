@@ -6,7 +6,7 @@ vi.mock('../httpClient', () => ({ requestJson: vi.fn(), requestBlob: vi.fn() }))
 
 import { requestJson } from '../httpClient';
 import { pollJob } from '../videoAnalysisClient.js';
-import { runServerAnalysis } from '../videoAnalysisRun.js';
+import { runServerAnalysis } from '../videoAnalysisRun';
 
 const intranet = { session: { mode: 'intranet', apiBaseUrl: 'https://srv' }, settings: {} };
 

@@ -7,7 +7,7 @@ vi.mock('../videoProvenance', () => ({ applyFeatureToModule: vi.fn() }));
 import { createClip, createJob } from '../videoAnalysisClient';
 import { applyVideoAnalysisJob } from '../patientServerRepository';
 import { applyFeatureToModule } from '../videoProvenance';
-import { applyVideoFeatureViaServer, computeAppliedInputsHash } from '../videoServerApply.js';
+import { applyVideoFeatureViaServer, computeAppliedInputsHash } from '../videoServerApply';
 import { setLockToken, clearAllLockTokens } from '../lockTokenStore.js';
 
 const patient = { id: 'local-1', sync: { serverId: 'srv-1', revision: 2, syncStatus: 'synced' } };

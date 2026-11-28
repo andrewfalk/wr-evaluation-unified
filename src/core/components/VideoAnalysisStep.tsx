@@ -397,7 +397,7 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
     setApplyError('');
     try {
       const serverPatient = await applyVideoFeatureViaServer(
-        activePatient as object,
+        activePatient as Parameters<typeof applyVideoFeatureViaServer>[0],
         { moduleId, ctx, featureKey: s.featureKey, suggestedValue: s.suggestedValue, confidence: s.confidence, processIds: processIds || [], analysisJobIds, analysisBundleVersion: bundleForApply, recipe: appliedRecipe, editReason, analysisProfile },
         { session, settings, appliedBy, shouldContinue: isAlive }
       );

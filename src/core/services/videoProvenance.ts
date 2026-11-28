@@ -4,9 +4,57 @@
 // 모듈별 write/coerce는 각 모듈 videoMappingConfig가 제공(jobExtras vs tasks, String vs number).
 import { getModule } from '../moduleRegistry';
 import { VIDEO_FEATURE_TARGETS } from '@wr/contracts/index';
+import type { AnalysisRecipe, FeatureKey, FeatureMappingTarget } from '@wr/contracts/index';
+import type { AppliedInputEntry, VideoFeatureMap, VideoFeatureValue } from './videoStepTypes';
 
-const cloneVideoAnalysis = (patient) => {
-  const va = patient.data.shared.videoAnalysis || {};
+// ── 타입(P2-75g-ts) — 이 파일이 읽고 쓰는 필드만 적는다. 실행 코드는 그대로다. ──
+/** 적용·되돌리기가 만지는 환자 모양(data.shared.videoAnalysis·data.modules). */
+export interface ProvenancePatient {
+  data: {
+    shared: { videoAnalysis?: { appliedInputs?: AppliedInputEntry[]; candidateFeatures?: unknown[] } };
+    modules: Record<string, unknown>;
+  };
+}
+
+export interface ModuleSuggestion {
+  featureKey: string;
+  targetField: string | null;
+  unit: FeatureMappingTarget['unit'];
+  suggestedValue: VideoFeatureValue['value'];
+  confidence: number;
+  autoSuggestAllowed: boolean | undefined;
+  requiresManualReview: boolean | undefined;
+  mode: FeatureMappingTarget['mode'];
+}
+
+export interface ModuleCandidate {
+  featureKey: string;
+  value: VideoFeatureValue['value'];
+  reason: string | undefined;
+  confidence: number;
+}
+
+export type CollectedCandidate = VideoFeatureValue & { featureKey: string; processIds: string[]; clipIds: string[] };
+
+export interface ApplyFeatureOptions {
+  moduleId: string;
+  /** { sharedJobId } (job-scope) | { taskId } (task-scope) — 모듈의 writeField가 읽는다. */
+  ctx: unknown;
+  featureKey: string;
+  appliedValue?: unknown;
+  suggestedValue?: unknown;
+  confidence?: number;
+  analysisBundleVersion?: string;
+  recipe?: AnalysisRecipe | null;
+  appliedBy?: string;
+  processIds?: string[];
+  clipIds?: string[];
+  analysisJobIds?: string[];
+  editReason?: string;
+}
+
+const cloneVideoAnalysis = (patient: ProvenancePatient) => {
+  const va = (patient.data.shared.videoAnalysis || {}) as NonNullable<ProvenancePatient['data']['shared']['videoAnalysis']>;
   return {
     ...va,
     appliedInputs: [...(va.appliedInputs || [])],
@@ -14,7 +62,7 @@ const cloneVideoAnalysis = (patient) => {
   };
 };
 
-const withModuleData = (patient, moduleId, moduleData) => ({
+const withModuleData = (patient: ProvenancePatient, moduleId: string, moduleData: unknown): ProvenancePatient => ({
   ...patient,
   data: {
     ...patient.data,
@@ -22,7 +70,7 @@ const withModuleData = (patient, moduleId, moduleData) => ({
   },
 });
 
-const withVideoAnalysis = (patient, videoAnalysis) => ({
+const withVideoAnalysis = (patient: ProvenancePatient, videoAnalysis: ReturnType<typeof cloneVideoAnalysis>): ProvenancePatient => ({
   ...patient,
   data: { ...patient.data, shared: { ...patient.data.shared, videoAnalysis } },
 });
@@ -32,10 +80,10 @@ const withVideoAnalysis = (patient, videoAnalysis) => ({
  * 모듈/필드/단위는 VIDEO_FEATURE_TARGETS(계약)이 단일 진실.
  * @returns {Array<{featureKey,targetField,unit,suggestedValue,confidence,autoSuggestAllowed,requiresManualReview,mode}>}
  */
-export function getModuleSuggestions(featureMap, moduleId) {
-  const suggestions = [];
+export function getModuleSuggestions(featureMap: VideoFeatureMap | null | undefined, moduleId: string): ModuleSuggestion[] {
+  const suggestions: ModuleSuggestion[] = [];
   for (const [featureKey, fv] of Object.entries(featureMap || {})) {
-    const target = VIDEO_FEATURE_TARGETS[featureKey];
+    const target = VIDEO_FEATURE_TARGETS[featureKey as FeatureKey];
     if (!target || target.moduleId !== moduleId) continue;
     if (target.mode === 'candidate') continue; // 모듈 필드 미기입 — candidateFeatures로만
     suggestions.push({
@@ -59,10 +107,10 @@ export function getModuleSuggestions(featureMap, moduleId) {
  * featureKey로 분기(필요 시 evidence.intrinsicUnit/intrinsicMetric 참조).
  * @returns {Array<{featureKey,value,reason,confidence}>}
  */
-export function getModuleCandidates(featureMap, moduleId) {
-  const out = [];
+export function getModuleCandidates(featureMap: VideoFeatureMap | null | undefined, moduleId: string): ModuleCandidate[] {
+  const out: ModuleCandidate[] = [];
   for (const [featureKey, fv] of Object.entries(featureMap || {})) {
-    const target = VIDEO_FEATURE_TARGETS[featureKey];
+    const target = VIDEO_FEATURE_TARGETS[featureKey as FeatureKey];
     // 계약상 candidate-mode + 실제 값도 candidate kind일 때만(malformed/구캐시 오표시 방어, collectCandidateFeatures와 정합).
     if (!target || target.moduleId !== moduleId || target.mode !== 'candidate' || fv.kind !== 'candidate') continue;
     out.push({ featureKey, value: fv.value, reason: fv.reason, confidence: fv.confidence });
@@ -73,8 +121,11 @@ export function getModuleCandidates(featureMap, moduleId) {
 /**
  * candidate-mode feature들을 candidateFeatures 엔트리로 추출(모듈 필드에 쓰지 않음).
  */
-export function collectCandidateFeatures(featureMap, { processIds = [], clipIds = [] } = {}) {
-  const out = [];
+export function collectCandidateFeatures(
+  featureMap: VideoFeatureMap | null | undefined,
+  { processIds = [], clipIds = [] }: { processIds?: string[]; clipIds?: string[] } = {},
+): CollectedCandidate[] {
+  const out: CollectedCandidate[] = [];
   for (const [featureKey, fv] of Object.entries(featureMap || {})) {
     if (fv.kind !== 'candidate') continue;
     out.push({ ...fv, featureKey, processIds, clipIds });
@@ -87,7 +138,7 @@ export function collectCandidateFeatures(featureMap, { processIds = [], clipIds 
  * 모듈 필드에는 원자값만 기입(모듈별 coerce). 환자 객체를 새로 만들어 반환(불변).
  * @returns {{patient: object, appliedInput: object}}
  */
-export function applyFeatureToModule(patient, {
+export function applyFeatureToModule(patient: ProvenancePatient, {
   moduleId,
   ctx,            // { sharedJobId } (job-scope) | { taskId } (task-scope)
   featureKey,
@@ -101,13 +152,13 @@ export function applyFeatureToModule(patient, {
   clipIds = [],
   analysisJobIds = [],   // 이 제안을 만든 원본 분석 job id(서버 실분석 시). 추론 출처 추적(PR D1).
   editReason,
-}) {
+}: ApplyFeatureOptions): { patient: ProvenancePatient; appliedInput: AppliedInputEntry } {
   const mod = getModule(moduleId);
   const cfg = mod?.videoMappingConfig;
   if (!cfg?.writeField) {
     throw new Error(`module '${moduleId}' has no videoMappingConfig.writeField`);
   }
-  const target = VIDEO_FEATURE_TARGETS[featureKey];
+  const target = VIDEO_FEATURE_TARGETS[featureKey as FeatureKey];
   if (!target || target.moduleId !== moduleId) {
     throw new Error(`featureKey '${featureKey}' does not map to module '${moduleId}'`);
   }
@@ -156,7 +207,7 @@ export function applyFeatureToModule(patient, {
  * @param {object} patient
  * @param {object|number} ref - appliedInput 엔트리 객체 또는 index
  */
-export function rollbackAppliedInput(patient, ref) {
+export function rollbackAppliedInput(patient: ProvenancePatient, ref: AppliedInputEntry | number): ProvenancePatient {
   const list = patient.data.shared.videoAnalysis?.appliedInputs || [];
   const index = typeof ref === 'number' ? ref : list.indexOf(ref);
   if (index < 0 || index >= list.length) return patient;
@@ -185,7 +236,7 @@ export function rollbackAppliedInput(patient, ref) {
 
 // targetPath에서 ctx(sharedJobId/taskId) 복원. 형식:
 //  modules.<m>.jobExtras[sharedJobId=<id>].<field>  |  modules.<m>.tasks[id=<id>].<field>
-function ctxFromTargetPath(entry) {
+function ctxFromTargetPath(entry: AppliedInputEntry) {
   const jm = /jobExtras\[sharedJobId=([^\]]+)\]/.exec(entry.targetPath);
   if (jm) return { sharedJobId: jm[1] };
   const tm = /tasks\[id=([^\]]+)\]/.exec(entry.targetPath);
@@ -194,7 +245,7 @@ function ctxFromTargetPath(entry) {
 }
 
 // targetPath의 마지막 필드명 → featureKey 역매핑(VIDEO_FEATURE_TARGETS).
-function featureKeyFromTargetPath(entry) {
+function featureKeyFromTargetPath(entry: AppliedInputEntry): string | null {
   const field = entry.targetPath.split('.').pop();
   const found = Object.entries(VIDEO_FEATURE_TARGETS).find(
     ([, t]) => t.moduleId === entry.moduleId && t.targetField === field

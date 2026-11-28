@@ -4,6 +4,7 @@ import type { Dispatch, ReactNode, SetStateAction } from 'react';
 import type { buildAppliedRecipe } from '@wr/contracts/index';
 import type { getModuleCandidates, getModuleSuggestions } from '../../services/videoProvenance';
 import type { SampleDetectResult } from '../TargetPicker';
+import type { RunServerAnalysisOptions } from '../../services/videoAnalysisRun';
 import type {
   EvidenceByFeatureKey, FeatureEvidence, InferenceDevice, ModuleTask, ProcessEvidence, ProcessFeatures, SharedJob, SuppressedCandidate,
   UploadState, VideoAnalysisData, VideoClip, VideoProcess,
@@ -89,7 +90,7 @@ export interface SharedData {
 
 export interface PatientData {
   shared: SharedData & { videoAnalysis: VideoAnalysisData };
-  modules?: Record<string, { tasks?: ModuleTask[] } | undefined>;
+  modules: Record<string, { tasks?: ModuleTask[] } | undefined>;
   [key: string]: unknown;
 }
 
@@ -108,7 +109,7 @@ export interface VideoAnalysisStepProps {
   session?: { user?: { name?: string } } | null;
   settings?: unknown;
   fixtureMode?: boolean;
-  serverConfig?: unknown;
+  serverConfig?: RunServerAnalysisOptions['serverConfig'];
   onServerApplied?: (serverPatient: unknown) => void;
 }
 

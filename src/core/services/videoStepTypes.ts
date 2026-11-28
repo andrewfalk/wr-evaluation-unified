@@ -25,8 +25,11 @@ export interface VideoFeatureValue {
   kind?: string;
   value?: FeatureScalar;
   unit?: string | null;
-  confidence?: number;
+  /** 0~1(계약 VideoFeatureValueSchema에서 필수). */
+  confidence: number;
   reason?: string;
+  autoSuggestAllowed?: boolean;
+  requiresManualReview?: boolean;
 }
 
 export type VideoFeatureMap = Record<string, VideoFeatureValue>;
@@ -52,6 +55,7 @@ export interface CandidateFeature {
 }
 
 export interface AppliedInputEntry {
+  moduleId: string;
   targetPath: string;
   appliedValue: unknown;
   previousValue: unknown;
@@ -118,7 +122,7 @@ export interface SuppressedCandidate {
 export interface InferenceDevice {
   used?: string;
   fallback?: boolean;
-  reason?: string;
+  reason?: string | null;
 }
 
 export interface ProcessEvidence {
@@ -126,7 +130,7 @@ export interface ProcessEvidence {
   analysisJobIds?: string[];
   evidenceByFeatureKey?: Record<string, ContributionEvidence>;
   suppressedCandidates?: SuppressedCandidate[];
-  inferenceDevice?: InferenceDevice;
+  inferenceDevice?: InferenceDevice | null;
 }
 
 export interface SourceJob {
