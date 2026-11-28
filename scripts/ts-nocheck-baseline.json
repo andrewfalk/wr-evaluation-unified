@@ -2,7 +2,6 @@
   "src/core/auth/AuthContext.jsx",
   "src/core/auth/authChannel.js",
   "src/core/components/AIAnalysisPanel.jsx",
-  "src/core/components/AdminConsoleModal.jsx",
   "src/core/components/AssessmentTab.jsx",
   "src/core/components/ChangePasswordModal.jsx",
   "src/core/components/DiagnosisForm.jsx",

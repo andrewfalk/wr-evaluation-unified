@@ -9,7 +9,7 @@ vi.mock('../../services/httpClient', () => ({
 }));
 
 import { requestJson } from '../../services/httpClient';
-import { AdminConsoleModal } from '../AdminConsoleModal.jsx';
+import { AdminConsoleModal } from '../AdminConsoleModal';
 import { emrAuditNote, devicesPerPc, deviceActionErrorMessage, EMR_AUDIT_FLAG_LABELS } from '../adminAuditNotes';
 
 const SESSION = { mode: 'intranet', apiBaseUrl: 'https://srv', user: { id: 'admin-1', role: 'admin', organizationId: 'org-1' } };

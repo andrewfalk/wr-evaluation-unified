@@ -1,13 +1,24 @@
-// @ts-nocheck
 import { useEffect, useRef, useState } from 'react';
 import { requestJson } from '../services/httpClient';
 import { resolveApiBaseUrl } from '../../platform/dataMode';
 import { deviceActionErrorMessage, devicesPerPc, emrAuditNote } from './adminAuditNotes';
 
+// 서버 응답·세션 타입은 이 화면이 읽는 필드만 적는다(런타임 검증 없음 — 요청 클라이언트 shim의 반환이 any라 주석으로 받는다).
+type AdminSession = {
+  mode?: string | null;
+  apiBaseUrl?: string | null;
+  user?: { id?: string | null; organizationId?: string | null; [field: string]: unknown } | null;
+  [field: string]: unknown;
+} | null | undefined;
+
+interface TabProps {
+  session: AdminSession;
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 // Mirrors server checkPasswordPolicy in auth/passwordPolicy.ts
-function validatePassword(pw) {
+function validatePassword(pw: string): string | null {
   if (!pw || pw.length < 10) return '비밀번호는 10자 이상이어야 합니다.';
   if (!/[a-zA-Z가-힣]/.test(pw)) return '비밀번호에 문자(영문 또는 한글)가 포함되어야 합니다.';
   if (!/\d/.test(pw)) return '비밀번호에 숫자가 포함되어야 합니다.';
@@ -15,25 +26,25 @@ function validatePassword(pw) {
   return null;
 }
 
-function fmt(value) {
+function fmt(value: string | null | undefined): string {
   if (!value) return '-';
   try { return new Date(value).toLocaleString('ko-KR'); } catch { return String(value); }
 }
 
-function StatusBadge({ status }) {
-  const map = { active: ['connected', '활성'], pending: ['checking', '대기'], revoked: ['fallback', '취소됨'] };
+function StatusBadge({ status }: { status: string }) {
+  const map: Record<string, [string, string]> = { active: ['connected', '활성'], pending: ['checking', '대기'], revoked: ['fallback', '취소됨'] };
   const [tone, label] = map[status] ?? ['local', status];
   return <span className={`admin-badge admin-badge--${tone}`}>{label}</span>;
 }
 
-function RoleBadge({ role }) {
-  const label = { admin: '관리자', doctor: '의사', nurse: '간호사', staff: '직원' }[role] ?? role;
+function RoleBadge({ role }: { role: string }) {
+  const label = ({ admin: '관리자', doctor: '의사', nurse: '간호사', staff: '직원' } as Record<string, string>)[role] ?? role;
   return <span className={`admin-badge admin-badge--role admin-badge--role-${role}`}>{label}</span>;
 }
 
 // ── Audit Log Tab ─────────────────────────────────────────────────────────────
 // EMR 기록의 비고: 설치본이 알린 발생 시각과 서버 표시(옛 설치본·행위자 불확실/미검증·몰아서 전송·기관 미확정).
-function EmrAuditNoteCell({ item }) {
+function EmrAuditNoteCell({ item }: { item: AuditRow }) {
   const note = emrAuditNote(item);
   if (!note || (!note.occurredAt && note.flags.length === 0)) return '-';
   return (
@@ -46,15 +57,32 @@ function EmrAuditNoteCell({ item }) {
   );
 }
 
-function AuditTab({ session }) {
-  const [items, setItems]                   = useState([]);
+interface AuditRow {
+  id: string;
+  createdAt: string | null;
+  actorUserId?: string | null;
+  action: string;
+  outcome: string;
+  targetType?: string | null;
+  targetId?: string | null;
+  ip?: string | null;
+  extra?: unknown;
+}
+
+interface AuditPage {
+  items: AuditRow[];
+  total: number;
+}
+
+function AuditTab({ session }: TabProps) {
+  const [items, setItems]                   = useState<AuditRow[]>([]);
   const [total, setTotal]                   = useState(0);
   const [page, setPage]                     = useState(1);
   const [limit, setLimit]                   = useState(50);
   const [actionFilter, setActionFilter]     = useState('');
   const [targetFilter, setTargetFilter]     = useState('');
   const [loading, setLoading]               = useState(false);
-  const [error, setError]                   = useState(null);
+  const [error, setError]                   = useState<string | null>(null);
   const baseUrl = resolveApiBaseUrl({ session });
 
   const load = async (p = 1) => {
@@ -64,12 +92,12 @@ function AuditTab({ session }) {
       const params = new URLSearchParams({ page: String(p), limit: String(limit) });
       if (actionFilter) params.set('action', actionFilter);
       if (targetFilter) params.set('targetType', targetFilter);
-      const data = await requestJson(`/api/admin/audit?${params}`, { baseUrl, session });
+      const data: AuditPage = await requestJson(`/api/admin/audit?${params}`, { baseUrl, session });
       setItems(data.items);
       setTotal(data.total);
       setPage(p);
     } catch (e) {
-      setError(e.message);
+      setError((e as Error).message);
     } finally {
       setLoading(false);
     }
@@ -145,21 +173,34 @@ function AuditTab({ session }) {
 }
 
 // ── Devices Tab ───────────────────────────────────────────────────────────────
-function DevicesTab({ session }) {
-  const [devices, setDevices] = useState([]);
+interface DeviceRow {
+  id: string;
+  userName: string;
+  userLoginId: string;
+  buildTarget: string;
+  status: string;
+  registeredAt: string | null;
+  lastSeenAt: string | null;
+  registerIp?: string | null;
+  suspicious?: boolean;
+  keyPrefix?: string | null;
+}
+
+function DevicesTab({ session }: TabProps) {
+  const [devices, setDevices] = useState<DeviceRow[]>([]);
   const [loading, setLoading] = useState(false);
-  const [actioning, setActioning] = useState(null);
-  const [error, setError] = useState(null);
+  const [actioning, setActioning] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const baseUrl = resolveApiBaseUrl({ session });
 
   const load = async () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await requestJson('/api/admin/devices', { baseUrl, session });
+      const data: { devices: DeviceRow[] } = await requestJson('/api/admin/devices', { baseUrl, session });
       setDevices(data.devices);
     } catch (e) {
-      setError(e.message);
+      setError((e as Error).message);
     } finally {
       setLoading(false);
     }
@@ -167,13 +208,13 @@ function DevicesTab({ session }) {
 
   useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const act = async (deviceId, path) => {
+  const act = async (deviceId: string, path: string) => {
     setActioning(deviceId);
     try {
       await requestJson(`/api/admin/devices/${deviceId}/${path}`, { baseUrl, method: 'POST', session });
       await load();
     } catch (e) {
-      setError(deviceActionErrorMessage(e));
+      setError(deviceActionErrorMessage(e as Error));
     } finally {
       setActioning(null);
     }
@@ -208,8 +249,8 @@ function DevicesTab({ session }) {
                 </td>
                 <td>
                   <span className="admin-cell-mono" title="장치 키 지문 앞자리 — 같은 값이면 같은 PC">{d.keyPrefix ?? '-'}</span>
-                  {(pcRows.get(d.keyPrefix) ?? 0) > 1 && (
-                    <div className="admin-cell-hint">같은 PC {pcRows.get(d.keyPrefix)}행</div>
+                  {(pcRows.get(d.keyPrefix as string) ?? 0) > 1 && (
+                    <div className="admin-cell-hint">같은 PC {pcRows.get(d.keyPrefix as string)}행</div>
                   )}
                 </td>
                 <td>{d.buildTarget}</td>
@@ -241,17 +282,32 @@ function DevicesTab({ session }) {
 // ── Users Tab ─────────────────────────────────────────────────────────────────
 const EMPTY_FORM = { loginId: '', name: '', role: 'doctor', password: '' };
 
-function UsersTab({ session }) {
-  const [users, setUsers]                   = useState([]);
+interface UserRow {
+  id: string;
+  loginId: string;
+  name: string;
+  role: string;
+  disabled?: boolean;
+  mustChangePassword?: boolean;
+  createdAt?: string | null;
+  lastLoginAt?: string | null;
+}
+
+interface UsersResponse {
+  users: UserRow[];
+}
+
+function UsersTab({ session }: TabProps) {
+  const [users, setUsers]                   = useState<UserRow[]>([]);
   const [loading, setLoading]               = useState(false);
-  const [error, setError]                   = useState(null);
+  const [error, setError]                   = useState<string | null>(null);
   const [form, setForm]                     = useState(EMPTY_FORM);
-  const [formError, setFormError]           = useState(null);
+  const [formError, setFormError]           = useState<string | null>(null);
   const [creating, setCreating]             = useState(false);
-  const [actioning, setActioning]           = useState(null);
-  const [resetTarget, setResetTarget]       = useState(null);
+  const [actioning, setActioning]           = useState<string | null>(null);
+  const [resetTarget, setResetTarget]       = useState<string | null>(null);
   const [resetPw, setResetPw]               = useState('');
-  const [resetError, setResetError]         = useState(null);
+  const [resetError, setResetError]         = useState<string | null>(null);
   const baseUrl = resolveApiBaseUrl({ session });
   const selfId  = session?.user?.id;
 
@@ -259,10 +315,10 @@ function UsersTab({ session }) {
     setLoading(true);
     setError(null);
     try {
-      const data = await requestJson('/api/admin/users', { baseUrl, session });
+      const data: UsersResponse = await requestJson('/api/admin/users', { baseUrl, session });
       setUsers(data.users);
     } catch (e) {
-      setError(e.message);
+      setError((e as Error).message);
     } finally {
       setLoading(false);
     }
@@ -287,13 +343,13 @@ function UsersTab({ session }) {
       setForm(EMPTY_FORM);
       await load();
     } catch (e) {
-      setFormError(e.message);
+      setFormError((e as Error).message);
     } finally {
       setCreating(false);
     }
   };
 
-  const handleDisableToggle = async (user) => {
+  const handleDisableToggle = async (user: UserRow) => {
     setActioning(user.id);
     setError(null);
     try {
@@ -302,7 +358,7 @@ function UsersTab({ session }) {
       });
       await load();
     } catch (e) {
-      setError(e.message);
+      setError((e as Error).message);
     } finally {
       setActioning(null);
     }
@@ -322,7 +378,7 @@ function UsersTab({ session }) {
       setResetTarget(null);
       setResetPw('');
     } catch (e) {
-      setResetError(e.message);
+      setResetError((e as Error).message);
     }
   };
 
@@ -429,12 +485,28 @@ function UsersTab({ session }) {
 }
 
 // ── Signup Requests Tab ───────────────────────────────────────────────────────
-function SignupRequestsTab({ session }) {
-  const [items, setItems]               = useState([]);
+interface SignupRow {
+  id: string;
+  loginId: string;
+  name: string;
+  requestedRole: string;
+  note?: string | null;
+  createdAt: string | null;
+  reviewerName?: string | null;
+}
+
+interface ApprovalResult {
+  name: string;
+  loginId: string;
+  tempPassword: string;
+}
+
+function SignupRequestsTab({ session }: TabProps) {
+  const [items, setItems]               = useState<SignupRow[]>([]);
   const [loading, setLoading]           = useState(false);
-  const [error, setError]               = useState(null);
+  const [error, setError]               = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState('pending');
-  const [approvalResult, setApprovalResult] = useState(null);
+  const [approvalResult, setApprovalResult] = useState<ApprovalResult | null>(null);
   const baseUrl = resolveApiBaseUrl({ session });
 
   const load = async () => {
@@ -442,10 +514,10 @@ function SignupRequestsTab({ session }) {
     setError(null);
     try {
       const params = new URLSearchParams({ status: statusFilter });
-      const data = await requestJson(`/api/admin/signup-requests?${params}`, { baseUrl, session });
+      const data: { requests: SignupRow[] } = await requestJson(`/api/admin/signup-requests?${params}`, { baseUrl, session });
       setItems(data.requests);
     } catch (err) {
-      setError(err.message);
+      setError((err as Error).message);
     } finally {
       setLoading(false);
     }
@@ -453,19 +525,19 @@ function SignupRequestsTab({ session }) {
 
   useEffect(() => { load(); }, [statusFilter]);
 
-  const handleApprove = async (id) => {
+  const handleApprove = async (id: string) => {
     try {
-      const data = await requestJson(`/api/admin/signup-requests/${id}/approve`, {
+      const data: ApprovalResult = await requestJson(`/api/admin/signup-requests/${id}/approve`, {
         baseUrl, session, method: 'POST',
       });
       setApprovalResult(data);
       load();
     } catch (err) {
-      setError(err.message);
+      setError((err as Error).message);
     }
   };
 
-  const handleReject = async (id) => {
+  const handleReject = async (id: string) => {
     if (!confirm('이 신청을 거절하시겠습니까?')) return;
     try {
       await requestJson(`/api/admin/signup-requests/${id}/reject`, {
@@ -473,7 +545,7 @@ function SignupRequestsTab({ session }) {
       });
       load();
     } catch (err) {
-      setError(err.message);
+      setError((err as Error).message);
     }
   };
 
@@ -568,28 +640,49 @@ function SignupRequestsTab({ session }) {
 }
 
 // ── Patient Assignment Tab ────────────────────────────────────────────────────
-function PatientAssignmentTab({ session, onPatientAssignmentChanged }) {
-  const [doctors, setDoctors]     = useState([]);
-  const [patients, setServerPatients] = useState([]);
+interface PatientShared {
+  name?: string;
+  patientNo?: string;
+  doctorName?: string;
+}
+
+interface ServerPatientRow {
+  id: string;
+  assignedDoctorUserId?: string | null;
+  data?: { shared?: PatientShared | null } | null;
+}
+
+interface PatientsPage {
+  items?: ServerPatientRow[];
+  total?: number;
+}
+
+interface PatientAssignmentTabProps extends TabProps {
+  onPatientAssignmentChanged?: () => unknown;
+}
+
+function PatientAssignmentTab({ session, onPatientAssignmentChanged }: PatientAssignmentTabProps) {
+  const [doctors, setDoctors]     = useState<UserRow[]>([]);
+  const [patients, setServerPatients] = useState<ServerPatientRow[]>([]);
   const [loading, setLoading]     = useState(false);
-  const [error, setError]         = useState(null);
-  const [pending, setPending]     = useState({}); // { patientId: userId | '' }
-  const [actioning, setActioning] = useState(null);
+  const [error, setError]         = useState<string | null>(null);
+  const [pending, setPending]     = useState<Record<string, string>>({}); // { patientId: userId | '' }
+  const [actioning, setActioning] = useState<string | null>(null);
   const [search, setSearch]       = useState('');
-  const controllerRef             = useRef(null);
+  const controllerRef             = useRef<AbortController | null>(null);
   const baseUrl = resolveApiBaseUrl({ session });
 
   // Load doctors once on mount.
   useEffect(() => {
     requestJson('/api/admin/users', { baseUrl, session })
-      .then(data => setDoctors((data.users || []).filter(u => u.role === 'doctor' && !u.disabled)))
+      .then((data: UsersResponse) => setDoctors((data.users || []).filter(u => u.role === 'doctor' && !u.disabled)))
       .catch(err => setError(err.message));
     return () => { controllerRef.current?.abort(); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Unified offset loop for both full-load and search.
   // Aborts any in-flight request before starting a new one (race condition guard).
-  const loadPatients = async (q) => {
+  const loadPatients = async (q: string) => {
     controllerRef.current?.abort();
     const controller = new AbortController();
     controllerRef.current = controller;
@@ -600,10 +693,10 @@ function PatientAssignmentTab({ session, onPatientAssignmentChanged }) {
     try {
       const LIMIT = 100;
       const qParam = q.trim() ? `&q=${encodeURIComponent(q.trim())}` : '';
-      let all = [];
+      let all: ServerPatientRow[] = [];
       let offset = 0;
       while (true) {
-        const data = await requestJson(
+        const data: PatientsPage = await requestJson(
           `/api/patients?scope=all&limit=${LIMIT}&offset=${offset}${qParam}`,
           { baseUrl, session, signal }
         );
@@ -615,7 +708,7 @@ function PatientAssignmentTab({ session, onPatientAssignmentChanged }) {
       setPending({});
     } catch (err) {
       if (signal.aborted) return; // stale request superseded by a newer one
-      setError(err.message);
+      setError((err as Error).message);
     } finally {
       if (!signal.aborted) setLoading(false);
     }
@@ -631,7 +724,7 @@ function PatientAssignmentTab({ session, onPatientAssignmentChanged }) {
     return () => { clearTimeout(timer); controllerRef.current?.abort(); };
   }, [search]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleAssign = async (patientId) => {
+  const handleAssign = async (patientId: string) => {
     const selectedVal  = pending[patientId];
     const assignedUserId = selectedVal === '' ? null : (selectedVal ?? null);
     setActioning(patientId);
@@ -642,7 +735,7 @@ function PatientAssignmentTab({ session, onPatientAssignmentChanged }) {
       onPatientAssignmentChanged?.();
       await loadPatients(search);
     } catch (err) {
-      setError(err.message);
+      setError((err as Error).message);
       setActioning(null);
     }
   };
@@ -673,7 +766,7 @@ function PatientAssignmentTab({ session, onPatientAssignmentChanged }) {
             </thead>
             <tbody>
               {patients.map(p => {
-                const shared     = p.data?.shared || {};
+                const shared: PatientShared = p.data?.shared || {};
                 const currentId  = p.assignedDoctorUserId ?? null;
                 const selectedVal = pending[p.id] !== undefined ? pending[p.id] : (currentId ?? '');
                 const hasChange  = selectedVal !== (currentId ?? '');
@@ -721,7 +814,7 @@ function PatientAssignmentTab({ session, onPatientAssignmentChanged }) {
 }
 
 // ── Ops Status Tab ────────────────────────────────────────────────────────────
-const OPS_SUMMARY_LABELS = {
+const OPS_SUMMARY_LABELS: Record<string, string> = {
   ok:                 '정상',
   stale:              '백업 지연',
   alert_open:         '장애 미처리',
@@ -729,21 +822,45 @@ const OPS_SUMMARY_LABELS = {
   dry_run_alert_open: '검증 알림 (정상)',
 };
 
-function OpsTab({ session }) {
-  const [data, setData]     = useState(null);
+interface OpsAlert {
+  runId: string;
+  reasonClass: string;
+  createdAt: string | null;
+  dryRun?: boolean;
+}
+
+interface OpsStatus {
+  monitorReport?: {
+    checkedAt: string | null;
+    summary: string;
+    isStale?: boolean;
+    staleThresholdHours?: number;
+    lastSuccessAt: string | null;
+    openAlerts: OpsAlert[];
+  } | null;
+  backupStatus?: {
+    status: string;
+    runId?: string | null;
+    lastFailureAt: string | null;
+    reasonClass?: string | null;
+  } | null;
+}
+
+function OpsTab({ session }: TabProps) {
+  const [data, setData]     = useState<OpsStatus | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError]   = useState(null);
-  const [acting, setActing] = useState(null); // runId currently being ack/resolved
+  const [error, setError]   = useState<string | null>(null);
+  const [acting, setActing] = useState<string | null>(null); // runId currently being ack/resolved
   const baseUrl = resolveApiBaseUrl({ session });
 
   const load = async () => {
     setLoading(true);
     setError(null);
     try {
-      const result = await requestJson('/api/admin/ops/backup-status', { baseUrl, session });
+      const result: OpsStatus | null = await requestJson('/api/admin/ops/backup-status', { baseUrl, session });
       setData(result);
     } catch (e) {
-      setError(e.message || '불러오기 실패');
+      setError((e as Error).message || '불러오기 실패');
     } finally {
       setLoading(false);
     }
@@ -751,25 +868,25 @@ function OpsTab({ session }) {
 
   useEffect(() => { load(); }, []);
 
-  const handleAck = async (runId) => {
+  const handleAck = async (runId: string) => {
     setActing(runId);
     try {
       await requestJson(`/api/admin/ops/backup-alerts/${runId}/ack`, { baseUrl, session, method: 'POST' });
       await load();
     } catch (e) {
-      setError(e.message || '확인 처리 실패');
+      setError((e as Error).message || '확인 처리 실패');
     } finally {
       setActing(null);
     }
   };
 
-  const handleResolve = async (runId) => {
+  const handleResolve = async (runId: string) => {
     setActing(runId);
     try {
       await requestJson(`/api/admin/ops/backup-alerts/${runId}/resolve`, { baseUrl, session, method: 'POST' });
       await load();
     } catch (e) {
-      setError(e.message || '해결 처리 실패');
+      setError((e as Error).message || '해결 처리 실패');
     } finally {
       setActing(null);
     }
@@ -865,14 +982,24 @@ const DEVICE_OPTIONS = [
   { value: 'cuda', label: 'GPU 강제 (CUDA)', hint: 'GPU(CUDA)로만 추론. 사용 불가 시 분석 실패(에러).' },
 ];
 
-function InferenceDeviceTab({ session }) {
-  const [device, setDevice]   = useState(null);   // 서버 저장값
-  const [draft, setDraft]     = useState(null);    // 편집값
-  const [gpu, setGpu]         = useState(null);     // { cudaAvailable, providers, error }
+interface GpuStatus {
+  cudaAvailable?: boolean;
+  error?: string | null;
+}
+
+interface OrgSettings {
+  inferenceDevice: string | null;
+  gpu?: GpuStatus | null;
+}
+
+function InferenceDeviceTab({ session }: TabProps) {
+  const [device, setDevice]   = useState<string | null>(null);   // 서버 저장값
+  const [draft, setDraft]     = useState<string | null>(null);    // 편집값
+  const [gpu, setGpu]         = useState<GpuStatus | null>(null);     // { cudaAvailable, providers, error }
   const [loading, setLoading] = useState(false);
   const [saving, setSaving]   = useState(false);
-  const [error, setError]     = useState(null);
-  const [savedMsg, setSavedMsg] = useState(null);
+  const [error, setError]     = useState<string | null>(null);
+  const [savedMsg, setSavedMsg] = useState<string | null>(null);
   const baseUrl = resolveApiBaseUrl({ session });
 
   const load = async () => {
@@ -880,12 +1007,12 @@ function InferenceDeviceTab({ session }) {
     setError(null);
     setSavedMsg(null);
     try {
-      const data = await requestJson('/api/admin/org-settings', { baseUrl, session });
+      const data: OrgSettings = await requestJson('/api/admin/org-settings', { baseUrl, session });
       setDevice(data.inferenceDevice);
       setDraft(data.inferenceDevice);
       setGpu(data.gpu || null);
     } catch (e) {
-      setError(e.message);
+      setError((e as Error).message);
     } finally {
       setLoading(false);
     }
@@ -898,14 +1025,14 @@ function InferenceDeviceTab({ session }) {
     setError(null);
     setSavedMsg(null);
     try {
-      const data = await requestJson('/api/admin/org-settings', {
+      const data: OrgSettings = await requestJson('/api/admin/org-settings', {
         baseUrl, method: 'PATCH', body: { inferenceDevice: draft }, session,
       });
       setDevice(data.inferenceDevice);
       setDraft(data.inferenceDevice);
       setSavedMsg('저장되었습니다.');
     } catch (e) {
-      setError(e.message);
+      setError((e as Error).message);
     } finally {
       setSaving(false);
     }
@@ -959,21 +1086,30 @@ function InferenceDeviceTab({ session }) {
 // ── Preset Sharing Tab ──────────────────────────────────────────────────────
 // Org-wide preset visibility manager. Admin can select presets (incl. other
 // users' private ones) and bulk-convert visibility either direction.
-function PresetVisibilityBadge({ visibility }) {
+function PresetVisibilityBadge({ visibility }: { visibility: string }) {
   return visibility === 'organization'
     ? <span className="admin-badge admin-badge--connected">조직 공유</span>
     : <span className="admin-badge admin-badge--fallback">비공개(소유자만)</span>;
 }
 
-function PresetsTab({ session }) {
-  const [presets, setPresets] = useState([]);
+interface PresetRow {
+  id: string;
+  jobName?: string | null;
+  category?: string | null;
+  ownerName?: string | null;
+  organizationId?: string | null;
+  visibility: string;
+}
+
+function PresetsTab({ session }: TabProps) {
+  const [presets, setPresets] = useState<PresetRow[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError]     = useState(null);
-  const [status, setStatus]   = useState(null);
-  const [selected, setSelected] = useState(() => new Set());
+  const [error, setError]     = useState<string | null>(null);
+  const [status, setStatus]   = useState<string | null>(null);
+  const [selected, setSelected] = useState(() => new Set<string>());
   const [search, setSearch]   = useState('');
   const [visFilter, setVisFilter] = useState('all');
-  const [pending, setPending] = useState(null);   // 'organization' | 'private' awaiting confirm
+  const [pending, setPending] = useState<string | null>(null);   // 'organization' | 'private' awaiting confirm
   const [acting, setActing]   = useState(false);
   const baseUrl = resolveApiBaseUrl({ session });
   // Superadmin (no org bound) sees presets across all orgs → show org column.
@@ -985,10 +1121,10 @@ function PresetsTab({ session }) {
     setSelected(new Set());
     setPending(null);
     try {
-      const data = await requestJson('/api/admin/presets', { baseUrl, session });
+      const data: { presets?: PresetRow[] } = await requestJson('/api/admin/presets', { baseUrl, session });
       setPresets(data.presets || []);
     } catch (e) {
-      setError(e.message);
+      setError((e as Error).message);
     } finally {
       setLoading(false);
     }
@@ -998,8 +1134,8 @@ function PresetsTab({ session }) {
 
   // Filter changes must reset selection — otherwise a preset selected under a
   // previous filter (now hidden) could be converted unseen.
-  const onSearch    = (v) => { setSearch(v);    setSelected(new Set()); setPending(null); };
-  const onVisFilter = (v) => { setVisFilter(v); setSelected(new Set()); setPending(null); };
+  const onSearch    = (v: string) => { setSearch(v);    setSelected(new Set()); setPending(null); };
+  const onVisFilter = (v: string) => { setVisFilter(v); setSelected(new Set()); setPending(null); };
 
   const filtered = presets.filter(p => {
     if (visFilter !== 'all' && p.visibility !== visFilter) return false;
@@ -1009,7 +1145,7 @@ function PresetsTab({ session }) {
 
   const allSelected = filtered.length > 0 && filtered.every(p => selected.has(p.id));
 
-  const toggleOne = (id) => {
+  const toggleOne = (id: string) => {
     setPending(null);
     setSelected(prev => {
       const next = new Set(prev);
@@ -1031,7 +1167,7 @@ function PresetsTab({ session }) {
     });
   };
 
-  const arm = (visibility) => { setError(null); setStatus(null); setPending(visibility); };
+  const arm = (visibility: string) => { setError(null); setStatus(null); setPending(visibility); };
 
   const confirmConvert = async () => {
     const ids = [...selected];
@@ -1039,14 +1175,14 @@ function PresetsTab({ session }) {
     setActing(true);
     setError(null);
     try {
-      const data = await requestJson('/api/admin/presets/visibility', {
+      const data: { requested: number; updated: number } = await requestJson('/api/admin/presets/visibility', {
         baseUrl, method: 'POST', session, body: { ids, visibility: pending },
       });
       const label = pending === 'organization' ? '조직 공유' : '비공개(소유자만)';
       setStatus(`선택 ${data.requested}개 중 ${data.updated}개를 ${label}로 전환했습니다.`);
       await load();
     } catch (e) {
-      setError(e.message);
+      setError((e as Error).message);
     } finally {
       setActing(false);
     }
@@ -1127,32 +1263,49 @@ function PresetsTab({ session }) {
 // 통계 워크벤치 권한(capability) 부여/회수. default_all_roles인 capability는 목록에
 // 나오지만 grant 없이도 모든 사용자가 통과하므로 부여 폼에서는 안내만 하고 막지 않는다
 // — 서버가 최종 판정을 하고, 여기선 grant가 필요한 capability 운용을 돕는 용도.
-function GrantStatusBadge({ status }) {
-  const map = { active: ['connected', '활성'], expired: ['fallback', '만료'], revoked: ['local', '회수됨'] };
+function GrantStatusBadge({ status }: { status: string }) {
+  const map: Record<string, [string, string]> = { active: ['connected', '활성'], expired: ['fallback', '만료'], revoked: ['local', '회수됨'] };
   const [tone, label] = map[status] ?? ['local', status];
   return <span className={`admin-badge admin-badge--${tone}`}>{label}</span>;
 }
 
 const EMPTY_GRANT_FORM = { userId: '', capability: '', reason: '', expiresAt: '' };
 
-function CapabilitiesTab({ session }) {
-  const [catalog, setCatalog]         = useState([]);
-  const [grants, setGrants]           = useState([]);
-  const [users, setUsers]             = useState([]);
+interface CapabilityEntry {
+  key: string;
+  label: string;
+}
+
+interface GrantRow {
+  id: string;
+  userName: string;
+  capability: string;
+  status: string;
+  grantedByName?: string | null;
+  reason: string;
+  expiresAt: string | null;
+}
+
+function CapabilitiesTab({ session }: TabProps) {
+  const [catalog, setCatalog]         = useState<CapabilityEntry[]>([]);
+  const [grants, setGrants]           = useState<GrantRow[]>([]);
+  const [users, setUsers]             = useState<UserRow[]>([]);
   const [loading, setLoading]         = useState(false);
-  const [error, setError]             = useState(null);
-  const [status, setStatus]           = useState(null);
+  const [error, setError]             = useState<string | null>(null);
+  const [status, setStatus]           = useState<string | null>(null);
   const [form, setForm]               = useState(EMPTY_GRANT_FORM);
-  const [formError, setFormError]     = useState(null);
+  const [formError, setFormError]     = useState<string | null>(null);
   const [creating, setCreating]       = useState(false);
-  const [actioning, setActioning]     = useState(null);
+  const [actioning, setActioning]     = useState<string | null>(null);
   const baseUrl = resolveApiBaseUrl({ session });
 
   const load = async () => {
     setLoading(true);
     setError(null);
     try {
-      const [catalogData, grantsData, usersData] = await Promise.all([
+      const [catalogData, grantsData, usersData]: [
+        { capabilities?: CapabilityEntry[] }, { grants?: GrantRow[] }, { users?: UserRow[] },
+      ] = await Promise.all([
         requestJson('/api/capabilities/catalog', { baseUrl, session }),
         requestJson('/api/capabilities/grants',  { baseUrl, session }),
         requestJson('/api/admin/users',          { baseUrl, session }),
@@ -1161,7 +1314,7 @@ function CapabilitiesTab({ session }) {
       setGrants(grantsData.grants || []);
       setUsers(usersData.users || []);
     } catch (e) {
-      setError(e.message);
+      setError((e as Error).message);
     } finally {
       setLoading(false);
     }
@@ -1169,7 +1322,7 @@ function CapabilitiesTab({ session }) {
 
   useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const capabilityLabel = (key) => catalog.find(c => c.key === key)?.label ?? key;
+  const capabilityLabel = (key: string) => catalog.find(c => c.key === key)?.label ?? key;
 
   const handleCreate = async () => {
     setFormError(null);
@@ -1193,20 +1346,20 @@ function CapabilitiesTab({ session }) {
       setStatus('권한을 부여했습니다.');
       await load();
     } catch (e) {
-      setFormError(e.message);
+      setFormError((e as Error).message);
     } finally {
       setCreating(false);
     }
   };
 
-  const handleRevoke = async (grant) => {
+  const handleRevoke = async (grant: GrantRow) => {
     setActioning(grant.id);
     setError(null);
     try {
       await requestJson(`/api/capabilities/grants/${grant.id}/revoke`, { baseUrl, method: 'POST', session });
       await load();
     } catch (e) {
-      setError(e.message);
+      setError((e as Error).message);
     } finally {
       setActioning(null);
     }
@@ -1294,7 +1447,13 @@ const TABS = [
   { id: 'ops',        label: '운영 상태' },
 ];
 
-export function AdminConsoleModal({ session, onClose, onPatientAssignmentChanged }) {
+export interface AdminConsoleModalProps {
+  session: AdminSession;
+  onClose: () => void;
+  onPatientAssignmentChanged?: () => unknown;
+}
+
+export function AdminConsoleModal({ session, onClose, onPatientAssignmentChanged }: AdminConsoleModalProps) {
   const [activeTab, setActiveTab] = useState('audit');
 
   return (
