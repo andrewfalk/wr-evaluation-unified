@@ -22,6 +22,6 @@ describe('useRecipeDraft', () => {
     ] as const) {
       expect(now[name], name).toBe(first[name]);
     }
-    expect(now.dispatch).toBe(first.dispatch);
+    expect(now.dispatchDraft).toBe(first.dispatchDraft);
   });
 });

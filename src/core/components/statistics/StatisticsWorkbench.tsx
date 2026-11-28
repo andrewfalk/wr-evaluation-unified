@@ -112,7 +112,7 @@ export function StatisticsWorkbench({
   // P2-77b — 레시피 초안 14개 상태는 useRecipeDraft의 reducer 하나로 둔다(workbenchTransitions.ts의 recipeDraftReducer).
   // 패널에 그대로 내려가는 setter는 옛 useState setter처럼 값·갱신 함수를 받고 참조가 같다.
   const {
-    draft, dispatch,
+    draft, dispatchDraft,
     setRequestedMethod, setStandardizePredictors, setInteractionTerms, setSplineKeys, setEventLevel, setStratifyByKey,
     setFilterDraft, setAppliedFilters, setFormulaPolicies,
   } = useRecipeDraft();
@@ -145,7 +145,7 @@ export function StatisticsWorkbench({
     setRecoveryKeys([]); // 재조회 성공 — 복구 필요 상태 해제(실패·로딩 중에는 유지)
     const pruned = pruneStaleSelections(currentDraft(), catalogByKey);
     if (!pruned) return;
-    dispatch({ type: 'pruneCatalog', catalogByKey });
+    dispatchDraft({ type: 'pruneCatalog', catalogByKey });
     setCatalogPruneNotice(pruned.removed.map((k) => (REMOVED_VARIABLES as Record<string, string>)[k] ? `${k} — ${(REMOVED_VARIABLES as Record<string, string>)[k]}` : k));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [catalogState]);
@@ -156,13 +156,13 @@ export function StatisticsWorkbench({
   function handleGrainChange(nextGrain: string) {
     // 같은 grain이면 아무것도 바꾸지 않는다. 예측은 l2_logistic 하나뿐이라(다시 고를 UI가 없어) 모드가
     // prediction이면 requestedMethod를 그대로 둔다 — 둘 다 reducer(changeGrain)가 지킨다.
-    dispatch({ type: 'changeGrain', grain: nextGrain });
+    dispatchDraft({ type: 'changeGrain', grain: nextGrain });
   }
 
   function toggleVariable(key: string) {
     // 변수 구성이 바뀌면(상한에 걸려 그대로여도) 방법 선택을 초기화하고, 해제된 변수가 결과변수·interaction·
     // spline·그룹 변수였다면 함께 정리한다 — reducer(toggleVariable)의 주석 ①② 참고.
-    dispatch({ type: 'toggleVariable', key });
+    dispatchDraft({ type: 'toggleVariable', key });
   }
 
   function handleAnalysisModeChange(nextMode: string) {
@@ -195,7 +195,7 @@ export function StatisticsWorkbench({
   function applyTransition(nextMode: string, nextPurpose: string) {
     // 안내(notice)는 reducer 밖 상태다 — 같은 순수 함수로 계산해 정하고, 초안 정리는 액션으로 보낸다.
     const { notice } = planModePurposeTransition(currentDraft(), nextMode, nextPurpose, catalogByKey);
-    dispatch({ type: 'transition', nextMode, nextPurpose, catalogByKey });
+    dispatchDraft({ type: 'transition', nextMode, nextPurpose, catalogByKey });
     setTransitionNotice(notice);
   }
 
@@ -209,7 +209,7 @@ export function StatisticsWorkbench({
   // EVENT_LEVEL_REQUIRES_CATEGORICAL_OUTCOME으로 거부한다(리뷰 지적).
   function handleOutcomeKeyChange(nextOutcomeKey: string | null) {
     // 새 결과변수를 참조하는 interaction·spline을 정리하고, eventLevel은 예측의 boolean 결과변수면 'true', 그 밖은 비운다.
-    dispatch({ type: 'changeOutcomeKey', outcomeKey: nextOutcomeKey, catalogByKey });
+    dispatchDraft({ type: 'changeOutcomeKey', outcomeKey: nextOutcomeKey, catalogByKey });
   }
 
   // ---- preview: 조건-key(무엇을 위한 결과인가) + 요청세대(그 요청 인스턴스가 최신인가) ----

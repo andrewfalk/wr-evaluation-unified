@@ -21,15 +21,15 @@ export interface RecipeDraftSetters {
 
 export interface RecipeDraftApi extends RecipeDraftSetters {
   draft: RecipeDraftState;
-  dispatch: Dispatch<RecipeDraftAction>;
+  dispatchDraft: Dispatch<RecipeDraftAction>;
 }
 
 export function useRecipeDraft(): RecipeDraftApi {
-  const [draft, dispatch] = useReducer(recipeDraftReducer, undefined, createInitialRecipeDraft);
+  const [draft, dispatchDraft] = useReducer(recipeDraftReducer, undefined, createInitialRecipeDraft);
   // dispatch는 참조가 바뀌지 않으므로 setter도 마운트 동안 한 번만 만든다.
   const setters = useMemo<RecipeDraftSetters>(() => {
     function fieldSetter<K extends RecipeDraftField>(field: K): FieldSetter<K> {
-      return (value) => dispatch({ type: 'set', field, value } as RecipeDraftAction);
+      return (value) => dispatchDraft({ type: 'set', field, value } as RecipeDraftAction);
     }
     return {
       setRequestedMethod: fieldSetter('requestedMethod'),
@@ -43,5 +43,5 @@ export function useRecipeDraft(): RecipeDraftApi {
       setFormulaPolicies: fieldSetter('formulaPolicies'),
     };
   }, []);
-  return { draft, dispatch, ...setters };
+  return { draft, dispatchDraft, ...setters };
 }
