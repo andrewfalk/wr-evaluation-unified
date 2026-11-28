@@ -8,7 +8,7 @@ import {
   REPETITION_FEATURE_KEYS, REPETITION_PROFILES, HAND_WRIST_FEATURE_KEYS, REPETITION_BAND_FEATURE_KEYS,
 } from '../services/videoFeatureProfiles';
 import { gateFeaturesByViewpoint } from '../services/videoViewpointConfig';
-import { aggregateProcessFeatures, getAggregationMethod, contributionValue } from '../services/videoAggregate';
+import { contributionValue } from '../services/videoAggregate';
 import {
   getModuleSuggestions,
   getModuleCandidates,
@@ -25,161 +25,48 @@ import { TargetPicker } from './TargetPicker';
 import { SkeletonOverlay } from './SkeletonOverlay';
 import { getModule } from '../moduleRegistry';
 import { VIDEO_FEATURE_TARGETS, resolveAnalysisJobIds, buildAppliedRecipe } from '@wr/contracts/index';
-import { filterAnalysisJobs, isJobExcludedFromAnalysis } from '@wr/analytics-core/jobScope';
+import { isJobExcludedFromAnalysis } from '@wr/analytics-core/jobScope';
 import type { ReactNode } from 'react';
 import type { FeatureKey } from '@wr/contracts/index';
 import type { OverlaySegment } from './SkeletonOverlay';
 import type { SampleDetectResult } from './TargetPicker';
+import type {
+  AppliedInputEntry, CandidateFeature, ContributionEvidence, EvidenceByFeatureKey, FeatureEvidence, FusionCandidate, InferenceDevice,
+  ModuleTask, ProcessEvidence, ProcessFeatures, SharedJob, SuppressedCandidate, UploadState, VideoAnalysisData, VideoClip,
+  VideoFeatureMap, VideoProcess,
+} from '../services/videoStepTypes';
+import {
+  buildVideoStatus, fmtNum, effectiveShare, buildJobFeatures, buildJobEvidence, buildProcessEvidence, resolveSourceJobs,
+  segmentsForJob, contribFormula, sourceJobLabel,
+} from '../services/videoStepEvidence';
+import {
+  candidateMinutesPerDay, candidateHoursPerDay, RATIO_HOURS_CANDIDATE_KEYS, formatCandidateSubValue, flatCandidateRowRef,
+  hasAnyFlatEvidence, excludeTaskScopeCandidates, flatCandidateLabel,
+} from '../services/videoStepCandidates';
+import {
+  VIEWPOINTS, PROFILES, MOCK_BUNDLE, canDetectClip, requestedFeaturesForModules, tasksForJob, resolveTargetTaskId,
+  shareTotalsByJob, clearDerived, addProcessVA, editProcessVA, removeProcessVA, addClipVA, editClipVA, removeClipVA, resolveApplyMode,
+} from '../services/videoStepState';
 
-// ── 타입(P2-75b-ts) — 이 화면이 읽고 쓰는 필드만 적는다(저장 모양의 정본은 shared/contracts/videoAnalysis.ts). 실행 코드는 그대로다. ──
-type FeatureScalar = string | number | boolean | null | undefined;
-type AggregationMode = 'shareWeighted' | 'absolutePerDay';
+// 순수 헬퍼와 타입은 services/videoStep*.ts로 옮겼다(P2-75c) — 헬퍼 테스트 등이 이 파일에서 가져가므로 지금 이름 그대로 다시 내보낸다.
+export {
+  buildVideoStatus, fmtNum, effectiveShare, buildJobFeatures, buildJobEvidence, buildProcessEvidence, resolveSourceJobs,
+  segmentsForJob, contribFormula, sourceJobLabel,
+} from '../services/videoStepEvidence';
+export {
+  candidateMinutesPerDay, candidateHoursPerDay, formatCandidateSubValue, flatCandidateRowRef, hasAnyFlatEvidence,
+  excludeTaskScopeCandidates, flatCandidateLabel,
+} from '../services/videoStepCandidates';
+export {
+  canDetectClip, requestedFeaturesForModules, tasksForJob, resolveTargetTaskId, shareTotalsByJob, clearDerived, addProcessVA,
+  editProcessVA, removeProcessVA, addClipVA, editClipVA, removeClipVA, resolveApplyMode,
+} from '../services/videoStepState';
+export type {
+  VideoProcess, VideoClip, VideoFeatureValue, VideoFeatureMap, ProcessFeatures, JobFeatures, CandidateFeature, AppliedInputEntry,
+  VideoAnalysisData, ContributionEvidence, EvidenceContribution, FeatureEvidence, EvidenceByFeatureKey, ProcessEvidence, SourceJob,
+} from '../services/videoStepTypes';
 
-export interface VideoProcess {
-  id: string;
-  sharedJobId: string;
-  name: string;
-  shiftSharePercent: number;
-  activeMinutesPerDay: number | null;
-  analysisProfile: string;
-}
-
-export interface VideoClip {
-  id: string;
-  processId: string;
-  viewpoint: string;
-  analysisProfile?: string;
-  fixtureClipName?: string;
-}
-
-export interface VideoFeatureValue {
-  kind?: string;
-  value?: FeatureScalar;
-  unit?: string | null;
-  confidence?: number;
-  reason?: string;
-}
-
-export type VideoFeatureMap = Record<string, VideoFeatureValue>;
-
-export interface ProcessFeatures {
-  processId: string;
-  jobId?: string;
-  analysisJobIds?: string[];
-  features: VideoFeatureMap;
-}
-
-export interface JobFeatures {
-  sharedJobId: string;
-  features: VideoFeatureMap;
-}
-
-export interface CandidateFeature {
-  featureKey: string;
-  value?: FeatureScalar;
-  reason?: string;
-  confidence?: number;
-  processIds?: string[];
-}
-
-export interface AppliedInputEntry {
-  targetPath: string;
-  appliedValue: unknown;
-  previousValue: unknown;
-}
-
-export interface VideoAnalysisData {
-  processes: VideoProcess[];
-  clips: VideoClip[];
-  processFeatures?: ProcessFeatures[];
-  jobFeatures?: JobFeatures[];
-  candidateFeatures?: CandidateFeature[];
-  appliedInputs: AppliedInputEntry[];
-  processFeatureAggregationMode?: AggregationMode;
-}
-
-interface FusionCandidate {
-  jobId?: string;
-  viewpoint?: string;
-  adopted?: boolean;
-}
-
-/** 서버 실분석이 공정·featureKey마다 주는 근거(영속화 안 함). */
-export interface ContributionEvidence {
-  intrinsicMetric?: string;
-  intrinsicValue?: FeatureScalar;
-  intrinsicUnit?: string;
-  activeMinutesPerDay?: number | null;
-  confidenceBreakdown?: Record<string, number | null | undefined>;
-  fusion?: { adopted?: { viewpoint?: string; jobId?: string }; candidates?: FusionCandidate[] };
-  segments?: OverlaySegment[];
-  warnings?: string[];
-}
-
-export interface EvidenceContribution {
-  processId: string;
-  processName: string;
-  sharePercent: number;
-  perDayValue: FeatureScalar;
-  analysisJobIds: string[];
-  evidence: ContributionEvidence;
-}
-
-/** "왜 이 값?" 패널 한 칸(직업 단위는 공정 여럿, 작업 단위는 공정 하나). */
-export interface FeatureEvidence {
-  aggregationMethod: string;
-  contributions: EvidenceContribution[];
-  analysisJobIds: string[];
-}
-
-export type EvidenceByFeatureKey = Record<string, FeatureEvidence>;
-
-interface SuppressedCandidate {
-  featureKey: string;
-  reason?: string;
-  preferred?: unknown;
-}
-
-interface InferenceDevice {
-  used?: string;
-  fallback?: boolean;
-  reason?: string;
-}
-
-export interface ProcessEvidence {
-  processId: string;
-  analysisJobIds?: string[];
-  evidenceByFeatureKey?: Record<string, ContributionEvidence>;
-  suppressedCandidates?: SuppressedCandidate[];
-  inferenceDevice?: InferenceDevice;
-}
-
-export interface SourceJob {
-  jobId: string;
-  processName: string | null;
-  viewpoint: string | null;
-  adopted: boolean;
-}
-
-interface ModuleTask {
-  id: string | number;
-  sharedJobId?: string;
-  name?: string;
-}
-
-interface SharedJob {
-  id: string;
-  jobName?: string;
-  excludeFromAnalysis?: boolean;
-}
-
-interface UploadState {
-  fileName: string;
-  progress: number;
-  status: 'uploading' | 'done' | 'error';
-  serverClipId: string | null;
-}
-
+// ── 이 화면의 상태·props 타입(P2-75b-ts) ──
 interface DetectionState {
   serverClipId: string;
   result: SampleDetectResult;
@@ -250,368 +137,6 @@ export interface VideoAnalysisStepProps {
   fixtureMode?: boolean;
   serverConfig?: unknown;
   onServerApplied?: (serverPatient: unknown) => void;
-}
-
-const VIEWPOINTS = [
-  { value: 'sagittal', label: '측면(sagittal)' },
-  { value: 'frontal', label: '정면(frontal)' },
-  { value: 'other', label: '기타' },
-];
-// desc: 프로필 선택 시 select 옆에 보이는 짧은 설명(출처: shared/contracts/videoAnalysis.ts 프로필 정의 주석).
-const PROFILES = [
-  { value: 'posture-basic', label: '자세시간(5~10fps)', desc: '쪼그려앉기·허리 구부리기·오버헤드 자세시간 추정' },
-  { value: 'repetition-upper-limb', label: '상지반복(10~15fps)', desc: '어깨·팔꿈치 반복 빈도와 속도 구간별 시간 추정' },
-  { value: 'hand-wrist', label: '손목·손(15~30fps)', desc: '손목 굴곡·편위와 손목·손가락 반복 추정' },
-];
-const MOCK_BUNDLE = 'mock-6.0-2';
-
-// ── 순수 헬퍼(테스트 대상) ────────────────────────────────────────────────
-/**
- * 대상자 탐지(sample-detect) 가능 여부. 서버 모드 전제.
- * 실 업로드 완료 clip(upload.status==='done') 또는 dev fixture 파일명 보유 clip만 탐지 가능(M3-7a).
- */
-export function canDetectClip({ serverMode, fixtureMode, clip, upload }: { serverMode: boolean; fixtureMode: boolean; clip: VideoClip; upload?: UploadState }): boolean {
-  if (!serverMode) return false;
-  if (upload && upload.status === 'done' && upload.serverClipId) return true;
-  return !!(fixtureMode && clip.fixtureClipName);
-}
-
-/** 활성 모듈로 매핑되는 모든 featureKey(자동·candidate 포함). */
-export function requestedFeaturesForModules(activeModules: string[] = []): string[] {
-  return Object.keys(VIDEO_FEATURE_TARGETS).filter(
-    (k) => activeModules.includes(VIDEO_FEATURE_TARGETS[k as FeatureKey].moduleId)
-  );
-}
-
-/**
- * 상태바 표시용 파생 수치(새 React state 없음 — 렌더 시점 계산). 표시 전용이라 결정적 정의:
- * - suggestionCount: 직업단위(jobFeatures×jobScopeModules) + 작업단위(processFeatures×taskScopeModules) getModuleSuggestions 합.
- *   candidate 제외. "제안 N" 라벨(actionable 여부—참고만·대상작업 미선택·미동기화—는 세지 않음).
- * - warningCount: 점유율 합 ≠100 직업 수 + missingActiveTime에서 누락 feature가 실제 있는 공정 수(빈 배열 방어).
- */
-export function buildVideoStatus(va: VideoAnalysisData, {
-  shareTotals = {}, missingActiveTime = {}, jobScopeModules = [], taskScopeModules = [],
-  analyzing = false, hasAnalysis = false,
-}: {
-  shareTotals?: Record<string, number>; missingActiveTime?: Record<string, string[]>;
-  jobScopeModules?: string[]; taskScopeModules?: string[]; analyzing?: boolean; hasAnalysis?: boolean;
-} = {}) {
-  let suggestionCount = 0;
-  for (const jf of va.jobFeatures || []) {
-    for (const m of jobScopeModules) suggestionCount += getModuleSuggestions(jf.features, m).length;
-  }
-  for (const pf of va.processFeatures || []) {
-    for (const m of taskScopeModules) suggestionCount += getModuleSuggestions(pf.features, m).length;
-  }
-  const shareWarn = Object.values(shareTotals).filter((t) => t !== 100).length;
-  const activeTimeWarn = Object.values(missingActiveTime).filter((a) => a && a.length > 0).length;
-  return {
-    processCount: (va.processes || []).length,
-    clipCount: (va.clips || []).length,
-    suggestionCount,
-    warningCount: shareWarn + activeTimeWarn,
-    analysisState: analyzing ? '분석 중' : (hasAnalysis ? '분석 완료' : '분석 전'),
-  };
-}
-
-// 표시용 숫자 — 모든 지표를 소수점 1자리로 통일(정수·비숫자는 그대로). 부동소수 꼬리 제거.
-export function fmtNum<T>(v: T): T | number {
-  return (typeof v === 'number' && Number.isFinite(v)) ? Math.round(v * 10) / 10 : v;
-}
-
-/**
- * 공정의 effective share(%)를 결정한다 — job-scope 집계(buildJobFeatures)와 공정별 서브행 기여값
- * (renderJobScopeSuggestions)이 항상 같은 값을 쓰도록 단일화(6.0-17, 재구현 금지).
- * @param {'shareWeighted'|'absolutePerDay'} mode - processFeatureAggregationMode.
- *   absolutePerDay: 서버 실분석 값은 ratio×activeMinutesPerDay로 이미 절대 per-day이므로 share로
- *   재가중하지 않고 100%로 취급(이중 차감 방지). shareWeighted(mock 기본): 공정 점유율 그대로.
- */
-export function effectiveShare(mode: AggregationMode | undefined, shiftSharePercent: number): number {
-  return mode === 'absolutePerDay' ? 100 : shiftSharePercent;
-}
-
-/**
- * 공정별 feature를 직업(sharedJobId) 단위로 묶어 집계한다(job-scope).
- * @param {'shareWeighted'|'absolutePerDay'} [processFeatureAggregationMode] - effectiveShare 참고.
- */
-export function buildJobFeatures(
-  processes: VideoProcess[] = [], processFeatures: ProcessFeatures[] = [],
-  { processFeatureAggregationMode = 'shareWeighted' }: { processFeatureAggregationMode?: AggregationMode } = {},
-): JobFeatures[] {
-  const byJob: Record<string, Array<{ share: number; features: VideoFeatureMap }>> = {};
-  for (const pf of processFeatures) {
-    const proc = processes.find((p) => p.id === pf.processId);
-    if (!proc) continue;
-    (byJob[proc.sharedJobId] = byJob[proc.sharedJobId] || []).push({
-      share: effectiveShare(processFeatureAggregationMode, proc.shiftSharePercent),
-      features: pf.features,
-    });
-  }
-  return Object.keys(byJob).map((sharedJobId) => ({
-    sharedJobId,
-    features: aggregateProcessFeatures(byJob[sharedJobId]) as VideoFeatureMap,
-  }));
-}
-
-/**
- * 공정별 근거(processEvidence)를 직업(sharedJobId) 단위로 묶어 "왜 이 값?" 패널 lookup map을 만든다.
- * 값 집계(buildJobFeatures)와 **완전 분리** — evidence는 feature 객체에 미부착·shared에 영속화 안 함.
- * 2단 keying: jobEvidenceBySharedJobId[sharedJobId][featureKey] (featureKey 단독은 다직업 충돌).
- * @param {Array} processFeatures - per-day 값(공정별 per-feature value 참조용)
- * @param {Array} processEvidence - [{ processId, analysisJobIds, evidenceByFeatureKey }]
- * @returns {object} jobEvidenceBySharedJobId
- */
-export function buildJobEvidence(
-  processes: VideoProcess[] = [], processFeatures: ProcessFeatures[] = [], processEvidence: ProcessEvidence[] = [],
-): Record<string, EvidenceByFeatureKey> {
-  const featuresByProcess: Record<string, VideoFeatureMap> = {};
-  for (const pf of processFeatures) featuresByProcess[pf.processId] = pf.features || {};
-  const byJob: Record<string, EvidenceByFeatureKey> = {};
-  for (const pe of processEvidence) {
-    const proc = processes.find((p) => p.id === pe.processId);
-    if (!proc) continue;
-    const jobMap = byJob[proc.sharedJobId] || (byJob[proc.sharedJobId] = {});
-    for (const [featureKey, ev] of Object.entries(pe.evidenceByFeatureKey || {})) {
-      const entry = jobMap[featureKey] || (jobMap[featureKey] = {
-        aggregationMethod: getAggregationMethod(featureKey),
-        contributions: [],
-        analysisJobIds: [],
-      });
-      entry.contributions.push({
-        processId: proc.id,
-        processName: proc.name,
-        // 실 공정 점유율(검토자 표시용). 집계 가중치(서버 absolute 경로의 내부 100%)와 구분 — 오해 방지.
-        sharePercent: proc.shiftSharePercent,
-        perDayValue: featuresByProcess[pe.processId]?.[featureKey]?.value,
-        // 이 공정의 원본 분석 job(들) — fusion evidence 없는 contribution의 골격 검수 fallback(6.0-8).
-        analysisJobIds: (pe.analysisJobIds || []).slice(),
-        evidence: ev,
-      });
-      for (const jid of pe.analysisJobIds || []) {
-        if (entry.analysisJobIds.indexOf(jid) < 0) entry.analysisJobIds.push(jid);
-      }
-    }
-  }
-  return byJob;
-}
-
-/**
- * task-scope(경추·척추): 공정별 근거를 공정(processId) 단위로 묶는다. 집계가 없으므로 contribution은
- * 공정 1개뿐 — buildJobEvidence와 같은 jobEv-like 형태라 renderEvidencePanel·resolveSourceJobs를 그대로 쓴다.
- * @returns {object} processEvidenceByProcessId[processId][featureKey] = { aggregationMethod, contributions, analysisJobIds }
- */
-export function buildProcessEvidence(
-  processes: VideoProcess[] = [], processFeatures: ProcessFeatures[] = [], processEvidence: ProcessEvidence[] = [],
-): Record<string, EvidenceByFeatureKey> {
-  const featuresByProcess: Record<string, VideoFeatureMap> = {};
-  for (const pf of processFeatures) featuresByProcess[pf.processId] = pf.features || {};
-  const byProc: Record<string, EvidenceByFeatureKey> = {};
-  for (const pe of processEvidence) {
-    const proc = processes.find((p) => p.id === pe.processId);
-    if (!proc) continue;
-    const jobIds = (pe.analysisJobIds || []).slice();
-    const featMap = byProc[pe.processId] || (byProc[pe.processId] = {});
-    for (const [featureKey, ev] of Object.entries(pe.evidenceByFeatureKey || {})) {
-      featMap[featureKey] = {
-        aggregationMethod: 'task(1:1)',
-        analysisJobIds: jobIds.slice(),
-        contributions: [{
-          processId: proc.id,
-          processName: proc.name,
-          sharePercent: proc.shiftSharePercent,
-          perDayValue: featuresByProcess[pe.processId]?.[featureKey]?.value,
-          analysisJobIds: jobIds.slice(),
-          evidence: ev,
-        }],
-      };
-    }
-  }
-  return byProc;
-}
-
-const VIEWPOINT_LABEL: Record<string, string> = { sagittal: '측면', frontal: '정면', other: '기타' };
-
-/**
- * feature 한 항목(jobEv)의 골격 검수 대상 source job 목록을 도출한다(6.0-8).
- * feature 값은 공정 합산·시점 융합으로 N개 job에서 오므로 단일 jobId를 붙이면 안 된다.
- * 우선순위: contribution.evidence.fusion.candidates(채택=adopted, 탈락=비교 시점) — 채택 job을 주 검수 대상으로,
- * 탈락 후보는 "비교 시점"으로 구분. fusion이 없으면(구 데이터) jobEv.analysisJobIds로 fallback.
- * @returns {Array<{jobId, processName, viewpoint, adopted}>} 채택 먼저 정렬, jobId 중복 제거.
- */
-export function resolveSourceJobs(jobEv: FeatureEvidence | null | undefined): SourceJob[] {
-  if (!jobEv) return [];
-  const out: SourceJob[] = [];
-  const seen = new Set();
-  const pushJob = (jobId: string | null | undefined, processName: string | null | undefined, viewpoint: string | null | undefined, adopted: boolean | undefined) => {
-    if (!jobId || seen.has(jobId)) return;
-    seen.add(jobId);
-    out.push({ jobId, processName: processName || null, viewpoint: viewpoint || null, adopted: !!adopted });
-  };
-  for (const c of jobEv.contributions || []) {
-    const cands = c.evidence?.fusion?.candidates;
-    if (Array.isArray(cands) && cands.length > 0) {
-      for (const cand of cands) pushJob(cand?.jobId, c.processName, cand?.viewpoint, cand?.adopted);
-    } else {
-      // 이 contribution은 시점 융합 evidence가 없음(구/부분 evidence) → 공정 job으로 fallback(누락 방지).
-      for (const jid of c.analysisJobIds || []) pushJob(jid, c.processName, null, true);
-    }
-  }
-  // contribution이 전혀 없는 경우(구 데이터)만 feature 레벨 analysisJobIds로 최종 fallback.
-  if (out.length === 0) {
-    for (const jid of jobEv.analysisJobIds || []) pushJob(jid, null, null, true);
-  }
-  out.sort((a, b) => (b.adopted ? 1 : 0) - (a.adopted ? 1 : 0));
-  return out;
-}
-
-// 골격 overlay(특정 source job)에 그 변수의 근거 구간(segments)을 매칭한다. evidence.segments는 채택(또는
-// 단일) 클립 기준이라 그 job의 overlay일 때만 매칭 — 비교 시점 job은 구간 미보유라 빈 배열(하이라이트 없음).
-export function segmentsForJob(jobEv: FeatureEvidence | null | undefined, jobId: string | null | undefined): OverlaySegment[] {
-  if (!jobEv || !jobId) return [];
-  for (const c of jobEv.contributions || []) {
-    const ev = (c.evidence || {}) as ContributionEvidence;
-    if (!Array.isArray(ev.segments) || ev.segments.length === 0) continue;
-    const adoptedJobId = ev.fusion?.adopted?.jobId;
-    const owns = adoptedJobId != null ? adoptedJobId === jobId : (c.analysisJobIds || []).indexOf(jobId) >= 0;
-    if (owns) return ev.segments;
-  }
-  return [];
-}
-
-/**
- * task-scope 모듈의 적용 대상 task 후보(직업 기준). spine처럼 fallbackUnlinked면 매칭 task가 없을 때
- * 직업 미연결 레거시 task도 후보로 허용한다(모듈 extractFromModule fallback과 동일 규칙). cervical은 엄격.
- */
-export function tasksForJob(
-  moduleData: { tasks?: ModuleTask[] } | null | undefined, sharedJobId: string,
-  { fallbackUnlinked = false }: { fallbackUnlinked?: boolean } = {},
-): ModuleTask[] {
-  const all = (moduleData && moduleData.tasks) || [];
-  const linked = all.filter((t) => t.sharedJobId === sharedJobId);
-  if (!linked.length && fallbackUnlinked) return all.filter((t) => !t.sharedJobId);
-  return linked;
-}
-
-/**
- * 적용 대상 taskId 해석: 선택값(selectedTaskId)이 **현재 후보 목록에 실제 존재**할 때만 유효(stale 방어).
- * 없으면 후보가 1개일 때 자동 지정, 그 외 null(=대상 없음 → 적용 비활성).
- */
-export function resolveTargetTaskId(tasks: ModuleTask[] = [], selectedTaskId: string | number | null | undefined): string | number | null {
-  if (selectedTaskId != null && tasks.some((t) => String(t.id) === String(selectedTaskId))) return selectedTaskId;
-  if (tasks.length === 1) return tasks[0].id;
-  return null;
-}
-
-/**
- * candidate 비율(posture_ratio 0~1)을 공정 활동시간(분/일)으로 환산한 분/일. 활동시간 없으면 null.
- * 순수 함수(테스트 대상). 표시 전용 — candidate value 자체는 비율을 유지한다.
- */
-export function candidateMinutesPerDay(ratio: unknown, activeMinutesPerDay: number | null | undefined): number | null {
-  if (activeMinutesPerDay == null || typeof ratio !== 'number') return null;
-  return Math.round(ratio * activeMinutesPerDay);
-}
-
-/**
- * candidate 비율(posture_ratio 0~1)을 공정 활동시간(분/일)으로 환산한 **시간/일**(candidateMinutesPerDay의
- * 시간 단위 버전, 6.0-17). unit이 hours_per_day인 candidate(예: repetitiveMedium/FastHoursLeft/Right)에
- * 사용 — candidate는 raw ratio를 보존하므로(convertClipFeaturesToPerDay) 표시 시점에 환산한다.
- */
-export function candidateHoursPerDay(ratio: unknown, activeMinutesPerDay: number | null | undefined): number | null {
-  const minutes = candidateMinutesPerDay(ratio, activeMinutesPerDay);
-  return minutes == null ? null : Math.round((minutes / 60) * 10) / 10;
-}
-
-// 6.0-16 Left/Right 4키만 raw ratio(posture_ratio, convertClipFeaturesToPerDay가 그대로 보존)라
-// candidateHoursPerDay 환산 대상. vibrationToolUseDurationCandidate도 unit은 같은 hours_per_day지만
-// Python 계산 블록 자체가 없는 mock 전용 placeholder라 value가 ratio가 아님(리뷰 반영) — unit만으로
-// 분기하면 이 값이 ratio×활동시간/60으로 잘못 부풀려진다. 그래서 unit이 아니라 featureKey로 명시 분기.
-const RATIO_HOURS_CANDIDATE_KEYS = new Set([
-  'repetitiveMediumHoursLeft', 'repetitiveMediumHoursRight',
-  'repetitiveFastHoursLeft', 'repetitiveFastHoursRight',
-]);
-
-/**
- * flat 참고 후보의 공정별 서브행 값 문자열(6.0-17). RATIO_HOURS_CANDIDATE_KEYS(신규 Left/Right 4키)만
- * candidateHoursPerDay로 시간/일 환산, cycles_per_minute·degrees는 기존처럼 원값+단위, 그 외
- * (vibrationToolUseDurationCandidate·categorical·boolean 등)는 원값 그대로(환산 없음).
- */
-export function formatCandidateSubValue(c: CandidateFeature, activeMinutesPerDay: number | null | undefined): string {
-  if (RATIO_HOURS_CANDIDATE_KEYS.has(c.featureKey)) {
-    const h = candidateHoursPerDay(c.value, activeMinutesPerDay);
-    return h != null ? `약 ${h} 시간/일` : '(활동시간 입력 시 시간/일 표시)';
-  }
-  const unit = VIDEO_FEATURE_TARGETS[c.featureKey as FeatureKey]?.unit;
-  const n = Math.round((Number(c.value) || 0) * 10) / 10;
-  if (unit === 'cycles_per_minute') return `약 ${n} 회/분`;
-  if (unit === 'degrees') return `약 ${n}°`;
-  return String(fmtNum(c.value));
-}
-
-/**
- * flat "참고 후보" 서브행 → { processId, rowKey, jobEv } (6.0-18: flat 골격 검수 배선).
- * jobEv는 (processId, featureKey) 2단 키(buildProcessEvidence 산출물)라 서브행이 1:1 대응.
- * evidence는 transient(영속화 안 함) → mock·리로드·공정삭제 시 null로 떨어지고 호출측(renderSkeletonReview)이
- * 자연히 버튼을 숨긴다(fail-safe). 렌더와 동일 경로를 테스트가 검증하도록 분리.
- */
-export function flatCandidateRowRef(
-  c: CandidateFeature, processEvidenceByProcessId: Record<string, EvidenceByFeatureKey> = {},
-): { processId: string | null; rowKey: string; jobEv: FeatureEvidence | null } {
-  const processId = (c.processIds || [])[0] || null;
-  const featMap = (processId && processEvidenceByProcessId[processId]) || null;
-  const jobEv = (featMap && featMap[c.featureKey]) || null;
-  return { processId, rowKey: `flat:${processId || 'noproc'}:${c.featureKey}`, jobEv };
-}
-
-/** flat 후보 중 하나라도 evidence가 있는가 — 없으면 "세션 한정" 안내를 띄운다(6.0-18). */
-export function hasAnyFlatEvidence(entries: CandidateFeature[] = [], processEvidenceByProcessId: Record<string, EvidenceByFeatureKey> = {}): boolean {
-  return entries.some((c) => flatCandidateRowRef(c, processEvidenceByProcessId).jobEv != null);
-}
-
-/**
- * flat "참고 후보"에서 task-scope 모듈(경추·척추) candidate를 제외한다(작업 단위 섹션에서 표시하므로 중복 방지).
- * 렌더와 동일 경로를 테스트가 검증하도록 순수 함수로 분리.
- */
-export function excludeTaskScopeCandidates(candidateFeatures: CandidateFeature[] = [], taskScopeModuleIds: string[] = []): CandidateFeature[] {
-  return candidateFeatures.filter((c) => !taskScopeModuleIds.includes(VIDEO_FEATURE_TARGETS[c.featureKey as FeatureKey]?.moduleId));
-}
-
-/**
- * flat "참고 후보" 표시 라벨. 반복빈도(6.0-11)는 raw featureKey/value 대신 "어깨/팔꿈치 반복: 약 N 회/분"으로.
- * 알 수 없는 featureKey는 null 반환 → 호출측이 기존 generic 렌더(featureKey: value) 유지.
- */
-// 6.0-17: 어깨 반복 밴드별 시간합 Left/Right — raw ratio라 값은 공정별 서브행(candidateHoursPerDay)에서
-// 표시하고, 여기 라벨은 값 없는 카테고리명만(단일 숫자로 대표할 수 없음 — 공정마다 다름).
-const BAND_SIDE_LABEL: Record<string, string> = {
-  repetitiveMediumHoursLeft: '어깨 반복(중간속도, 좌측)',
-  repetitiveMediumHoursRight: '어깨 반복(중간속도, 우측)',
-  repetitiveFastHoursLeft: '어깨 반복(빠른속도, 좌측)',
-  repetitiveFastHoursRight: '어깨 반복(빠른속도, 우측)',
-};
-
-export function flatCandidateLabel(c: CandidateFeature): string | null {
-  const n = Math.round((Number(c.value) || 0) * 10) / 10;
-  if (REPETITION_FEATURE_KEYS.has(c.featureKey)) {
-    const part = c.featureKey === 'shoulderRepetitionRate' ? '어깨' : '팔꿈치';
-    return `${part} 반복: 약 ${n} 회/분`;
-  }
-  // 6.0-10 손목: 반복(회/분)·굴곡/편위(°).
-  if (c.featureKey === 'wristRepetitionRate') return `손목 반복: 약 ${n} 회/분`;
-  if (c.featureKey === 'wristFlexionPeakAngle') return `손목 굴곡(최대): 약 ${n}°`;
-  if (c.featureKey === 'wristDeviationPeakAngle') return `손목 요/척측 편위(최대): 약 ${n}°`;
-  if (BAND_SIDE_LABEL[c.featureKey]) return BAND_SIDE_LABEL[c.featureKey];
-  return null;
-}
-
-// 한 contribution(공정)의 환산식 문자열(자세비율 × 활동시간). ratio metric만 표시. 단위별 분기.
-export function contribFormula(ev: ContributionEvidence | null | undefined, perDayValue: FeatureScalar, unit: string | null | undefined): string | null {
-  if (!ev || ev.intrinsicMetric !== 'posture_ratio' || ev.activeMinutesPerDay == null) return null;
-  const ratio = fmtNum(ev.intrinsicValue);
-  const pd = typeof perDayValue === 'number' ? Math.round(perDayValue * 10) / 10 : perDayValue;
-  const pdStr = pd == null ? '?' : pd;
-  const am = ev.activeMinutesPerDay;
-  if (unit === 'hours_per_day') return `${pdStr} 시간/일 = 자세비율 ${ratio} × 활동 ${am}분/일 ÷ 60`;
-  if (unit === 'minutes_per_day') return `${pdStr} 분/일 = 자세비율 ${ratio} × 활동 ${am}분/일`;
-  return `${pdStr} ${unit || ''} = 자세비율 ${ratio} × 활동 ${am}분/일`;
 }
 
 // "왜 이 값?" 근거 패널. jobEv 없으면(mock·이전 세션) fallback 안내(영속화 안 하는 설계 표현).
@@ -794,71 +319,6 @@ export function FlatCandidateList({
       )}
     </div>
   );
-}
-
-// source job 버튼 라벨: "〈공정명〉 측면(채택)" 형태.
-export function sourceJobLabel(sj: SourceJob): string {
-  const vp = sj.viewpoint ? (VIEWPOINT_LABEL[sj.viewpoint] || sj.viewpoint) : '';
-  const tag = sj.adopted ? '채택' : '비교 시점';
-  return `${sj.processName ? sj.processName + ' ' : ''}${vp ? vp + ' ' : ''}(${tag})`;
-}
-
-/** 공정 시간점유율 합(직업별). 100% 초과/미달 경고용. */
-export function shareTotalsByJob(processes: VideoProcess[] = []): Record<string, number> {
-  const totals: Record<string, number> = {};
-  for (const p of processes) {
-    totals[p.sharedJobId] = (totals[p.sharedJobId] || 0) + (Number(p.shiftSharePercent) || 0);
-  }
-  return totals;
-}
-
-// 입력(공정/클립)이 바뀌면 mock 분석 파생결과는 stale이 되므로 비운다(잘못된 기준 적용 방지).
-// 이미 모듈에 적용된 값(appliedInputs)·provenance는 보존한다.
-export function clearDerived(va: VideoAnalysisData): VideoAnalysisData {
-  return { ...va, processFeatures: [], jobFeatures: [], candidateFeatures: [] };
-}
-export function addProcessVA(va: VideoAnalysisData, jobs: SharedJob[] = []): VideoAnalysisData {
-  return clearDerived({
-    ...va,
-    processes: [...va.processes, {
-      id: crypto.randomUUID(),
-      // 새 공정의 기본 직력은 첫 "신체부담평가 포함" 직력(전부 미포함이면 첫 직력)
-      sharedJobId: (filterAnalysisJobs(jobs)[0] || jobs[0])?.id || '',
-      name: `공정 ${va.processes.length + 1}`,
-      shiftSharePercent: 0,
-      activeMinutesPerDay: null, // 공정활동분/일(수기). per-day 환산 입력. null=모름(적용 불가).
-      analysisProfile: 'posture-basic',
-    }],
-  });
-}
-export function editProcessVA(va: VideoAnalysisData, id: string, patch: Partial<VideoProcess>): VideoAnalysisData {
-  return clearDerived({ ...va, processes: va.processes.map((p) => (p.id === id ? { ...p, ...patch } : p)) });
-}
-export function removeProcessVA(va: VideoAnalysisData, id: string): VideoAnalysisData {
-  return clearDerived({
-    ...va,
-    processes: va.processes.filter((p) => p.id !== id),
-    clips: va.clips.filter((c) => c.processId !== id),
-  });
-}
-export function addClipVA(va: VideoAnalysisData, processId: string): VideoAnalysisData {
-  return clearDerived({
-    ...va,
-    clips: [...va.clips, { id: crypto.randomUUID(), processId, viewpoint: 'sagittal', analysisProfile: 'posture-basic' }],
-  });
-}
-export function editClipVA(va: VideoAnalysisData, id: string, patch: Partial<VideoClip>): VideoAnalysisData {
-  return clearDerived({ ...va, clips: va.clips.map((c) => (c.id === id ? { ...c, ...patch } : c)) });
-}
-export function removeClipVA(va: VideoAnalysisData, id: string): VideoAnalysisData {
-  return clearDerived({ ...va, clips: va.clips.filter((c) => c.id !== id) });
-}
-
-// 적용 경로 결정: 인트라넷=서버(synced 필요), 인트라넷+미동기=차단, 그 외=로컬.
-export function resolveApplyMode(serverSupported: boolean, isSynced: boolean): 'server' | 'blocked' | 'local' {
-  if (serverSupported && isSynced) return 'server';
-  if (serverSupported && !isSynced) return 'blocked';
-  return 'local';
 }
 
 // ── 컴포넌트 ──────────────────────────────────────────────────────────────
