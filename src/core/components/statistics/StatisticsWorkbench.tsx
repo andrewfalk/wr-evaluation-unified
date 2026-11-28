@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { fetchStatsCatalog, previewStatsAnalysis, runStatsAnalysis, exportStatsAggregate } from '../../services/statsRepository';
+import { useEffect, useRef, useState } from 'react';
+import { runStatsAnalysis } from '../../services/statsRepository';
 import { useStatsRunPolling } from '../../hooks/useStatsRunPolling';
 import { CatalogPanel } from './CatalogPanel';
 import { RecipePanel } from './RecipePanel';
@@ -10,8 +10,12 @@ import { describeStatsApiError, getUnknownVariableKeys, REMOVED_VARIABLES, UNKNO
 import { planModePurposeTransition, pruneStaleSelections } from './workbenchTransitions';
 import type { RecipeDraft } from './workbenchTransitions';
 import { useRecipeDraft } from './useRecipeDraft';
-import type { RecipePreviewState, RecipeTransitionNotice } from './RecipePanel';
-import type { AnalyzeResponse, CatalogResponse } from '@wr/contracts/stats';
+import { useStatsCatalog } from './useStatsCatalog';
+import { useStatsPreview } from './useStatsPreview';
+import { useStatsExport } from './useStatsExport';
+import { isFeatureUnavailableError } from './workbenchIo';
+import type { RecipeTransitionNotice } from './RecipePanel';
+import type { AnalyzeResponse } from '@wr/contracts/stats';
 import { buildConditionKey, buildRecipe, isRecipeComplete } from './recipeBuild';
 import type { WorkbenchRecipe } from './recipeBuild';
 import './statistics-workbench.css';
@@ -19,12 +23,6 @@ import '../charts/charts.css';
 
 // 작업대 레시피 타입 — P2-77a에서 recipeBuild.ts로 옮겼다.
 export type { WorkbenchRecipe } from './recipeBuild';
-
-/** 서버 오류 객체에서 이 화면이 읽는 필드(statsRepository가 던지는 오류). */
-interface StatsErrorLike {
-  status?: number;
-  data?: { code?: string };
-}
 
 export interface StatisticsWorkbenchProps {
   session: unknown;
@@ -37,20 +35,6 @@ export interface StatisticsWorkbenchProps {
   onClose: () => void;
 }
 
-function downloadBlob(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
-function isFeatureUnavailableError(err: unknown): boolean {
-  return (err as StatsErrorLike | null | undefined)?.status === 404 && (err as StatsErrorLike | null | undefined)?.data?.code === 'NOT_FOUND';
-}
 
 // PR2 — 통계분석 워크벤치 화면. 계획서(pr2-dreamy-frog.md) §1~§10의 최종 설계를 그대로
 // 구현한다: 4열 레이아웃, draft/appliedFilters/committed 3단 상태, 조건-key+요청세대
@@ -58,51 +42,10 @@ function isFeatureUnavailableError(err: unknown): boolean {
 export function StatisticsWorkbench({
   session, serverConfig, statsAvailable, refetchConfig, configRefreshing, configRefreshError, onClose,
 }: StatisticsWorkbenchProps) {
-  const [catalogState, setCatalogState] = useState<{ status: string; data: CatalogResponse | null; error: unknown }>({ status: 'loading', data: null, error: null });
-  const [featureUnavailableDetected, setFeatureUnavailableDetected] = useState(false);
-
-  // 1차 리뷰가 잡은 결함 — statsAvailable "값"만 보고 배너를 내리면, config가 이미 true로
-  // 저장된 상태에서(일시적 404 → 배너 표시 → 서버 복구 → 재조회도 true) true→true라
-  // effect가 재실행되지 않아 배너가 안 내려가고, 카탈로그·preview도 마운트/조건 변경 시에만
-  // 재요청되므로 최초 실패가 그대로 남는다. "재조회가 방금 끝났다"는 사건(configRefreshing의
-  // true→false 하강 엣지) 자체를 감지해 recoveryToken을 올리고, 카탈로그·preview 둘 다 이
-  // 토큰을 의존성에 포함시켜 값이 안 바뀌어도 재시도되게 한다.
-  //
-  // 2차 리뷰가 잡은 결함 — useServerConfig.js의 refetchConfig()는 실패 시 state.config를
-  // 그대로 둔다(§4 설계 — 오래된 응답이 최신 상태를 덮지 않게). 즉 statsAvailable이 true인
-  // 채로 재조회가 "실패"해도(configRefreshing: true→false는 성공·실패 모두에서 일어남)
-  // statsAvailable 값만 보면 여전히 true라 그 실패까지 복구로 오인했다 — 재조회가 실제로
-  // 성공했을 때(configRefreshError가 비어있을 때)만 복구로 인정한다.
-  const [recoveryToken, setRecoveryToken] = useState(0);
-  const wasRefreshingRef = useRef(configRefreshing);
-  useEffect(() => {
-    const wasRefreshing = wasRefreshingRef.current;
-    wasRefreshingRef.current = configRefreshing;
-    if (wasRefreshing && !configRefreshing && statsAvailable && !configRefreshError) {
-      setFeatureUnavailableDetected(false);
-      setRecoveryToken((t) => t + 1);
-    }
-  }, [configRefreshing, statsAvailable, configRefreshError]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const controller = new AbortController();
-    setCatalogState({ status: 'loading', data: null, error: null });
-    fetchStatsCatalog(session, { signal: controller.signal })
-      .then((data) => { if (!cancelled) setCatalogState({ status: 'ready', data, error: null }); })
-      .catch((err) => {
-        if (cancelled) return;
-        if (isFeatureUnavailableError(err)) setFeatureUnavailableDetected(true);
-        setCatalogState({ status: 'error', data: null, error: err });
-      });
-    return () => { cancelled = true; controller.abort(); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [recoveryToken]);
-
-  const catalogByKey = useMemo(
-    () => new Map((catalogState.data?.variables ?? []).map((v) => [v.key, v])),
-    [catalogState.data],
-  );
+  // P2-77c — 카탈로그 불러오기(설정 재조회 하강 엣지 → recoveryToken → 다시 불러오기)는 useStatsCatalog로(effect 순서 그대로).
+  const {
+    catalogState, catalogByKey, featureUnavailableDetected, setFeatureUnavailableDetected, recoveryToken, setRecoveryToken,
+  } = useStatsCatalog({ session, statsAvailable, configRefreshing, configRefreshError });
 
   // PR0-B3 Part A — GET /catalog가 실제로 지원한다고 응답한 grain만 선택지로 노출한다.
   // 아직 로딩 중이면 'case'만 있다고 가정(기존 동작과 동일하게 안전한 기본값).
@@ -217,41 +160,13 @@ export function StatisticsWorkbench({
     grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters,
     outcomeKey, standardizePredictors, interactionTerms, splineKeys, eventLevel, stratifyByKey,
   );
-  const [previewState, setPreviewState] = useState<RecipePreviewState>({ key: null, status: 'idle', result: null, error: null });
-  const previewGenRef = useRef(0);
-
-  useEffect(() => {
-    const key = currentConditionKey;
-    const gen = ++previewGenRef.current;
-    if (!isRecipeComplete(analysisMode, variableKeys, formulaPolicies, catalogByKey, appliedFilters, outcomeKey, eventLevel, stratifyByKey)) {
-      setPreviewState({ key, status: 'idle', result: null, error: null });
-      return undefined;
-    }
-    setPreviewState({ key, status: 'loading', result: null, error: null });
-    const controller = new AbortController();
-    const timer = setTimeout(async () => {
-      try {
-        // PR3-A — preview는 requestedMethod를 참고만 하고 유효성을 검사하지 않는다
-        // (서버가 관대함, 계획서 §파이프라인 "preview는 관대하다") — method 미선택
-        // 상태에서도 이 호출은 정상적으로 나가야 availableMethods를 받아올 수 있다.
-        const recipe = buildRecipe(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters, outcomeKey, standardizePredictors, interactionTerms, splineKeys, eventLevel, catalogByKey, stratifyByKey);
-        const res = await previewStatsAnalysis(recipe, session, { signal: controller.signal });
-        if (gen !== previewGenRef.current) return;
-        setPreviewState((prev) => (prev.key === key ? { key, status: 'ready', result: res, error: null } : prev));
-      } catch (err) {
-        if ((err as Error | null | undefined)?.name === 'AbortError') return;
-        if (isFeatureUnavailableError(err)) setFeatureUnavailableDetected(true);
-        if (gen !== previewGenRef.current) return;
-        // 실패한 요청의 목적을 오류와 같이 보관한다 — 오류 문구는 현재 화면 목적이 아니라 요청 목적 기준이다.
-        setPreviewState((prev) => (prev.key === key ? { key, status: 'error', result: null, error: err, requestPurpose: analysisPurpose } : prev));
-      }
-    }, 500);
-    return () => { clearTimeout(timer); controller.abort(); };
-    // recoveryToken도 의존성에 넣는다 — 조건은 그대로인데 이전 preview가 기능비가용으로
-    // 실패했을 때, 재조회 성공 이후 재시도할 유일한 트리거가 이것이다(조건 자체는 안 바뀌므로
-    // currentConditionKey만으로는 재실행되지 않는다).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentConditionKey, recoveryToken]);
+  // P2-77c — 미리보기 요청(조건 키 + 요청 세대, 500ms 디바운스)은 useStatsPreview로(effect 자리·의존 배열 그대로).
+  const { previewState } = useStatsPreview({
+    currentConditionKey, recoveryToken, session, analysisPurpose,
+    isComplete: () => isRecipeComplete(analysisMode, variableKeys, formulaPolicies, catalogByKey, appliedFilters, outcomeKey, eventLevel, stratifyByKey),
+    buildRequest: () => buildRecipe(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters, outcomeKey, standardizePredictors, interactionTerms, splineKeys, eventLevel, catalogByKey, stratifyByKey),
+    onFeatureUnavailable: () => setFeatureUnavailableDetected(true),
+  });
 
   const isPreviewCurrent = previewState.key === currentConditionKey;
 
@@ -403,7 +318,6 @@ export function StatisticsWorkbench({
     : false;
 
   // ---- export ----
-  const [exportState, setExportState] = useState<{ status: string; error: unknown }>({ status: 'idle', error: null });
   // PR3-A §"결과 계약 불변조건" — 내보내기 잠금은 activeScreen이나 현재 활성 탭이
   // 아니라 저장된 실행의 analysisMode 기준(committedRecipe)으로 판정한다. 탭을
   // 바꿔도 내보내기 가능 여부는 바뀌면 안 된다. 서버도 manifest.analysisMode 기준으로
@@ -411,20 +325,10 @@ export function StatisticsWorkbench({
   // PR4-A2 — 회귀는 CSV export 지원(집계 섹션만, pointDiagnostics는 서버가
   // 애초에 CSV에 넣지 않는다). bivariate/correlation_matrix는 여전히 PR5 범위.
   const exportUnsupported = committedRecipe?.analysisMode === 'bivariate' || committedRecipe?.analysisMode === 'correlation_matrix';
-  async function handleExport() {
-    if (!committedResult || actionsLocked || exportUnsupported) return; // 버튼 disabled와 별개로 핸들러 자체도 잠금을 지킨다
-    setExportState({ status: 'exporting', error: null });
-    try {
-      const blob = await exportStatsAggregate(committedResult.runManifest.analysisRunId, session);
-      // 받는 동안 화면이 내려갔으면(계정 전환 등) 이전 화면의 내보내기 파일을 만들지 않는다(AS-4).
-      if (!mountedRef.current) return;
-      downloadBlob(blob, `stats-export-${committedResult.runManifest.analysisRunId}.csv`);
-      setExportState({ status: 'idle', error: null });
-    } catch (err) {
-      if (isFeatureUnavailableError(err)) setFeatureUnavailableDetected(true);
-      setExportState({ status: 'error', error: err });
-    }
-  }
+  const { exportState, handleExport } = useStatsExport({
+    committedResult, actionsLocked, exportUnsupported, session, mountedRef,
+    onFeatureUnavailable: () => setFeatureUnavailableDetected(true),
+  });
 
   // ---- 반응형 접힘(§10) ----
   const viewportWidth = useViewportWidth();
