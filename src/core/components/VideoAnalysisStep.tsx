@@ -24,31 +24,30 @@ import { useWorkspaceLifetime } from '../../app/useWorkspaceLifetime';
 import { TargetPicker } from './TargetPicker';
 import { SkeletonOverlay } from './SkeletonOverlay';
 import { getModule } from '../moduleRegistry';
-import { VIDEO_FEATURE_TARGETS, resolveAnalysisJobIds, buildAppliedRecipe } from '@wr/contracts/index';
+import { resolveAnalysisJobIds, buildAppliedRecipe } from '@wr/contracts/index';
 import { isJobExcludedFromAnalysis } from '@wr/analytics-core/jobScope';
 import type { ReactNode } from 'react';
-import type { FeatureKey } from '@wr/contracts/index';
-import type { OverlaySegment } from './SkeletonOverlay';
 import type { SampleDetectResult } from './TargetPicker';
 import type {
-  AppliedInputEntry, CandidateFeature, ContributionEvidence, EvidenceByFeatureKey, FeatureEvidence, FusionCandidate, InferenceDevice,
-  ModuleTask, ProcessEvidence, ProcessFeatures, SharedJob, SuppressedCandidate, UploadState, VideoAnalysisData, VideoClip,
-  VideoFeatureMap, VideoProcess,
+  AppliedInputEntry, EvidenceByFeatureKey, FeatureEvidence, InferenceDevice, ModuleTask, ProcessEvidence, ProcessFeatures,
+  SharedJob, SuppressedCandidate, UploadState, VideoAnalysisData, VideoClip, VideoFeatureMap, VideoProcess,
 } from '../services/videoStepTypes';
 import {
   buildVideoStatus, fmtNum, effectiveShare, buildJobFeatures, buildJobEvidence, buildProcessEvidence, resolveSourceJobs,
-  segmentsForJob, contribFormula, sourceJobLabel,
+  segmentsForJob, sourceJobLabel,
 } from '../services/videoStepEvidence';
-import {
-  candidateMinutesPerDay, candidateHoursPerDay, RATIO_HOURS_CANDIDATE_KEYS, formatCandidateSubValue, flatCandidateRowRef,
-  hasAnyFlatEvidence, excludeTaskScopeCandidates, flatCandidateLabel,
-} from '../services/videoStepCandidates';
+import { candidateMinutesPerDay, excludeTaskScopeCandidates } from '../services/videoStepCandidates';
 import {
   VIEWPOINTS, PROFILES, MOCK_BUNDLE, canDetectClip, requestedFeaturesForModules, tasksForJob, resolveTargetTaskId,
   shareTotalsByJob, clearDerived, addProcessVA, editProcessVA, removeProcessVA, addClipVA, editClipVA, removeClipVA, resolveApplyMode,
 } from '../services/videoStepState';
+import { EvidencePanel } from './video/EvidencePanel';
+import { FlatCandidateList } from './video/FlatCandidateList';
 
-// 순수 헬퍼와 타입은 services/videoStep*.ts로 옮겼다(P2-75c) — 헬퍼 테스트 등이 이 파일에서 가져가므로 지금 이름 그대로 다시 내보낸다.
+// 순수 헬퍼와 타입은 services/videoStep*.ts로(P2-75c), 하위 화면은 video/로(P2-75d) 옮겼다 — 테스트 등이 이 파일에서 가져가므로
+// 지금 이름 그대로 다시 내보낸다.
+export { EvidencePanel } from './video/EvidencePanel';
+export { FlatCandidateList } from './video/FlatCandidateList';
 export {
   buildVideoStatus, fmtNum, effectiveShare, buildJobFeatures, buildJobEvidence, buildProcessEvidence, resolveSourceJobs,
   segmentsForJob, contribFormula, sourceJobLabel,
@@ -137,188 +136,6 @@ export interface VideoAnalysisStepProps {
   fixtureMode?: boolean;
   serverConfig?: unknown;
   onServerApplied?: (serverPatient: unknown) => void;
-}
-
-// "왜 이 값?" 근거 패널. jobEv 없으면(mock·이전 세션) fallback 안내(영속화 안 하는 설계 표현).
-export function EvidencePanel({ jobEv, unit }: { jobEv: FeatureEvidence | null | undefined; unit: string | null | undefined }) {
-  if (!jobEv) {
-    return (
-      <div className="va-evidence-note">
-        근거 정보는 현재 분석 세션에서만 표시됩니다. 다시 분석하면 확인할 수 있습니다.
-      </div>
-    );
-  }
-  // 한 행(라벨 dt + 값 dd). 값이 비면 행 자체를 그리지 않는다.
-  const row = (label: string, value: ReactNode) => (
-    <div className="va-evidence-row">
-      <dt>{label}</dt>
-      <dd>{value}</dd>
-    </div>
-  );
-  return (
-    <div className="va-evidence">
-      <dl className="va-evidence-dl">
-        {row('집계 방식', <code>{jobEv.aggregationMethod}</code>)}
-        {(jobEv.analysisJobIds?.length as number) > 0 && row('분석 job', jobEv.analysisJobIds.join(', '))}
-      </dl>
-      {(jobEv.contributions || []).map((c, i) => {
-        const ev = (c.evidence || {}) as ContributionEvidence;
-        const formula = contribFormula(ev, c.perDayValue, unit);
-        const bd = ev.confidenceBreakdown;
-        const adopted = ev.fusion?.adopted;
-        const bdKeys = bd
-          ? ['keypoint', 'visibility', 'tracking', 'viewpoint', 'usableFrameRatio'].filter((k) => bd[k] != null)
-          : [];
-        return (
-          <div key={i} className="va-evidence-proc">
-            <div className="va-evidence-proc-title">
-              <b>{c.processName || '(공정)'}</b> <span>공정 점유율 {c.sharePercent}%</span>
-            </div>
-            <dl className="va-evidence-dl">
-              {formula && row('환산식', formula)}
-              {adopted && row('채택 시점', `${adopted.viewpoint || '미지정'}${adopted.jobId ? ` (job ${adopted.jobId})` : ''}${(ev.fusion?.candidates?.length as number) > 1 ? ` / 후보 ${(ev.fusion as { candidates: FusionCandidate[] }).candidates.length}개` : ''}`)}
-              {bdKeys.length > 0 && row('신뢰도 성분', (
-                <span className="va-evidence-chips">
-                  {bdKeys.map((k) => <span key={k} className="va-flag-pill tone-neutral">{`${k} ${Math.round((bd as Record<string, number>)[k] * 100)}%`}</span>)}
-                </span>
-              ))}
-              {(ev.segments?.length as number) > 0 && row('근거 구간', `${(ev.segments as OverlaySegment[]).length}개`)}
-            </dl>
-            {(ev.warnings?.length as number) > 0 && <div className="va-evidence-warn">경고: {(ev.warnings as string[]).join(', ')}</div>}
-          </div>
-        );
-      })}
-      <div className="va-evidence-note">
-        ※ 신뢰도·경고는 실험값입니다(자동제안 차단 임계값은 검증 전까지 비활성). 값은 전문의가 확정합니다.
-      </div>
-    </div>
-  );
-}
-
-/**
- * flat "참고 후보" 리스트(6.0-17 그룹핑 + 6.0-18 골격 검수·근거 배선). `renderEvidencePanel`·
- * `renderSkeletonReview`는 VideoAnalysisStep의 state 클로저(expandedOverlay·session 등)라 재구현하지
- * 않고 render prop으로 주입한다 — 이 컴포넌트는 표시 로직만 갖고, jsdom 렌더 테스트(flatCandidateList.test.jsx)로
- * JSX 배선 누락(이번 버그의 본체 — 순수 함수 테스트만으로는 검출 불가)을 검증한다.
- *
- * mock 모드는 서버 artifact가 원천적으로 없어 골격 검수가 불가능하고, 근거 패널을 열어도 "다시 분석하면
- * 확인할 수 있습니다"라는 사실과 다른 안내만 나온다 → 버튼·상세 영역·안내 문구 전부 `serverMode` 전용.
- * task-scope 후보행(renderCandidateRow)은 mock에서도 "왜 이 값?"이 뜨는 기존 동작을 유지하므로, 이 비대칭은
- * 의도된 것이다(flat 행은 골격 검수와 짝을 이루는 서버 전용 검수 도구로 취급).
- */
-export function FlatCandidateList({
-  candidates,
-  processes,
-  processEvidenceByProcessId,
-  suppressedCandidates,
-  serverMode,
-  expandedEvidence,
-  onToggleEvidence,
-  renderEvidencePanel,
-  renderSkeletonReview,
-}: {
-  candidates: CandidateFeature[];
-  processes: VideoProcess[];
-  processEvidenceByProcessId: Record<string, EvidenceByFeatureKey>;
-  suppressedCandidates: SuppressedCandidate[];
-  serverMode: boolean;
-  expandedEvidence: string | null;
-  onToggleEvidence: (key: string | null) => void;
-  renderEvidencePanel: (jobEv: FeatureEvidence | null, unit: string | null) => ReactNode;
-  renderSkeletonReview: (rowKey: string, jobEv: FeatureEvidence | null) => ReactNode;
-}) {
-  if (candidates.length === 0 && suppressedCandidates.length === 0) return null;
-  // 6.0-17: featureKey별로 묶어 헤더 1개 + 공정별 값 서브행으로 표시(이전엔 공정마다 개별
-  // 항목이라 여러 공정이 같은 후보를 내면 라벨이 중복 노출됨).
-  const grouped = new Map<string, CandidateFeature[]>();
-  for (const c of candidates) {
-    ((grouped.get(c.featureKey) || grouped.set(c.featureKey, []).get(c.featureKey)) as CandidateFeature[]).push(c);
-  }
-  return (
-    <div className="va-suggest-group">
-      <div className="va-suggest-group-title">참고 후보 (자동입력 금지)</div>
-      {candidates.length > 0 && (
-        <ul className="va-suggest-list">
-          {[...grouped.entries()].map(([featureKey, entries]) => {
-            const first = entries[0];
-            const label = flatCandidateLabel(first);
-            return (
-              <li key={featureKey} className="va-suggest-card">
-                <div className="va-suggest-head">
-                  <span className="va-suggest-value">
-                    {label !== null
-                      ? <>{label} — <span className="va-hint">{displayCandidateReason(first.reason)}</span></>
-                      : <><code className="va-suggest-key">{featureKey}</code>: {String(first.value)} — <span className="va-hint">{displayCandidateReason(first.reason)}</span></>}
-                  </span>
-                  <span className="va-flag-pill tone-warning" title="관찰값 — 자동입력 안 함">참고만</span>
-                </div>
-                <ul className="va-subrows">
-                  {entries.map((c, idx) => {
-                    // 6.0-18: 골격 검수·근거 배선. jobEv는 (processId, featureKey) 1:1이라 서브행이 부착점
-                    // (그룹 헤더는 여러 공정 jobEv 합성이 필요해 금지 — 계획 §1).
-                    const { processId, rowKey, jobEv } = flatCandidateRowRef(c, processEvidenceByProcessId);
-                    const p = processes.find((pp) => pp.id === processId);
-                    const expanded = expandedEvidence === rowKey;
-                    // serverMode 가드를 컴포넌트에서도 명시(renderSkeletonReview 내부 게이트와 이중). 부모
-                    // state인 expandedEvidence는 모드 전환(환자 전환 등) 후에도 rowKey가 남을 수 있어
-                    // 상세 영역까지 함께 막는다.
-                    const skeleton = serverMode ? renderSkeletonReview(rowKey, jobEv) : null;
-                    // Left/Right 4키는 candidate value가 raw ratio(convertClipFeaturesToPerDay가 그대로
-                    // 보존)라 jobEv.contributions[].perDayValue도 ratio 그대로다. contribFormula는 그
-                    // perDayValue를 "환산 완료값"으로 보고 그대로 찍어(예: "0.2 시간/일 = 자세비율 0.2 ×
-                    // 활동 200분/일 ÷ 60") 미환산 비율을 환산값처럼 오표시한다(서브행은 formatCandidateSubValue로
-                    // 이미 정상 환산 — 0.7 시간/일). renderCandidateRow의 trunkFlexionOver45Duration displayJobEv
-                    // 패치(:1023-1032)와 동일하게, 근거 패널에 넘기기 직전에만 perDayValue를
-                    // candidateHoursPerDay 결과로 보정한다(골격 검수는 원본 jobEv를 그대로 씀 — segments·fusion엔
-                    // 영향 없음).
-                    const displayJobEv = (RATIO_HOURS_CANDIDATE_KEYS.has(c.featureKey) && jobEv)
-                      ? {
-                          ...jobEv,
-                          contributions: (jobEv.contributions || []).map((ct) => ({
-                            ...ct, perDayValue: candidateHoursPerDay(c.value, p?.activeMinutesPerDay),
-                          })),
-                        }
-                      : jobEv;
-                    return (
-                      <li key={processId || idx} className="va-subrow">
-                        {p?.name || '(공정 미상)'}: {formatCandidateSubValue(c, p?.activeMinutesPerDay)}
-                        {serverMode && (
-                          <button type="button" className="btn btn-secondary btn-sm va-subrow-btn" data-readonly-allow
-                            onClick={() => onToggleEvidence(expanded ? null : rowKey)}>
-                            {expanded ? '근거 닫기' : '왜 이 값?'}
-                          </button>
-                        )}
-                        {serverMode && (expanded || skeleton) && (
-                          <div className="va-suggest-details">
-                            {expanded && renderEvidencePanel(displayJobEv, VIDEO_FEATURE_TARGETS[c.featureKey as FeatureKey]?.unit || null)}
-                            {skeleton}
-                          </div>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-      {/* evidence는 transient(영속화 안 함) — 새로고침·환자 재진입 후에는 골격·근거가 사라진다. 그 상황을
-          버그로 오인하지 않도록 블록당 한 번만 안내(서버 모드 한정 — mock은 원래 검수 대상 아님). 6.0-18. */}
-      {serverMode && candidates.length > 0
-        && !hasAnyFlatEvidence(candidates, processEvidenceByProcessId) && (
-        <p className="va-hint va-hint-block">
-          ※ 골격 검수·근거는 현재 분석 세션에서만 제공됩니다 — 다시 분석하면 표시됩니다.
-        </p>
-      )}
-      {/* 시점 하드 게이트 안내(6.0-10): 손목 굴곡/편위는 같은 2D 값이라 시점별로만 노출 */}
-      {suppressedCandidates.length > 0 && (
-        <p className="va-hint va-hint-block">
-          손목 각도는 측면 클립에서 굴곡만, 정면 클립에서 편위만 표시됩니다 — 해당 시점 클립이 없어 일부 후보는 숨겨졌습니다.
-        </p>
-      )}
-    </div>
-  );
 }
 
 // ── 컴포넌트 ──────────────────────────────────────────────────────────────
