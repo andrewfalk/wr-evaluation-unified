@@ -1,6 +1,6 @@
 // 관리자 콘솔 — 감사 로그 탭. P2-82a에서 AdminConsoleModal.tsx의 선언을 본문 그대로 옮겼다.
 import { useState, useEffect } from 'react';
-import { requestJson } from '../../services/httpClient';
+import { fetchAuditLog } from '../../services/adminRepository';
 import { resolveApiBaseUrl } from '../../../platform/dataMode';
 import { emrAuditNote } from '../adminAuditNotes';
 import { fmt } from './shared';
@@ -56,7 +56,7 @@ export function AuditTab({ session }: TabProps) {
       const params = new URLSearchParams({ page: String(p), limit: String(limit) });
       if (actionFilter) params.set('action', actionFilter);
       if (targetFilter) params.set('targetType', targetFilter);
-      const data: AuditPage = await requestJson(`/api/admin/audit?${params}`, { baseUrl, session });
+      const data = await fetchAuditLog({ baseUrl, session }, params) as AuditPage;
       setItems(data.items);
       setTotal(data.total);
       setPage(p);

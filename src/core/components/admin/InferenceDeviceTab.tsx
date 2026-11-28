@@ -1,6 +1,6 @@
 // 관리자 콘솔 — 추론 디바이스 탭. P2-82b에서 AdminConsoleModal.tsx의 선언을 본문 그대로 옮겼다.
 import { useState, useEffect } from 'react';
-import { requestJson } from '../../services/httpClient';
+import { fetchOrgSettings, patchOrgSettings } from '../../services/adminRepository';
 import { resolveApiBaseUrl } from '../../../platform/dataMode';
 import type { TabProps } from './shared';
 
@@ -36,7 +36,7 @@ export function InferenceDeviceTab({ session }: TabProps) {
     setError(null);
     setSavedMsg(null);
     try {
-      const data: OrgSettings = await requestJson('/api/admin/org-settings', { baseUrl, session });
+      const data = await fetchOrgSettings({ baseUrl, session }) as OrgSettings;
       setDevice(data.inferenceDevice);
       setDraft(data.inferenceDevice);
       setGpu(data.gpu || null);
@@ -54,9 +54,7 @@ export function InferenceDeviceTab({ session }: TabProps) {
     setError(null);
     setSavedMsg(null);
     try {
-      const data: OrgSettings = await requestJson('/api/admin/org-settings', {
-        baseUrl, method: 'PATCH', body: { inferenceDevice: draft }, session,
-      });
+      const data = await patchOrgSettings({ baseUrl, session }, draft) as OrgSettings;
       setDevice(data.inferenceDevice);
       setDraft(data.inferenceDevice);
       setSavedMsg('저장되었습니다.');

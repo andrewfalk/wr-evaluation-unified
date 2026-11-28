@@ -1,6 +1,6 @@
 // 관리자 콘솔 — 디바이스 탭. P2-82a에서 AdminConsoleModal.tsx의 선언을 본문 그대로 옮겼다.
 import { useState, useEffect } from 'react';
-import { requestJson } from '../../services/httpClient';
+import { fetchDevices, postDeviceAction } from '../../services/adminRepository';
 import { resolveApiBaseUrl } from '../../../platform/dataMode';
 import { deviceActionErrorMessage, devicesPerPc } from '../adminAuditNotes';
 import { StatusBadge, fmt } from './shared';
@@ -31,7 +31,7 @@ export function DevicesTab({ session }: TabProps) {
     setLoading(true);
     setError(null);
     try {
-      const data: { devices: DeviceRow[] } = await requestJson('/api/admin/devices', { baseUrl, session });
+      const data = await fetchDevices({ baseUrl, session }) as { devices: DeviceRow[] };
       setDevices(data.devices);
     } catch (e) {
       setError((e as Error).message);
@@ -45,7 +45,7 @@ export function DevicesTab({ session }: TabProps) {
   const act = async (deviceId: string, path: string) => {
     setActioning(deviceId);
     try {
-      await requestJson(`/api/admin/devices/${deviceId}/${path}`, { baseUrl, method: 'POST', session });
+      await postDeviceAction({ baseUrl, session }, deviceId, path);
       await load();
     } catch (e) {
       setError(deviceActionErrorMessage(e as Error));

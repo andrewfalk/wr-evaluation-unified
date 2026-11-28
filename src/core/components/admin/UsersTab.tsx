@@ -1,6 +1,6 @@
 // 관리자 콘솔 — 사용자 관리 탭. P2-82a에서 AdminConsoleModal.tsx의 선언을 본문 그대로 옮겼다.
 import { useState, useEffect } from 'react';
-import { requestJson } from '../../services/httpClient';
+import { createAdminUser, fetchAdminUsers, postUserStatus, resetUserPassword } from '../../services/adminRepository';
 import { resolveApiBaseUrl } from '../../../platform/dataMode';
 import { validatePassword, RoleBadge, fmt } from './shared';
 import type { TabProps, UserRow, UsersResponse } from './shared';
@@ -26,7 +26,7 @@ export function UsersTab({ session }: TabProps) {
     setLoading(true);
     setError(null);
     try {
-      const data: UsersResponse = await requestJson('/api/admin/users', { baseUrl, session });
+      const data = await fetchAdminUsers({ baseUrl, session }) as UsersResponse;
       setUsers(data.users);
     } catch (e) {
       setError((e as Error).message);
@@ -50,7 +50,7 @@ export function UsersTab({ session }: TabProps) {
     }
     setCreating(true);
     try {
-      await requestJson('/api/admin/users', { baseUrl, method: 'POST', body: form, session });
+      await createAdminUser({ baseUrl, session }, form);
       setForm(EMPTY_FORM);
       await load();
     } catch (e) {
@@ -64,9 +64,7 @@ export function UsersTab({ session }: TabProps) {
     setActioning(user.id);
     setError(null);
     try {
-      await requestJson(`/api/admin/users/${user.id}/${user.disabled ? 'enable' : 'disable'}`, {
-        baseUrl, method: 'POST', session,
-      });
+      await postUserStatus({ baseUrl, session }, user.id, user.disabled ? 'enable' : 'disable');
       await load();
     } catch (e) {
       setError((e as Error).message);
@@ -83,9 +81,7 @@ export function UsersTab({ session }: TabProps) {
       return;
     }
     try {
-      await requestJson(`/api/admin/users/${resetTarget}/reset-password`, {
-        baseUrl, method: 'POST', body: { password: resetPw }, session,
-      });
+      await resetUserPassword({ baseUrl, session }, resetTarget as string, resetPw);
       setResetTarget(null);
       setResetPw('');
     } catch (e) {

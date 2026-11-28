@@ -1,6 +1,6 @@
 // 관리자 콘솔 — 통계 권한 탭. P2-82b에서 AdminConsoleModal.tsx의 선언을 본문 그대로 옮겼다.
 import { useState, useEffect } from 'react';
-import { requestJson } from '../../services/httpClient';
+import { createCapabilityGrant, fetchAdminUsers, fetchCapabilityCatalog, fetchCapabilityGrants, revokeCapabilityGrant } from '../../services/adminRepository';
 import { resolveApiBaseUrl } from '../../../platform/dataMode';
 import { fmt } from './shared';
 import type { TabProps, UserRow } from './shared';
@@ -49,13 +49,11 @@ export function CapabilitiesTab({ session }: TabProps) {
     setLoading(true);
     setError(null);
     try {
-      const [catalogData, grantsData, usersData]: [
-        { capabilities?: CapabilityEntry[] }, { grants?: GrantRow[] }, { users?: UserRow[] },
-      ] = await Promise.all([
-        requestJson('/api/capabilities/catalog', { baseUrl, session }),
-        requestJson('/api/capabilities/grants',  { baseUrl, session }),
-        requestJson('/api/admin/users',          { baseUrl, session }),
-      ]);
+      const [catalogData, grantsData, usersData] = await Promise.all([
+        fetchCapabilityCatalog({ baseUrl, session }),
+        fetchCapabilityGrants({ baseUrl, session }),
+        fetchAdminUsers({ baseUrl, session }),
+      ]) as [{ capabilities?: CapabilityEntry[] }, { grants?: GrantRow[] }, { users?: UserRow[] }];
       setCatalog(catalogData.capabilities || []);
       setGrants(grantsData.grants || []);
       setUsers(usersData.users || []);
@@ -79,14 +77,11 @@ export function CapabilitiesTab({ session }: TabProps) {
     }
     setCreating(true);
     try {
-      await requestJson('/api/capabilities/grants', {
-        baseUrl, method: 'POST', session,
-        body: {
-          userId:     form.userId,
-          capability: form.capability,
-          reason:     form.reason.trim(),
-          ...(form.expiresAt ? { expiresAt: new Date(form.expiresAt).toISOString() } : {}),
-        },
+      await createCapabilityGrant({ baseUrl, session }, {
+        userId:     form.userId,
+        capability: form.capability,
+        reason:     form.reason.trim(),
+        ...(form.expiresAt ? { expiresAt: new Date(form.expiresAt).toISOString() } : {}),
       });
       setForm(EMPTY_GRANT_FORM);
       setStatus('권한을 부여했습니다.');
@@ -102,7 +97,7 @@ export function CapabilitiesTab({ session }: TabProps) {
     setActioning(grant.id);
     setError(null);
     try {
-      await requestJson(`/api/capabilities/grants/${grant.id}/revoke`, { baseUrl, method: 'POST', session });
+      await revokeCapabilityGrant({ baseUrl, session }, grant.id);
       await load();
     } catch (e) {
       setError((e as Error).message);

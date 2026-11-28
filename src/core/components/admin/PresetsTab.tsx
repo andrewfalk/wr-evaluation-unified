@@ -1,6 +1,6 @@
 // 관리자 콘솔 — 프리셋 공유 탭. P2-82b에서 AdminConsoleModal.tsx의 선언을 본문 그대로 옮겼다.
 import { useState, useEffect } from 'react';
-import { requestJson } from '../../services/httpClient';
+import { fetchAdminPresets, postPresetVisibility } from '../../services/adminRepository';
 import { resolveApiBaseUrl } from '../../../platform/dataMode';
 import type { TabProps } from './shared';
 
@@ -42,7 +42,7 @@ export function PresetsTab({ session }: TabProps) {
     setSelected(new Set());
     setPending(null);
     try {
-      const data: { presets?: PresetRow[] } = await requestJson('/api/admin/presets', { baseUrl, session });
+      const data = await fetchAdminPresets({ baseUrl, session }) as { presets?: PresetRow[] };
       setPresets(data.presets || []);
     } catch (e) {
       setError((e as Error).message);
@@ -96,9 +96,7 @@ export function PresetsTab({ session }: TabProps) {
     setActing(true);
     setError(null);
     try {
-      const data: { requested: number; updated: number } = await requestJson('/api/admin/presets/visibility', {
-        baseUrl, method: 'POST', session, body: { ids, visibility: pending },
-      });
+      const data = await postPresetVisibility({ baseUrl, session }, ids, pending) as { requested: number; updated: number };
       const label = pending === 'organization' ? '조직 공유' : '비공개(소유자만)';
       setStatus(`선택 ${data.requested}개 중 ${data.updated}개를 ${label}로 전환했습니다.`);
       await load();
