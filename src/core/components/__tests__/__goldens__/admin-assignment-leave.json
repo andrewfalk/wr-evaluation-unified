@@ -1,0 +1,85 @@
+{
+  "steps": [
+    {
+      "step": "의사 목록 실패 — 오류 칸(환자 목록은 아직 불러오는 중)",
+      "requests": [
+        {
+          "method": "GET",
+          "url": "https://admin.synthetic.test/api/admin/users",
+          "headers": {
+            "Content-Type": "application/json",
+            "X-WR-User-Id": "admin-0001",
+            "X-WR-Org-Id": "org-synthetic-1",
+            "X-WR-Auth-Mode": "intranet"
+          },
+          "signal": "none"
+        },
+        {
+          "method": "GET",
+          "url": "https://admin.synthetic.test/api/patients?scope=all&limit=100&offset=0",
+          "headers": {
+            "Content-Type": "application/json",
+            "X-WR-User-Id": "admin-0001",
+            "X-WR-Org-Id": "org-synthetic-1",
+            "X-WR-Auth-Mode": "intranet"
+          },
+          "signal": "live"
+        }
+      ],
+      "dom": [
+        "<div class=\"admin-filter-row\">",
+        "  <input type=\"text\" placeholder=\"환자명 또는 등록번호 검색 (서버 검색)\" value=\"\" />",
+        "  <button class=\"btn btn-secondary\" disabled=\"\">",
+        "    \"새로 고침\"",
+        "<p class=\"admin-error\">",
+        "  \"사용자 목록을 불러오지 못했습니다(합성).\"",
+        "<p class=\"admin-empty\">",
+        "  \"불러오는 중…\""
+      ],
+      "form": []
+    },
+    {
+      "step": "탭을 떠남 — 환자 요청 끊김(운영 상태 탭이 부름)",
+      "requests": [
+        {
+          "method": "GET",
+          "url": "https://admin.synthetic.test/api/admin/ops/backup-status",
+          "headers": {
+            "Content-Type": "application/json",
+            "X-WR-User-Id": "admin-0001",
+            "X-WR-Org-Id": "org-synthetic-1",
+            "X-WR-Auth-Mode": "intranet"
+          },
+          "signal": "none"
+        }
+      ],
+      "dom": [
+        "<div class=\"admin-list-header\">",
+        "  <span style=\"font-weight: 600;\">",
+        "    \"백업 운영 상태\"",
+        "  <button class=\"btn btn-secondary btn-sm\">",
+        "    \"새로고침\"",
+        "<div class=\"admin-empty\">",
+        "  \"백업 모니터 데이터를 아직 불러오지 못했습니다.\""
+      ],
+      "form": [],
+      "events": [
+        "환자 요청 signal=aborted"
+      ]
+    },
+    {
+      "step": "끊긴 요청이 늦게 풀려도 화면 그대로",
+      "requests": [],
+      "dom": [
+        "<div class=\"admin-list-header\">",
+        "  <span style=\"font-weight: 600;\">",
+        "    \"백업 운영 상태\"",
+        "  <button class=\"btn btn-secondary btn-sm\">",
+        "    \"새로고침\"",
+        "<div class=\"admin-empty\">",
+        "  \"백업 모니터 데이터를 아직 불러오지 못했습니다.\""
+      ],
+      "form": []
+    }
+  ]
+}

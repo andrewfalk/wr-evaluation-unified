@@ -22,6 +22,8 @@ export interface AdminStep {
   dialogs?: string[];
   /** 그 단계에서 클립보드에 쓴 글자. */
   clipboard?: string[];
+  /** 그 단계에서 모달이 부른 콜백(onClose 등). */
+  events?: string[];
 }
 
 interface CallLike {
@@ -40,7 +42,7 @@ export interface StepRecorder {
   steps: AdminStep[];
   /** 지금까지의 요청을 기록하지 않고 넘긴다(앞 탭의 열기 요청 등). */
   skip(): CallLike[];
-  snap(step: string, extra?: Pick<AdminStep, 'dialogs' | 'clipboard'>): AdminStep;
+  snap(step: string, extra?: Pick<AdminStep, 'dialogs' | 'clipboard' | 'events'>): AdminStep;
 }
 
 function toRecorded(call: CallLike): RecordedRequest {
