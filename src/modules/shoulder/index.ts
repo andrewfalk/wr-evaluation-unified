@@ -30,6 +30,9 @@ registerModule({
   name: '어깨',
   icon: '🙆',
   description: '어깨 근골격계 질환 업무관련성 평가',
+  // 대시보드의 짧은 이름·색(P2-85b — 예전 Dashboard의 MODULE_LABELS·MODULE_COLORS 값 그대로).
+  shortName: '어깨',
+  color: 'var(--color-safe)',
   EvaluationComponent: ShoulderEvaluation as ComponentType<ModuleEvaluationProps>,
   createModuleData: createShoulderModuleData,
   computeCalc: computeShoulderCalc,

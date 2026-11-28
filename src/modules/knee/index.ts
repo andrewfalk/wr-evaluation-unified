@@ -42,6 +42,9 @@ registerModule({
   name: '무릎 (슬관절)',
   icon: '\uD83C\uDFC3',
   description: '근골격계 질환 업무관련성 평가',
+  // 대시보드의 짧은 이름·색(P2-85b — 예전 Dashboard의 MODULE_LABELS·MODULE_COLORS 값 그대로).
+  shortName: '무릎',
+  color: 'var(--accent)',
   EvaluationComponent: KneeEvaluation as ComponentType<ModuleEvaluationProps>,
   createModuleData: createKneeModuleData,
   computeCalc: computeKneeCalc,

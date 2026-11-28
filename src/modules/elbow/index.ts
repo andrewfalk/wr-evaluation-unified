@@ -106,6 +106,9 @@ registerModule({
   name: '팔꿈치',
   icon: '💪',
   description: '팔꿈치 질환 공통 신체부담 평가',
+  // 대시보드의 짧은 이름·색(P2-85b — 예전 Dashboard의 MODULE_LABELS·MODULE_COLORS 값 그대로).
+  shortName: '팔꿈치',
+  color: '#8b5cf6',
   EvaluationComponent: ElbowEvaluation as ComponentType<ModuleEvaluationProps>,
   createModuleData: createElbowModuleData,
   computeCalc: computeElbowCalc,
