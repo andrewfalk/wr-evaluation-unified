@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import { getModule } from '../moduleRegistry';
 import {
   buildPresetIdentity,
@@ -12,9 +13,58 @@ import {
 } from '../services/presetRepository';
 
 import { hasIntranetSession } from '../../platform/dataMode';
+import type { SessionLike } from '../../platform/dataMode';
+import type { ModuleManifest, PresetTaskListFieldDef } from '../modules/manifest';
+
+/** 프리셋(직접 만든 것·내장) — 이 창이 직접 읽는 필드. 나머지는 presetRepository(JS)의 함수가 읽는다. */
+export interface PresetRecord {
+  id?: string;
+  _customId?: string;
+  _customRevision?: unknown;
+  revision?: unknown;
+  source?: string;
+  jobName?: string;
+  modules?: Record<string, unknown>;
+}
+
+/** 환자 — 이 창이 읽는 데이터 필드(부모는 PatientRecord를 넘긴다). */
+interface PresetPatientData {
+  shared: { jobs?: Array<{ id: string; jobName?: string }> };
+  modules?: Record<string, unknown>;
+  activeModules?: string[];
+}
+
+interface PresetDraft {
+  jobName: string;
+  category: string;
+  description: string;
+}
+
+/** 척추 작업 카드(모듈이 칩을 주지 않을 때 그리는 값). */
+interface PresetTask {
+  name?: string;
+  posture?: string;
+  weight?: number | null;
+  frequency?: number | null;
+  timeValue?: number | string;
+  timeUnit?: string;
+  correctionFactor?: number | string;
+}
+
+export interface PresetManageModalProps {
+  jobId: string;
+  patient: { data?: PresetPatientData };
+  /** 부모(ModalHost)는 unknown[]으로 들고 있다. */
+  presets: readonly unknown[];
+  editingPreset?: PresetRecord | null;
+  // 메서드 꼴 — 부모가 넘기는 전달 핸들러(`(...args: never[]) => unknown`)를 받는다.
+  onSave(preset: Record<string, unknown>, meta: Record<string, unknown>): void;
+  onClose(): void;
+  session: SessionLike | null | undefined;
+}
 const CATEGORY_OPTIONS = ['건설업', '제조업', '사회복지업', '서비스업', '운수업', '농림어업', '기타'];
 
-function getPresetDraft(preset) {
+function getPresetDraft(preset: PresetRecord | null | undefined): PresetDraft {
   return {
     jobName: preset?.jobName || '',
     category: getPresetCategory(preset) || DEFAULT_CATEGORY,
@@ -22,17 +72,17 @@ function getPresetDraft(preset) {
   };
 }
 
-function normalizeSearchText(value) {
+function normalizeSearchText(value: unknown): string {
   return normalizePresetIdentityPart(value).toLowerCase();
 }
 
-function tokenize(value) {
+function tokenize(value: unknown): string[] {
   return normalizeSearchText(value)
     .split(/\s+/)
     .filter(token => token.length >= 2);
 }
 
-function formatPresetFieldValue(value, type) {
+function formatPresetFieldValue(value: unknown, type: string): ReactNode {
   if (Array.isArray(value)) {
     return value.join(', ');
   }
@@ -46,10 +96,10 @@ function formatPresetFieldValue(value, type) {
   if (type === 'boolean') {
     return value ? 'Y' : 'N';
   }
-  return value;
+  return value as ReactNode;
 }
 
-function getKeywordMatchScore(preset, draft) {
+function getKeywordMatchScore(preset: PresetRecord, draft: PresetDraft): number {
   const presetJob = normalizeSearchText(preset.jobName);
   const presetCategory = normalizeSearchText(getPresetCategory(preset));
   const presetDescription = normalizeSearchText(getPresetDescription(preset));
@@ -88,16 +138,16 @@ function getKeywordMatchScore(preset, draft) {
   return score;
 }
 
-export function PresetManageModal({ jobId, patient, presets, editingPreset = null, onSave, onClose, session }) {
-  const job = (patient.data.shared.jobs || []).find(item => item.id === jobId);
-  const activeModules = patient.data.activeModules || [];
+export function PresetManageModal({ jobId, patient, presets, editingPreset = null, onSave, onClose, session }: PresetManageModalProps) {
+  const job = ((patient.data as PresetPatientData).shared.jobs || []).find(item => item.id === jobId);
+  const activeModules = (patient.data as PresetPatientData).activeModules || [];
 
   const moduleExtracts = useMemo(() => {
-    const result = {};
+    const result: Record<string, unknown> = {};
     for (const moduleId of activeModules) {
       const mod = getModule(moduleId);
       if (!mod?.presetConfig?.extractFromModule) continue;
-      const moduleData = patient.data.modules?.[moduleId];
+      const moduleData = (patient.data as PresetPatientData).modules?.[moduleId];
       if (!moduleData) continue;
       try {
         const extracted = mod.presetConfig.extractFromModule(moduleData, jobId);
@@ -110,7 +160,7 @@ export function PresetManageModal({ jobId, patient, presets, editingPreset = nul
   }, [activeModules, patient, jobId]);
 
   const customPresets = useMemo(
-    () => presets.filter(preset => preset.source === 'custom' || preset._customId),
+    () => (presets as PresetRecord[]).filter(preset => preset.source === 'custom' || preset._customId),
     [presets]
   );
 
@@ -151,7 +201,7 @@ export function PresetManageModal({ jobId, patient, presets, editingPreset = nul
   // show read-only and block save; the server would reject it with 403 anyway.
   const isReadOnly = Boolean(editingPreset) && isIntranet && !isOwnPreset(editingPreset, session);
 
-  const toggleModule = (moduleId) => {
+  const toggleModule = (moduleId: string) => {
     setSelectedModules(prev => {
       const next = new Set(prev);
       if (next.has(moduleId)) next.delete(moduleId);
@@ -177,12 +227,12 @@ export function PresetManageModal({ jobId, patient, presets, editingPreset = nul
     return ownCustomPresets.find(preset => buildPresetIdentity(getPresetDraft(preset)) === draftIdentity);
   }, [ownCustomPresets, draftIdentity, editingPreset]);
 
-  const storedModules = existingCustom?.modules || {};
+  const storedModules: Record<string, unknown> = existingCustom?.modules || {};
   const moduleIdsToRender = useMemo(
     () => Array.from(new Set([...activeModules, ...Object.keys(storedModules)])),
     [activeModules, storedModules]
   );
-  const getModuleSnapshot = (moduleId) => moduleExtracts[moduleId] || storedModules[moduleId] || null;
+  const getModuleSnapshot = (moduleId: string) => moduleExtracts[moduleId] || storedModules[moduleId] || null;
 
   const selectedModuleIds = useMemo(
     () => Array.from(selectedModules).filter(moduleId => Boolean(getModuleSnapshot(moduleId))),
@@ -221,7 +271,7 @@ export function PresetManageModal({ jobId, patient, presets, editingPreset = nul
 
   const canSave = normalizedJobName && selectedModuleIds.length > 0 && !isReadOnly;
 
-  const renderModuleSummary = (moduleIds) => {
+  const renderModuleSummary = (moduleIds: string[]) => {
     if (!moduleIds.length) return '없음';
     return moduleIds
       .map(moduleId => getModule(moduleId)?.name || moduleId)
@@ -231,7 +281,7 @@ export function PresetManageModal({ jobId, patient, presets, editingPreset = nul
   const handleSave = () => {
     if (!canSave) return;
 
-    const modules = {};
+    const modules: Record<string, unknown> = {};
     for (const moduleId of selectedModuleIds) {
       modules[moduleId] = getModuleSnapshot(moduleId);
     }
@@ -256,18 +306,18 @@ export function PresetManageModal({ jobId, patient, presets, editingPreset = nul
     });
   };
 
-  const renderReadableFieldPreview = (moduleId, options = {}) => {
-    const mod = getModule(moduleId);
-    const data = getModuleSnapshot(moduleId);
+  const renderReadableFieldPreview = (moduleId: string, options: { storedOnly?: boolean } = {}) => {
+    const mod: ModuleManifest | undefined = getModule(moduleId);
+    const data = getModuleSnapshot(moduleId) as Record<string, unknown> | null;
     if (!mod?.presetConfig || !data) return null;
 
     const { storedOnly = false } = options;
     const { fields } = mod.presetConfig;
 
     // 작업 목록형(taskList 필드 — spine·cervical)을 먼저 본다. 저장된 값에 그 목록이 없으면 아무것도 그리지 않는다.
-    const taskListField = fields.find(field => field.type === 'taskList');
+    const taskListField = fields.find(field => field.type === 'taskList') as PresetTaskListFieldDef | undefined;
     if (taskListField) {
-      const tasks = data[taskListField.key];
+      const tasks = data[taskListField.key] as PresetTask[] | undefined;
       if (!tasks) return null;
       return (
         <div className="preset-field-preview">
@@ -279,7 +329,7 @@ export function PresetManageModal({ jobId, patient, presets, editingPreset = nul
               <div className="preset-task-title">{task.name}</div>
               <div className="preset-task-meta">
                 {/* \uCE69 \uBB38\uAD6C\uB294 \uBAA8\uB4C8\uC774 \uC8FC\uACE0(presetConfig taskList \uD544\uB4DC\uC758 chips \u2014 \uACBD\uCD94, FX-3), \uC5C6\uC73C\uBA74 \uCC99\uCD94 \uC791\uC5C5 \uCE69\uC744 \uADF8\uB9B0\uB2E4. */}
-                {taskListField.chips ? taskListField.chips(task).map((chip, chipIndex) => (
+                {taskListField.chips ? taskListField.chips(task as Readonly<Record<string, unknown>>).map((chip, chipIndex) => (
                   <span key={chipIndex} className="preset-task-chip">{chip}</span>
                 )) : (
                   <>

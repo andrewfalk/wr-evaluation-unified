@@ -4,7 +4,6 @@
   "src/core/components/AIAnalysisPanel.jsx",
   "src/core/components/AdminConsoleModal.jsx",
   "src/core/components/AssessmentTab.jsx",
-  "src/core/components/BatchImportModal.jsx",
   "src/core/components/ChangePasswordModal.jsx",
   "src/core/components/DiagnosisForm.jsx",
   "src/core/components/IntakeWizard.jsx",
