@@ -1,6 +1,8 @@
 // 메인 작업 화면(사이드바·헤더·단계 표시·단계 내용·이전/다음) — REFACTORING_ROADMAP Phase 2 C3-A(P2-24)에서 App.jsx의 마지막 렌더
-// 블록을 글자 그대로 옮겼고, C3-C(P2-45b)에서 값을 props 대신 작업 공간 Context(useWorkspace)에서 받는다(이름 그대로, .jsx 유지).
+// 블록을 글자 그대로 옮겼고, C3-C(P2-45b)에서 값을 props 대신 작업 공간 Context(useWorkspace)에서 받는다. C9(P2-83d-ts)에서 .tsx로
+// 옮기며 타입만 붙였다.
 // MainHeader·StepContent·PatientSidebar에 넘기는 JSX는 그대로다(core 컴포넌트 props 시그니처 불변 — 계획 원칙 5).
+import type { ComponentProps } from 'react';
 import { ModalHost } from '../modals/ModalHost';
 import { useWorkspace } from '../providers/WorkspaceContext';
 import { MainHeader } from '../../core/components/MainHeader';
@@ -29,11 +31,12 @@ export function WorkspaceScreen() {
     setShowSettings, setShowSidebar, settings, showOpsBanner, showSidebar, statsAvailable, steps, syncState, syncSummary,
     unifiedPreviewText, updateActiveModules, updateDiagnoses, updateModule, updateModuleById, updatePatient, updateShared,
   } = useWorkspace();
-  // (JSDoc: Context 값은 타입이 있어 `|| {}` 합집합에서 diagnoses를 못 읽는다 — 옛 props(타입 없음)와 같은 값·같은 식)
-  const shared = /** @type {{ diagnoses?: unknown[], [key: string]: unknown }} */ (activePatient?.data?.shared || {});
+  // (단언: Context 값은 타입이 있어 `|| {}` 합집합에서 diagnoses를 못 읽는다 — 옛 props(타입 없음)와 같은 값·같은 식.
+  //  타입은 뒤의 as가 정하고, 식 안의 옛 JSDoc 주석은 실행 코드 비교(esbuild는 식 안 주석을 남긴다)를 위해 그대로 둔다)
+  const shared = /** @type {{ diagnoses?: unknown[], [key: string]: unknown }} */ (activePatient?.data?.shared || {}) as { diagnoses?: unknown[]; [key: string]: unknown };
   const diagnoses = shared.diagnoses || [];
   const allModules = getAllModules();
-  const suggested = suggestModules(diagnoses);
+  const suggested = suggestModules(diagnoses as Parameters<typeof suggestModules>[0]);
 
   // 현재 스텝의 모듈에 대한 EvaluationComponent
   const EvaluationComponent = activeModule?.EvaluationComponent;
@@ -63,7 +66,7 @@ export function WorkspaceScreen() {
         onRemoveSelectedPatients={removeSelectedPatients}
         onResolveConflict={setConflictPatientId}
         scope={effectivePatientScope}
-        onScopeChange={scope => {
+        onScopeChange={(scope: string) => {
           setPatientSyncPaused(false);
           // normalizePatientScopeForSession: admin의 'mine'만 'all'로 치환하고,
           // 의사 userId/'__unassigned__'/'all'은 그대로 통과시킨다(서버가 재검증).
@@ -73,9 +76,9 @@ export function WorkspaceScreen() {
           // (예: 대시보드에서 특정 의사를 보던 중 사이드바를 토글한 경우).
           setDashboardScope(next);
         }}
-        doctorRoster={doctorRoster}
+        doctorRoster={doctorRoster as ComponentProps<typeof PatientSidebar>['doctorRoster']}
         session={session}
-        serverUnassignedCount={syncState?.serverUnassignedCount ?? null}
+        serverUnassignedCount={(syncState?.serverUnassignedCount ?? null) as ComponentProps<typeof PatientSidebar>['serverUnassignedCount']}
       />
 
       {/* 메인 영역 */}
@@ -186,7 +189,7 @@ export function WorkspaceScreen() {
             )}
 
             {/* 동기화 권한 거부 알림: 다른 디바이스에서 만든 dirty 환자가 더 이상 본인 담당이 아닐 때 */}
-            {syncState?.lastPermissionDeniedCount > 0 && (
+            {(syncState?.lastPermissionDeniedCount as number) > 0 && (
               <div className="read-only-banner" role="status" style={{ background: '#fde2e2', color: '#9b1c1c', borderColor: '#f5b5b5' }}>
                 권한 없음으로 동기화되지 않은 환자: {syncState.lastPermissionDeniedCount}건. 담당 의사 변경 또는 관리자 문의가 필요합니다.
               </div>
