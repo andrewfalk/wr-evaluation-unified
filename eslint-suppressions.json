@@ -49,7 +49,7 @@
       "count": 10
     }
   },
-  "src/core/components/statistics/ResultPanel.jsx": {
+  "src/core/components/statistics/ResultPanel.tsx": {
     "react/no-unescaped-entities": {
       "count": 12
     }

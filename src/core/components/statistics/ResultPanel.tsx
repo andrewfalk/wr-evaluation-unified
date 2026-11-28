@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { useState } from 'react';
 import { describeStatsApiError } from './describeStatsError';
 import { describeMethodReasonCode } from './describeMethodReasonCode';
@@ -15,8 +14,77 @@ import { RegressionDiagnosticsPanel } from '../charts/RegressionDiagnosticsPanel
 import { SplinePartialEffectChart } from '../charts/SplinePartialEffectChart';
 import { CurveChart } from '../charts/CurveChart';
 import { formatPValue, formatStat } from '../charts/numberFormat';
+import type {
+  AnalyzeBivariateResult,
+  AnalyzeContinuousResult,
+  AnalyzeCorrelationMatrixResult,
+  AnalyzeDescriptiveStratifiedResult,
+  AnalyzeDescriptiveStratifyGroup,
+  AnalyzeDiscreteLevel,
+  AnalyzeDiscreteResult,
+  AnalyzeMissingPatternEntry,
+  AnalyzePredictionResult,
+  AnalyzeRegressionResult,
+  AnalyzeResponse,
+  CatalogVariable,
+  LimitedDisclosureStatus,
+  PredictionMetric,
+  RegressionTerm,
+  StatsMethodId,
+  Table1ContinuousCell,
+  Table1DiscreteCell,
+} from '@wr/contracts/stats';
 
-const NULL_REASON_LABELS = {
+type CatalogByKey = Map<string, CatalogVariable>;
+/**
+ * 계약의 "억제 | 공개" 합집합을 한 모양으로 편 지역 타입 — 한쪽에만 있는 필드는 선택이다. 이 파일은 JS(작업대)가 import해
+ * 완화 설정(tsconfig.client.js.json, strict 끔)으로도 검사되는데, 그 설정은 boolean 판별자(`suppressed`)로 합집합을
+ * 좁히지 않는다 — 그래서 합집합 대신 화면이 읽는 필드를 펼쳐 적는다(서버 응답 타입은 지금 코드가 읽는 모양대로).
+ */
+type Loose<U, Common extends keyof U = never> = Pick<U, Common> & { suppressed: boolean }
+  & Partial<Omit<Extract<U, { suppressed: false }>, 'suppressed' | Common>>
+  & Partial<Omit<Extract<U, { suppressed: true }>, 'suppressed' | Common>>;
+type ContinuousRow = Loose<AnalyzeContinuousResult, 'variableKey' | 'kind'>;
+type DiscreteRow = Loose<AnalyzeDiscreteResult, 'variableKey' | 'kind'>;
+type BivariateView = Loose<AnalyzeBivariateResult, 'method'>;
+type BivariateRevealed = Extract<AnalyzeBivariateResult, { suppressed: false }>;
+type RegressionView = Loose<AnalyzeRegressionResult>;
+type PredictionView = Loose<AnalyzePredictionResult>;
+type PredictionBodyLambda = Extract<AnalyzePredictionResult, { suppressed: false }>['lambda'];
+type StratifiedView = Loose<AnalyzeDescriptiveStratifiedResult, 'stratifyByKey'>;
+type Table1ContinuousView = Loose<Table1ContinuousCell, 'variableKey' | 'kind'>;
+type Table1DiscreteView = Loose<Table1DiscreteCell, 'variableKey' | 'kind'>;
+interface Table1GroupView {
+  groupId: string;
+  continuous: Table1ContinuousView[];
+  discrete: Table1DiscreteView[];
+}
+/** buildDiscreteDisplay(JS)가 돌려주지만 JSDoc 반환 타입에는 빠진 rawMode(원본 표시 때의 최빈값)까지. */
+type DiscreteDisplay = ReturnType<typeof buildDiscreteDisplay> & { rawMode?: string | boolean | null };
+
+/** 결과 패널이 읽는 실행 조건(작업대의 committedRecipe) — 여기서 읽는 필드만 적는다. */
+export interface ResultRecipeView {
+  analysisMode?: string;
+  variableKeys?: string[];
+}
+
+export interface ResultExportState {
+  status: string;
+  error?: unknown;
+}
+
+export interface ResultPanelProps {
+  catalog: { variables?: CatalogVariable[] } | null | undefined;
+  committedRecipe: ResultRecipeView | null;
+  committedResult: AnalyzeResponse | null;
+  recipeChanged: boolean;
+  onExport: () => void;
+  exportState: ResultExportState;
+  actionsLocked: boolean;
+  exportUnsupported: boolean;
+}
+
+const NULL_REASON_LABELS: Record<string, string> = {
   insufficient_data: '자료 부족',
   undefined_zero_variance: '분산 0(정의 불가)',
   non_finite_result: '유한하지 않은 값',
@@ -27,7 +95,7 @@ const NULL_REASON_LABELS = {
 // PR3-A — StatsMethodIdSchema와 동일 목록. RecipePanel.jsx의 METHOD_LABELS와 중복이지만
 // 파일을 나눈 이유(다른 컴포넌트, 서로 다른 렌더 맥락)는 기존 관례(describeStatsError.js
 // vs describeMethodReasonCode.js 분리)와 같다.
-const METHOD_LABELS = {
+const METHOD_LABELS: Record<string, string> = {
   welch_t: 'Welch t 검정', mann_whitney: 'Mann-Whitney U 검정',
   anova: '일원분산분석(Welch)', kruskal_wallis: 'Kruskal-Wallis 검정',
   chi_square: '카이제곱 검정', fisher_exact: 'Fisher 정확검정',
@@ -40,7 +108,7 @@ const METHOD_LABELS = {
 };
 // PR4-B2 — computePredictionNonEstimableReason(1~10) + 엔진(NOT_CONVERGED, 11번).
 // 사유별로 다르게 쓴다(회귀와 동일 원칙 — "데이터 구조 문제"로 뭉치지 않는다).
-const PREDICTION_NON_ESTIMABLE_LABELS = {
+const PREDICTION_NON_ESTIMABLE_LABELS: Record<string, string> = {
   OUTCOME_NOT_OBSERVED: '결과변수가 관측된 사례가 없습니다.',
   EVENT_LEVEL_NOT_OBSERVED: '선택한 사건 레벨이 관측된 사례가 없습니다.',
   NON_EVENT_LEVEL_NOT_OBSERVED: '비사건 레벨이 관측된 사례가 없습니다.',
@@ -55,7 +123,7 @@ const PREDICTION_NON_ESTIMABLE_LABELS = {
   NOT_CONVERGED: '계산이 수렴하지 않았습니다.',
 };
 // PR4-B2 — PredictionCaveatSchema(shared/contracts/stats.ts)와 동일 목록.
-const PREDICTION_CAVEAT_LABELS = {
+const PREDICTION_CAVEAT_LABELS: Record<string, string> = {
   RESEARCH_INTERNAL_VALIDATION: '연구용 내부검증 결과입니다.',
   NOT_FOR_DEPLOYMENT: '실제 판정·배포에 쓰지 않습니다.',
   TEMPORAL_VALIDATION_NOT_PERFORMED: '시간분할(temporal holdout) 검증은 하지 않았습니다 — 후속 필수 과제입니다.',
@@ -66,19 +134,19 @@ const PREDICTION_CAVEAT_LABELS = {
   RAW_EXPOSURE_FORMULA_INPUT: '일부 설명변수는 작업부담 공식의 원시 입력값입니다.',
   USER_MODEL_SELECTION_NOT_CORRECTED: '변수·모형 선택 과정의 다중비교 보정은 하지 않았습니다.',
 };
-const PREDICTION_METRIC_LABELS = {
+const PREDICTION_METRIC_LABELS: Record<string, string> = {
   roc_auc: 'AUC(ROC)', average_precision: '평균정밀도(AP)', brier: 'Brier score',
   calibration_intercept: '보정 절편', calibration_slope: '보정 기울기',
 };
 // PR4-A1 — inferenceWithheldReason별 안내 문구. 원인이 다른데 같은 문구로 뭉치면
 // 사용자가 데이터 구조 문제로 오해한다(계획서 §5 "사유별로 다르게 쓴다").
-const REGRESSION_WITHHELD_LABELS = {
+const REGRESSION_WITHHELD_LABELS: Record<string, string> = {
   TOO_FEW_CLUSTERS: '표본 구조상(한 사람이 여러 행) p값·신뢰구간을 표시하지 않습니다.',
   CLUSTER_IMBALANCE: '표본 구조상(한 사람이 여러 행) p값·신뢰구간을 표시하지 않습니다.',
   COVARIANCE_NOT_COMPUTABLE: '표준오차를 계산할 수 없어 p값·신뢰구간을 표시하지 않습니다.',
   DEGENERATE_COVARIANCE: '표준오차를 계산할 수 없어 p값·신뢰구간을 표시하지 않습니다.',
 };
-const REGRESSION_NON_ESTIMABLE_LABELS = {
+const REGRESSION_NON_ESTIMABLE_LABELS: Record<string, string> = {
   INSUFFICIENT_COMPLETE_ROWS: '완전사례 수가 부족해 실행할 수 없습니다.',
   TOO_MANY_LEVELS: '범주형 설명변수의 수준이 너무 많습니다.',
   TOO_MANY_PARAMETERS: '설명변수(범주 포함)가 너무 많아 자유도가 부족합니다.',
@@ -93,24 +161,24 @@ const REGRESSION_NON_ESTIMABLE_LABELS = {
   CATEGORICAL_OUTCOME_NOT_BINARY: '결과변수의 관측된 범주가 정확히 2개가 아닙니다.',
   SPLINE_INSUFFICIENT_UNIQUE_VALUES: '스플라인을 적용할 변수의 고유값이 부족하거나 분포가 편중돼 있습니다.',
 };
-const GROUP_COMPARISON_METHODS = new Set(['welch_t', 'mann_whitney', 'anova', 'kruskal_wallis', 'paired_t', 'wilcoxon_signed_rank']);
+const GROUP_COMPARISON_METHODS = new Set<string | undefined>(['welch_t', 'mann_whitney', 'anova', 'kruskal_wallis', 'paired_t', 'wilcoxon_signed_rank']);
 // [코드리뷰 2026-09-12 2차] η²(anova)·ε²(kruskal_wallis)는 부호 있는 "차이" 개념이
 // 없다 — "뒤−앞" 방향 설명은 2-그룹 검정(welch_t/mann_whitney, 그리고 지금은 항상
 // unsupported인 paired_t/wilcoxon_signed_rank)에만 의미가 있다.
-const DIRECTIONAL_GROUP_METHODS = new Set(['welch_t', 'mann_whitney', 'paired_t', 'wilcoxon_signed_rank']);
-const CONTINGENCY_METHODS = new Set(['chi_square', 'fisher_exact']);
-const GROUPING_TYPES = new Set(['boolean', 'ordinal', 'categorical']);
-const REGRESSION_QUALITY_FLAG_LABELS = {
+const DIRECTIONAL_GROUP_METHODS = new Set<string | undefined>(['welch_t', 'mann_whitney', 'paired_t', 'wilcoxon_signed_rank']);
+const CONTINGENCY_METHODS = new Set<string | undefined>(['chi_square', 'fisher_exact']);
+const GROUPING_TYPES = new Set<string | undefined>(['boolean', 'ordinal', 'categorical']);
+const REGRESSION_QUALITY_FLAG_LABELS: Record<string, string> = {
   reference_level_fallback: '지정한 기준 범주를 쓸 수 없어 자동으로 선택한 기준 범주를 사용했습니다.',
   event_level_fallback: '지정한 사건 수준을 쓸 수 없어 자동으로 선택한 수준을 사용했습니다.',
 };
 
-const QUALITY_FLAG_LABELS = {
+const QUALITY_FLAG_LABELS: Record<string, string> = {
   low_expected_count: '일부 칸의 기대도수가 작아 근사의 타당성이 낮습니다.',
   haldane_anscombe_applied: '0이 포함된 셀이 있어 Haldane-Anscombe 보정(+0.5)을 적용했습니다.',
 };
 
-function variableLabel(catalogByKey, key) {
+function variableLabel(catalogByKey: CatalogByKey, key: string): string {
   return catalogByKey.get(key)?.label || key;
 }
 
@@ -121,14 +189,14 @@ function variableLabel(catalogByKey, key) {
 // Node의 server/src/stats/recipe/analysisContext.ts:92 `const [keyX, keyY] = recipe.variableKeys`와
 // server/src/stats/dataset/bivariateRoles.ts의 역할판정(타입으로 그룹/값을 가른다, 선택 순서 아님)을
 // 그대로 재현한다 — 서버가 실제로 쓰는 규칙과 갈리면 표시가 실제 응답과 어긋난다.
-function resolveBivariateVariableLabels(catalogByKey, committedRecipe) {
+function resolveBivariateVariableLabels(catalogByKey: CatalogByKey, committedRecipe: ResultRecipeView | null | undefined) {
   const [keyX, keyY] = committedRecipe?.variableKeys ?? [];
   const xLabel = keyX ? variableLabel(catalogByKey, keyX) : null;
   const yLabel = keyY ? variableLabel(catalogByKey, keyY) : null;
   const typeX = keyX ? catalogByKey.get(keyX)?.type : undefined;
   const typeY = keyY ? catalogByKey.get(keyY)?.type : undefined;
-  let groupLabel = null;
-  let valueLabel = null;
+  let groupLabel: string | null = null;
+  let valueLabel: string | null = null;
   if (GROUPING_TYPES.has(typeX) && typeY === 'continuous') {
     groupLabel = xLabel;
     valueLabel = yLabel;
@@ -139,28 +207,28 @@ function resolveBivariateVariableLabels(catalogByKey, committedRecipe) {
   return { xLabel, yLabel, groupLabel, valueLabel };
 }
 
-function missingPatternsText(patterns) {
+function missingPatternsText(patterns: AnalyzeMissingPatternEntry[] | null): string {
   if (patterns === null) return '(비공개)'; // §8 — null(억제)과 []([]0건)을 다른 표기로 구분
   if (patterns.length === 0) return '(없음)';
   return patterns.map((p) => `${p.reasonCode}:${p.count}`).join(', ');
 }
 
-function fmt(n) {
+function fmt(n: string | number | boolean | null | undefined): string {
   return n === null || n === undefined ? '—' : String(n);
 }
 
-function fmtCi(ci) {
+function fmtCi(ci: readonly number[] | null | undefined): string {
   if (!ci) return '—';
   return `[${formatStat(ci[0])}, ${formatStat(ci[1])}]`;
 }
 
 // 자유도: 정수(분자 df 등)는 그대로, 소수(Welch df)는 유효숫자 서식.
-function fmtDf(df) {
+function fmtDf(df: number | null | undefined): string {
   if (df === null || df === undefined) return '—';
   return Number.isInteger(df) ? String(df) : formatStat(df);
 }
 
-function ContinuousCard({ catalogByKey, row }) {
+function ContinuousCard({ catalogByKey, row }: { catalogByKey: CatalogByKey; row: ContinuousRow }) {
   if (row.suppressed) {
     return (
       <div className="swb-card">
@@ -177,7 +245,7 @@ function ContinuousCard({ catalogByKey, row }) {
       <strong>{variableLabel(catalogByKey, row.variableKey)}</strong>
       <table className="swb-table">
         <tbody>
-          <tr><th>n</th><td>{row.n}</td><th>결측</th><td>{row.missingCount} {missingPatternsText(row.missingPatterns)}</td></tr>
+          <tr><th>n</th><td>{row.n}</td><th>결측</th><td>{row.missingCount} {missingPatternsText(row.missingPatterns as AnalyzeMissingPatternEntry[] | null)}</td></tr>
           <tr><th>평균</th><td>{num(row.mean, 2)}</td><th>SD</th><td>{num(row.sd, 2)}</td></tr>
           <tr><th>중앙값</th><td>{num(row.median, 2)}</td><th>IQR</th><td>{num(row.iqr, 2)}</td></tr>
           <tr><th>Q1</th><td>{num(row.q1, 2)}</td><th>Q3</th><td>{num(row.q3, 2)}</td></tr>
@@ -204,12 +272,12 @@ const OTHER_MERGE_NOTE = "인원이 10명 미만인 범주와, 합친 값을 10�
 const RAW_LEVELS_NOTE = '제한 데이터 권한으로 소수 인원 범주까지 표시합니다. 화면을 외부에 공유할 때 주의하세요.';
 const SINGLE_VARIABLE_HINT = "범주형 변수 하나만 분석하면 소수 범주를 '기타'로 합쳐 볼 수 있는 경우가 있습니다.";
 
-function suppressedHint(catalogByKey, row, variableCount) {
+function suppressedHint(catalogByKey: CatalogByKey, row: DiscreteRow, variableCount: number): string | null {
   const isOrdinal = catalogByKey.get(row.variableKey)?.type === 'ordinal';
   return variableCount > 1 && !isOrdinal ? SINGLE_VARIABLE_HINT : null;
 }
 
-function DiscreteCard({ catalogByKey, row, variableCount }) {
+function DiscreteCard({ catalogByKey, row, variableCount }: { catalogByKey: CatalogByKey; row: DiscreteRow; variableCount: number }) {
   const isOrdinal = catalogByKey.get(row.variableKey)?.type === 'ordinal';
   const display = buildDiscreteDisplay({ levels: row.levels, other: row.other, rawLevels: row.rawLevels, isOrdinal });
   if (row.suppressed && !display.isRaw) {
@@ -222,16 +290,16 @@ function DiscreteCard({ catalogByKey, row, variableCount }) {
       </div>
     );
   }
-  const rawTotal = display.isRaw ? row.rawLevels.reduce((s, l) => s + l.count, 0) : null;
+  const rawTotal = display.isRaw ? (row.rawLevels as AnalyzeDiscreteLevel[]).reduce((s, l) => s + l.count, 0) : null;
   // 원본을 표시하는 동안에는 최빈값도 원본 기준이다 — row.mode는 "기타"로 합쳐진 공개 범주 기준이라
   // 반복 기록으로 소수 범주의 건수가 더 큰 경우 표와 어긋난다(외부 리뷰 지적).
-  const modeValue = display.isRaw ? display.rawMode : row.mode;
+  const modeValue = display.isRaw ? (display as DiscreteDisplay).rawMode : row.mode;
   return (
     <div className="swb-card">
       <strong>{variableLabel(catalogByKey, row.variableKey)}</strong>
       {row.suppressed
         ? <p>n={rawTotal}, 최빈값={fmt(modeValue)} <span className="swb-suppressed-note">(공개 정책상 일반 사용자에게는 표시되지 않는 변수)</span></p>
-        : <p>n={row.n}, 결측={row.missingCount} {missingPatternsText(row.missingPatterns)}, 최빈값={fmt(modeValue)}</p>}
+        : <p>n={row.n}, 결측={row.missingCount} {missingPatternsText(row.missingPatterns as AnalyzeMissingPatternEntry[] | null)}, 최빈값={fmt(modeValue)}</p>}
       <table className="swb-table">
         <thead><tr><th>수준</th><th>빈도</th><th>비율</th></tr></thead>
         <tbody>
@@ -251,7 +319,7 @@ function DiscreteCard({ catalogByKey, row, variableCount }) {
 // PR3-B — "분포" 탭 전용 차트 카드. summary 탭의 표 카드(ContinuousCard/
 // DiscreteCard)와 데이터 원본은 같지만 표시 형식만 다르다(계획서 §6.8 "모든
 // 분석 결과는 표와 그래프를 함께 낸다").
-function ContinuousDistributionCard({ catalogByKey, row }) {
+function ContinuousDistributionCard({ catalogByKey, row }: { catalogByKey: CatalogByKey; row: ContinuousRow }) {
   if (row.suppressed) {
     return (
       <div className="swb-card">
@@ -271,7 +339,7 @@ function ContinuousDistributionCard({ catalogByKey, row }) {
   );
 }
 
-function DiscreteDistributionCard({ catalogByKey, row, variableCount }) {
+function DiscreteDistributionCard({ catalogByKey, row, variableCount }: { catalogByKey: CatalogByKey; row: DiscreteRow; variableCount: number }) {
   const isOrdinal = catalogByKey.get(row.variableKey)?.type === 'ordinal';
   const display = buildDiscreteDisplay({ levels: row.levels, other: row.other, rawLevels: row.rawLevels, isOrdinal });
   if (row.suppressed && !display.isRaw) {
@@ -298,7 +366,7 @@ function DiscreteDistributionCard({ catalogByKey, row, variableCount }) {
 // method별로 다른 부분(GroupComparisonCard/ContingencyCard/CorrelationCard)만
 // 갈라서 렌더링한다 — 응답 shape 자체는 셋 다 동일하다(statistic/df/pValue/
 // effectSizes/extra), 어떤 필드를 어떻게 강조해 보여줄지만 다르다.
-function BivariateSuppressedCard({ bivariate }) {
+function BivariateSuppressedCard({ bivariate }: { bivariate: BivariateView }) {
   // 제한데이터 권한자 해제 응답에서만 unavailableReason이 온다 — 소수 인원 보호는 풀렸지만 통계적으로 계산할 수 없다는 뜻.
   const unavailable = describeMethodReasonCode(bivariate.unavailableReason);
   return (
@@ -313,7 +381,7 @@ function BivariateSuppressedCard({ bivariate }) {
   );
 }
 
-function BivariateFooter({ bivariate }) {
+function BivariateFooter({ bivariate }: { bivariate: BivariateRevealed }) {
   return (
     <>
       {bivariate.qualityFlags.length > 0 && (
@@ -346,7 +414,7 @@ function BivariateFooter({ bivariate }) {
 // 효과크기(mean_difference/rank_biserial)를 쓰는 2-그룹 검정에만 의미가 있다 —
 // anova/kruskal_wallis(η²/ε²)는 그룹이 3개 이상일 수 있고 효과크기에 방향이
 // 없으므로 그룹명·n만 보여준다.
-function GroupBreakdownTable({ groupBreakdown, method }) {
+function GroupBreakdownTable({ groupBreakdown, method }: { groupBreakdown: BivariateRevealed['groupBreakdown']; method: StatsMethodId }) {
   if (!groupBreakdown || groupBreakdown.length === 0) return null;
   const directional = DIRECTIONAL_GROUP_METHODS.has(method) && groupBreakdown.length === 2;
   return (
@@ -387,7 +455,7 @@ function GroupBreakdownTable({ groupBreakdown, method }) {
   );
 }
 
-function GroupComparisonCard({ bivariate, catalogByKey, committedRecipe }) {
+function GroupComparisonCard({ bivariate, catalogByKey, committedRecipe }: { bivariate: BivariateRevealed; catalogByKey: CatalogByKey; committedRecipe: ResultRecipeView | null }) {
   const { groupLabel, valueLabel } = resolveBivariateVariableLabels(catalogByKey, committedRecipe);
   return (
     <div className="swb-card">
@@ -406,7 +474,7 @@ function GroupComparisonCard({ bivariate, catalogByKey, committedRecipe }) {
             <td colSpan={3}>
               {typeof bivariate.df === 'object' && bivariate.df !== null
                 ? `${fmtDf(bivariate.df.numerator)}, ${fmtDf(bivariate.df.denominator)}`
-                : fmtDf(bivariate.df)}
+                : fmtDf(bivariate.df as number | null)}
             </td>
           </tr>
           <tr><th>p값</th><td colSpan={3}>{formatPValue(bivariate.pValue)}</td></tr>
@@ -430,7 +498,7 @@ function GroupComparisonCard({ bivariate, catalogByKey, committedRecipe }) {
 // [코드리뷰 2026-09-12 2차] "x (행)"/"y (열)"만으로는 두 변수가 같은 범주명을
 // 쓸 때 어느 변수의 행/열인지 구분할 수 없다 — 실제 변수 라벨(xLabel/yLabel,
 // Node의 x=행/y=열 규칙 그대로)을 헤더에 넣는다.
-function ContingencyTable({ table, xLabel, yLabel }) {
+function ContingencyTable({ table, xLabel, yLabel }: { table: BivariateRevealed['contingencyTable']; xLabel: string | null; yLabel: string | null }) {
   if (!table) return null;
   const { rowLabels, colLabels, cells } = table;
   return (
@@ -451,7 +519,7 @@ function ContingencyTable({ table, xLabel, yLabel }) {
   );
 }
 
-function ContingencyCard({ bivariate, catalogByKey, committedRecipe }) {
+function ContingencyCard({ bivariate, catalogByKey, committedRecipe }: { bivariate: BivariateRevealed; catalogByKey: CatalogByKey; committedRecipe: ResultRecipeView | null }) {
   const cramersV = bivariate.extra?.cramersV;
   const { xLabel, yLabel } = resolveBivariateVariableLabels(catalogByKey, committedRecipe);
   return (
@@ -466,7 +534,7 @@ function ContingencyCard({ bivariate, catalogByKey, committedRecipe }) {
       <table className="swb-table">
         <tbody>
           <tr><th>n</th><td>{bivariate.n}</td><th>통계량</th><td>{formatStat(bivariate.statistic)}</td></tr>
-          <tr><th>자유도</th><td>{fmtDf(bivariate.df)}</td><th>p값</th><td>{formatPValue(bivariate.pValue)}</td></tr>
+          <tr><th>자유도</th><td>{fmtDf(bivariate.df as number | null)}</td><th>p값</th><td>{formatPValue(bivariate.pValue)}</td></tr>
           {cramersV && (
             <tr><th>Cramér&apos;s V</th><td colSpan={3}>{formatStat(cramersV.value)}</td></tr>
           )}
@@ -483,7 +551,7 @@ function ContingencyCard({ bivariate, catalogByKey, committedRecipe }) {
   );
 }
 
-function CorrelationCard({ bivariate, catalogByKey, committedRecipe }) {
+function CorrelationCard({ bivariate, catalogByKey, committedRecipe }: { bivariate: BivariateRevealed; catalogByKey: CatalogByKey; committedRecipe: ResultRecipeView | null }) {
   const es = bivariate.effectSizes[0];
   const { xLabel, yLabel } = resolveBivariateVariableLabels(catalogByKey, committedRecipe);
   return (
@@ -511,21 +579,21 @@ function CorrelationCard({ bivariate, catalogByKey, committedRecipe }) {
   );
 }
 
-function BivariateResultCard({ bivariate, catalogByKey, committedRecipe }) {
+function BivariateResultCard({ bivariate, catalogByKey, committedRecipe }: { bivariate: BivariateView; catalogByKey: CatalogByKey; committedRecipe: ResultRecipeView | null }) {
   if (bivariate.suppressed) return <BivariateSuppressedCard bivariate={bivariate} />;
   if (CONTINGENCY_METHODS.has(bivariate.method)) {
-    return <ContingencyCard bivariate={bivariate} catalogByKey={catalogByKey} committedRecipe={committedRecipe} />;
+    return <ContingencyCard bivariate={bivariate as BivariateRevealed} catalogByKey={catalogByKey} committedRecipe={committedRecipe} />;
   }
   if (GROUP_COMPARISON_METHODS.has(bivariate.method)) {
-    return <GroupComparisonCard bivariate={bivariate} catalogByKey={catalogByKey} committedRecipe={committedRecipe} />;
+    return <GroupComparisonCard bivariate={bivariate as BivariateRevealed} catalogByKey={catalogByKey} committedRecipe={committedRecipe} />;
   }
-  return <CorrelationCard bivariate={bivariate} catalogByKey={catalogByKey} committedRecipe={committedRecipe} />;
+  return <CorrelationCard bivariate={bivariate as BivariateRevealed} catalogByKey={catalogByKey} committedRecipe={committedRecipe} />;
 }
 
 // PR3-B — 상관행렬(계획서 §4) 전용 결과 카드. 히트맵의 발산형 색은 r값(§6.8.3),
 // suppressed 셀은 사유 없이 불투명 처리(§4의 3단계 게이트가 이미 판정 완료).
-function CorrelationMatrixResultCard({ correlationMatrix, catalogByKey }) {
-  const labelOf = (key) => variableLabel(catalogByKey, key);
+function CorrelationMatrixResultCard({ correlationMatrix, catalogByKey }: { correlationMatrix: AnalyzeCorrelationMatrixResult; catalogByKey: CatalogByKey }) {
+  const labelOf = (key: string) => variableLabel(catalogByKey, key);
   return (
     <div className="swb-card">
       <strong>상관행렬 — {METHOD_LABELS[correlationMatrix.method] || correlationMatrix.method}</strong>
@@ -549,7 +617,7 @@ function CorrelationMatrixResultCard({ correlationMatrix, catalogByKey }) {
 // PR4-A1 §5 — 연관성 회귀 결과 카드. estimation 4상태(suppressed 포함)를 각각
 // 다르게 그린다: non_estimable은 사유 문구만, inference_withheld는 계수표에서
 // p·CI 열을 빈 칸으로 두고 상단에 배지(BivariateFooter의 qualityFlags 패턴 재사용).
-function num(v, digits = 4) {
+function num(v: number | null | undefined, digits = 4): string {
   return v === null || v === undefined || !Number.isFinite(v) ? '—' : v.toFixed(digits);
 }
 
@@ -557,8 +625,8 @@ function num(v, digits = 4) {
 // 증가당" 계수라 단위가 다르다. 실행 시 저장된 standardizedPredictorKeys를
 // 기준으로 표시한다(체크박스는 실행 후에도 바뀔 수 있어 그것으로는 판단할 수
 // 없다 — 리뷰 지적). interaction 항에는 적용하지 않는다 — 아래 참고.
-function isStandardizedMainTerm(t, standardizedKeys) {
-  return Boolean(t.variableKey) && standardizedKeys.length > 0 && standardizedKeys.includes(t.variableKey);
+function isStandardizedMainTerm(t: RegressionTerm, standardizedKeys: string[]): boolean {
+  return Boolean(t.variableKey) && standardizedKeys.length > 0 && standardizedKeys.includes(t.variableKey as string);
 }
 
 // PR4-A2(리뷰 후 수정) — interaction 계수(β₁₂)는 "1 SD당 효과"로 해석할 수 없다
@@ -566,13 +634,13 @@ function isStandardizedMainTerm(t, standardizedKeys) {
 // 변수 중 하나라도 표준화됐다고 전체에 동일한 suffix를 붙이면 잘못된 해석을
 // 유도한다(리뷰 지적) — 대신 각 변수가 어떤 척도로 곱해졌는지(z-score/원 단위)를
 // 개별 병기한다.
-function interactionScaleNote(interactionOf, standardizedKeys, catalogByKey) {
+function interactionScaleNote(interactionOf: [string, string] | null, standardizedKeys: string[], catalogByKey: CatalogByKey): string | null {
   if (!interactionOf || standardizedKeys.length === 0) return null;
-  const describe = (key) => `${variableLabel(catalogByKey, key)}(${standardizedKeys.includes(key) ? 'z-score' : '원 단위'})`;
+  const describe = (key: string) => `${variableLabel(catalogByKey, key)}(${standardizedKeys.includes(key) ? 'z-score' : '원 단위'})`;
   return `${describe(interactionOf[0])} × ${describe(interactionOf[1])}`;
 }
 
-function regressionTermRowLabel(t, standardizedKeys = [], catalogByKey = new Map()) {
+function regressionTermRowLabel(t: RegressionTerm, standardizedKeys: string[] = [], catalogByKey: CatalogByKey = new Map()): string {
   // 서버 label이 이미 "변수: 수준"(범주형) / "A × B"(interaction) 형태다(server/src/stats/dataset/regressionDesign.ts,
   // server/src/stats/disclosure/regressionSuppression.ts) — 수준을 다시 붙이면 "성별: male: male"이 된다.
   const base = t.label;
@@ -583,7 +651,9 @@ function regressionTermRowLabel(t, standardizedKeys = [], catalogByKey = new Map
   return isStandardizedMainTerm(t, standardizedKeys) ? `${base} (표준화, 1 SD당)` : base;
 }
 
-function RegressionCoefficientTable({ terms, exponentiated, standardizedPredictorKeys = [], catalogByKey = new Map() }) {
+function RegressionCoefficientTable({ terms, exponentiated, standardizedPredictorKeys = [], catalogByKey = new Map() }: {
+  terms: RegressionTerm[]; exponentiated: boolean; standardizedPredictorKeys?: string[]; catalogByKey?: CatalogByKey;
+}) {
   // PR4-A2 — spline 기저 항(β_ns1..β_ns4)은 개별로는 해석 불가능하므로 계수표에서
   // 뺀다(SplinePartialEffectChart로 대체 표시 — ForestPlot과 동일 원칙).
   const rows = terms.filter((t) => t.termType !== 'spline_basis');
@@ -614,25 +684,25 @@ function RegressionCoefficientTable({ terms, exponentiated, standardizedPredicto
       </table>
       {splineVariables.length > 0 && (
         <p className="swb-suppressed-note">
-          스플라인 변수({splineVariables.map((k) => variableLabel(catalogByKey, k)).join(', ')})의 개별 계수는 해석할 수 없어 생략했습니다 — 아래 부분효과 그래프를 참고하세요.
+          스플라인 변수({splineVariables.map((k) => variableLabel(catalogByKey, k as string)).join(', ')})의 개별 계수는 해석할 수 없어 생략했습니다 — 아래 부분효과 그래프를 참고하세요.
         </p>
       )}
     </div>
   );
 }
 
-function RegressionResultCard({ regression, catalogByKey }) {
+function RegressionResultCard({ regression, catalogByKey }: { regression: RegressionView; catalogByKey: CatalogByKey }) {
   if (regression.suppressed) {
     return (
       <div className="swb-card">
-        <strong>{METHOD_LABELS[regression.method] || regression.method || '회귀'}</strong>
+        <strong>{METHOD_LABELS[regression.method as string] || regression.method || '회귀'}</strong>
         <p className="swb-suppressed-note">공개 정책에 따라 결과가 표시되지 않음(표본 크기 등).</p>
       </div>
     );
   }
 
-  const methodLabel = METHOD_LABELS[regression.method] || regression.method;
-  const outcomeLabel = variableLabel(catalogByKey, regression.outcomeKey);
+  const methodLabel = METHOD_LABELS[regression.method as string] || regression.method;
+  const outcomeLabel = variableLabel(catalogByKey, regression.outcomeKey as string);
 
   if (regression.estimation === 'non_estimable') {
     return (
@@ -640,7 +710,7 @@ function RegressionResultCard({ regression, catalogByKey }) {
         <strong>{methodLabel}</strong>
         <p className="swb-card-subtitle">결과변수: {outcomeLabel}</p>
         <p className="swb-suppressed-note">
-          {REGRESSION_NON_ESTIMABLE_LABELS[regression.nonEstimableReason] || '현재 데이터로 계산할 수 없습니다.'}
+          {REGRESSION_NON_ESTIMABLE_LABELS[regression.nonEstimableReason as string] || '현재 데이터로 계산할 수 없습니다.'}
         </p>
       </div>
     );
@@ -659,23 +729,23 @@ function RegressionResultCard({ regression, catalogByKey }) {
         결과변수: {outcomeLabel}{isLogistic && regression.eventLevel ? ` (사건=${regression.eventLevel})` : ''} ·
         {' '}n={regression.n} · 표본 {regression.personCount}명
         {regression.covariance === 'person_cluster_cr1' && regression.clusterCount != null
-          ? ` · 클러스터 ${regression.clusterCount}개(최대 비중 ${(regression.maxClusterShare * 100).toFixed(0)}%)`
+          ? ` · 클러스터 ${regression.clusterCount}개(최대 비중 ${((regression.maxClusterShare as number) * 100).toFixed(0)}%)`
           : ''}
       </p>
 
       {isWithheld && (
         <p className="swb-status-warn">
-          {REGRESSION_WITHHELD_LABELS[regression.inferenceWithheldReason] || '일부 결과를 표시하지 않습니다.'}
+          {REGRESSION_WITHHELD_LABELS[regression.inferenceWithheldReason as string] || '일부 결과를 표시하지 않습니다.'}
         </p>
       )}
 
       <ForestPlot
         terms={regression.terms} exponentiated={isLogistic}
-        standardizedPredictorKeys={regression.standardizedPredictorKeys}
+        standardizedPredictorKeys={regression.standardizedPredictorKeys as never[]}
         variableLabelOf={(k) => variableLabel(catalogByKey, k)}
       />
       <RegressionCoefficientTable
-        terms={regression.terms} exponentiated={isLogistic}
+        terms={regression.terms as RegressionTerm[]} exponentiated={isLogistic}
         standardizedPredictorKeys={regression.standardizedPredictorKeys} catalogByKey={catalogByKey}
       />
       {regression.standardizedPredictorKeys && regression.standardizedPredictorKeys.length > 0 && (
@@ -709,8 +779,8 @@ function RegressionResultCard({ regression, catalogByKey }) {
         </p>
       )}
 
-      {regression.qualityFlags.length > 0 && (
-        <p className="swb-status-warn">{regression.qualityFlags.map((f) => REGRESSION_QUALITY_FLAG_LABELS[f] || f).join(' ')}</p>
+      {(regression.qualityFlags as string[]).length > 0 && (
+        <p className="swb-status-warn">{(regression.qualityFlags as string[]).map((f) => REGRESSION_QUALITY_FLAG_LABELS[f] || f).join(' ')}</p>
       )}
       <p className="swb-suppressed-note">완전사례 제외 {regression.excludedRowCount}건</p>
       <p className="swb-suppressed-note">{regression.analysisUnitNote}</p>
@@ -725,19 +795,19 @@ function RegressionResultCard({ regression, catalogByKey }) {
   );
 }
 
-const PREDICTION_CV_WITHHELD_LABELS = { LOW_VALID_REPEATS: '유효 반복 수 부족' };
-const PREDICTION_BOOTSTRAP_WITHHELD_LABELS = {
+const PREDICTION_CV_WITHHELD_LABELS: Record<string, string> = { LOW_VALID_REPEATS: '유효 반복 수 부족' };
+const PREDICTION_BOOTSTRAP_WITHHELD_LABELS: Record<string, string> = {
   APPARENT_UNAVAILABLE: 'apparent 값 없음', LOW_VALID_REPLICATES: '유효 복제 수 부족',
 };
 
-function predictionCvCell(cv) {
+function predictionCvCell(cv: PredictionMetric['cv']): string {
   if (cv.status === 'withheld') {
     return `보류: 유효 ${cv.validRepeats}/${cv.totalRepeats}${cv.withheldReason ? ` (${PREDICTION_CV_WITHHELD_LABELS[cv.withheldReason] || cv.withheldReason})` : ''}`;
   }
   return `${formatStat(cv.mean)} [${formatStat(cv.min)}–${formatStat(cv.max)}] (유효 ${cv.validRepeats}/${cv.totalRepeats})`;
 }
 
-function predictionBootstrapCell(bootstrap) {
+function predictionBootstrapCell(bootstrap: PredictionMetric['bootstrap']): string {
   if (bootstrap.status === 'withheld') {
     return `보류: 유효 ${bootstrap.validReplicates}/${bootstrap.totalReplicates}${bootstrap.withheldReason ? ` (${PREDICTION_BOOTSTRAP_WITHHELD_LABELS[bootstrap.withheldReason] || bootstrap.withheldReason})` : ''}`;
   }
@@ -752,11 +822,11 @@ function predictionBootstrapCell(bootstrap) {
 // 제한데이터 권한자 해제본 전용 — 추정 불가일 때 "완전사례 기준" 인원을 필요 기준과 함께 보여 준다. 미리보기의 사건/비사건 수는
 // 결과변수만 관측된 인원이라 예측이 실제로 쓰는 자료(예측변수 값이 모두 있는 사람)와 크게 다를 수 있어, 결측이 많은 변수를 고르면
 // "미리보기엔 138명인데 왜 부족하지?"처럼 혼동하기 쉽다.
-function PredictionCompleteCaseCounts({ prediction }) {
+function PredictionCompleteCaseCounts({ prediction }: { prediction: PredictionView }) {
   const rows = [
-    { label: '전체', count: prediction.personCount, need: PREDICTION_REQUIREMENTS.minPersons },
-    { label: '사건', count: prediction.eventPersonCount, need: PREDICTION_REQUIREMENTS.minEventPersons },
-    { label: '비사건', count: prediction.nonEventPersonCount, need: PREDICTION_REQUIREMENTS.minNonEventPersons },
+    { label: '전체', count: prediction.personCount as number, need: PREDICTION_REQUIREMENTS.minPersons },
+    { label: '사건', count: prediction.eventPersonCount as number, need: PREDICTION_REQUIREMENTS.minEventPersons },
+    { label: '비사건', count: prediction.nonEventPersonCount as number, need: PREDICTION_REQUIREMENTS.minNonEventPersons },
   ];
   return (
     <>
@@ -784,7 +854,7 @@ function PredictionCompleteCaseCounts({ prediction }) {
   );
 }
 
-function PredictionResultCard({ prediction, catalogByKey, limitedApplied = false }) {
+function PredictionResultCard({ prediction, catalogByKey, limitedApplied = false }: { prediction: PredictionView; catalogByKey: CatalogByKey; limitedApplied?: boolean }) {
   if (prediction.suppressed) {
     return (
       <div className="swb-card">
@@ -794,7 +864,7 @@ function PredictionResultCard({ prediction, catalogByKey, limitedApplied = false
     );
   }
 
-  const outcomeLabel = variableLabel(catalogByKey, prediction.outcomeKey);
+  const outcomeLabel = variableLabel(catalogByKey, prediction.outcomeKey as string);
 
   if (prediction.estimation === 'non_estimable') {
     return (
@@ -802,14 +872,14 @@ function PredictionResultCard({ prediction, catalogByKey, limitedApplied = false
         <strong>{METHOD_LABELS.l2_logistic}</strong>
         <p className="swb-card-subtitle">결과변수: {outcomeLabel} (사건={prediction.eventLevel})</p>
         <p className="swb-suppressed-note">
-          {PREDICTION_NON_ESTIMABLE_LABELS[prediction.nonEstimableReason] || '현재 데이터로 계산할 수 없습니다.'}
+          {PREDICTION_NON_ESTIMABLE_LABELS[prediction.nonEstimableReason as string] || '현재 데이터로 계산할 수 없습니다.'}
         </p>
         {limitedApplied && <PredictionCompleteCaseCounts prediction={prediction} />}
       </div>
     );
   }
 
-  const rocAucMetric = prediction.metrics.find((m) => m.metric === 'roc_auc');
+  const rocAucMetric = (prediction.metrics as PredictionMetric[]).find((m) => m.metric === 'roc_auc');
 
   return (
     <div className="swb-card">
@@ -828,7 +898,7 @@ function PredictionResultCard({ prediction, catalogByKey, limitedApplied = false
             <tr><th>지표</th><th>apparent</th><th>CV 평균[최소–최대] (유효 n/R)</th><th>bootstrap 보정 (유효 n/B)</th><th>반복 1</th></tr>
           </thead>
           <tbody>
-            {prediction.metrics.map((m) => (
+            {(prediction.metrics as PredictionMetric[]).map((m) => (
               <tr key={m.metric}>
                 <td>{PREDICTION_METRIC_LABELS[m.metric] || m.metric}</td>
                 <td>{formatStat(m.apparent)}</td>
@@ -861,7 +931,7 @@ function PredictionResultCard({ prediction, catalogByKey, limitedApplied = false
         </p>
       )}
 
-      <div className="swb-section-label">계수(표준화, λ={formatStat(prediction.lambda.selected)})</div>
+      <div className="swb-section-label">계수(표준화, λ={formatStat((prediction.lambda as PredictionBodyLambda).selected)})</div>
       <div className="swb-table-scroll">
         <table className="swb-table" aria-label="예측 계수표">
           <thead><tr><th>변수</th><th>수준</th><th>표준화 계수</th></tr></thead>
@@ -881,7 +951,7 @@ function PredictionResultCard({ prediction, catalogByKey, limitedApplied = false
         ridge(L2 정칙화) 표준화 계수는 개별 변수의 유의성 검정 목적이 아니라 예측 모형 내 상대적 기여도 참고용입니다 — p값·신뢰구간을 제공하지 않습니다.
       </p>
 
-      {prediction.droppedColumnFoldCount > 0 && (
+      {(prediction.droppedColumnFoldCount as number) > 0 && (
         <p className="swb-status-warn">
           일부 교차검증 분할에서 값이 상수인 설명변수 열 {prediction.droppedColumnFoldCount}개가 제외됐습니다.
         </p>
@@ -890,7 +960,7 @@ function PredictionResultCard({ prediction, catalogByKey, limitedApplied = false
 
       <div className="swb-section-label">주의사항</div>
       <ul>
-        {prediction.caveats.map((c) => (
+        {(prediction.caveats as string[]).map((c) => (
           <li key={c} className="swb-suppressed-note">{PREDICTION_CAVEAT_LABELS[c] || c}</li>
         ))}
       </ul>
@@ -903,7 +973,7 @@ function PredictionResultCard({ prediction, catalogByKey, limitedApplied = false
 // "비공개"(공개 정책상 억제)와 "—"(계산 불가 — 그룹 안에서 변수가 전부 결측)를
 // 구분해서 표시한다 — 둘 다 "—"로 뭉뚱그리면 소수셀이라 숨겨진 건지 그냥 데이터가
 // 없는 건지 사용자가 구분할 수 없다.
-function stratifyGroupLabel(group, stratifyByKey) {
+function stratifyGroupLabel(group: AnalyzeDescriptiveStratifyGroup, stratifyByKey: string): string {
   if (group.kind === 'total') return '전체';
   if (group.kind === 'other') return '기타';
   if (group.kind === 'missing') {
@@ -920,13 +990,13 @@ function stratifyGroupLabel(group, stratifyByKey) {
 // 같은 담당의가 둘 이상인 정상 조회에서도 열 제목만으로는 서로 다른 그룹임을
 // 구분할 수 없다 — groupId/CSV엔 구분값이 있지만 화면엔 없었다(리뷰 지적). 원본
 // UUID는 여전히 노출하지 않으면서, 중복된 라벨에만 순번을 붙인다.
-function resolveGroupLabels(groups, stratifyByKey) {
+function resolveGroupLabels(groups: AnalyzeDescriptiveStratifyGroup[], stratifyByKey: string): string[] {
   const rawLabels = groups.map((g) => stratifyGroupLabel(g, stratifyByKey));
-  const totalByLabel = new Map();
+  const totalByLabel = new Map<string, number>();
   for (const label of rawLabels) totalByLabel.set(label, (totalByLabel.get(label) || 0) + 1);
-  const seenSoFar = new Map();
+  const seenSoFar = new Map<string, number>();
   return rawLabels.map((label) => {
-    if (totalByLabel.get(label) <= 1) return label;
+    if ((totalByLabel.get(label) as number) <= 1) return label;
     const index = (seenSoFar.get(label) || 0) + 1;
     seenSoFar.set(label, index);
     return `${label} ${index}`;
@@ -937,12 +1007,12 @@ function resolveGroupLabels(groups, stratifyByKey) {
 // (버그 수정) 첫 번째 공개 그룹만 대표로 쓰면, 그 그룹에 없는 레벨(예: A그룹=남성만,
 // B그룹=여성만 관측되고 total은 강제 억제된 경우)이 표에서 통째로 누락된다 — total이
 // 억제돼도 A/B처럼 다른 그룹에만 있는 레벨은 여전히 공개 대상이므로 반드시 합쳐야 한다.
-function resolveDiscreteLevelsForVariable(byGroup, variableKey) {
-  const seen = new Map(); // `${typeof level}:${String(level)}` -> 원본 level 값(대표 1개)
+function resolveDiscreteLevelsForVariable(byGroup: Table1GroupView[], variableKey: string): Array<string | boolean> {
+  const seen = new Map<string, string | boolean>(); // `${typeof level}:${String(level)}` -> 원본 level 값(대표 1개)
   for (const g of byGroup) {
     const cell = g.discrete.find((d) => d.variableKey === variableKey);
     if (!cell || cell.suppressed) continue;
-    for (const l of cell.levels) {
+    for (const l of cell.levels as AnalyzeDiscreteLevel[]) {
       const key = `${typeof l.level}:${String(l.level)}`;
       if (!seen.has(key)) seen.set(key, l.level);
     }
@@ -950,14 +1020,14 @@ function resolveDiscreteLevelsForVariable(byGroup, variableKey) {
   return Array.from(seen.values());
 }
 
-function Table1ContinuousCellText({ cell }) {
+function Table1ContinuousCellText({ cell }: { cell: Table1ContinuousView | undefined }) {
   if (!cell) return '—';
   if (cell.suppressed) return <span className="swb-suppressed-note" style={{ fontStyle: 'italic' }}>비공개</span>;
   if (cell.mean === null) return '—'; // 계산 불가(그룹 안에서 변수 전부 결측) — 억제와 다른 표시
   return `${num(cell.mean, 2)} ± ${num(cell.sd, 2)} (n=${cell.n})`;
 }
 
-function Table1DiscreteCellText({ cell, level }) {
+function Table1DiscreteCellText({ cell, level }: { cell: Table1DiscreteView | undefined; level: string | boolean | null }) {
   if (!cell) return '—';
   if (cell.suppressed) return <span className="swb-suppressed-note" style={{ fontStyle: 'italic' }}>비공개</span>;
   // 계산 불가(이 그룹에서 변수가 전부 결측 — n=0)와 "이 레벨이 관측 0건"을 구분한다.
@@ -965,15 +1035,15 @@ function Table1DiscreteCellText({ cell, level }) {
   // 찍혀 실제 값이 0인 것처럼 보인다(버그 수정).
   if (cell.n === 0) return '—';
   if (level === null) return '—';
-  const found = cell.levels.find((l) => String(l.level) === String(level));
+  const found = (cell.levels as AnalyzeDiscreteLevel[]).find((l) => String(l.level) === String(level));
   return found ? `${found.count} (${(found.proportion * 100).toFixed(1)}%)` : '0 (0.0%)';
 }
 
-function Table1Grid({ stratified, catalogByKey, limitedApplied = false }) {
+function Table1Grid({ stratified, catalogByKey, limitedApplied = false }: { stratified: StratifiedView; catalogByKey: CatalogByKey; limitedApplied?: boolean }) {
   if (stratified.suppressed) {
     return <p className="swb-suppressed-note">공개 정책에 따라 표시되지 않음</p>;
   }
-  const { groups, byGroup, stratifyByKey } = stratified;
+  const { groups, byGroup, stratifyByKey } = stratified as Required<StratifiedView>;
   const byGroupId = new Map(byGroup.map((g) => [g.groupId, g]));
   const total = byGroupId.get('total');
   const continuousKeys = (total?.continuous ?? []).map((c) => c.variableKey);
@@ -1044,7 +1114,7 @@ function Table1Grid({ stratified, catalogByKey, limitedApplied = false }) {
 // 제한데이터 권한자 응답 전용(서버가 응답 시점에만 붙인다 — shared/contracts LimitedDisclosureStatusSchema).
 // applied는 소수 인원(1~9명) 보호가 해제됐다는 경고 배너이고, unavailable_*는 해제를 시도했지만 못 해
 // 일반(집계) 결과를 보여 준다는 안내다. 필드가 없으면 일반 응답이라 아무것도 그리지 않는다.
-const LIMITED_DISCLOSURE_MESSAGES = {
+const LIMITED_DISCLOSURE_MESSAGES: Record<string, string> = {
   applied: '제한데이터 권한: 소수 인원(10명 미만) 보호가 해제된 결과입니다. 화면 캡처·반출·공유에 주의하세요.',
   unavailable_engine_busy: '제한 해제 계산이 다른 작업과 겹쳐 일반(집계) 결과를 표시합니다. 잠시 후 다시 조회하세요.',
   unavailable_computation_failed: '제한 해제 계산에 실패해 일반(집계) 결과를 표시합니다. 다시 시도하세요.',
@@ -1056,7 +1126,7 @@ const LIMITED_DISCLOSURE_MESSAGES = {
   unavailable_version_drift: '분석 규칙·엔진 버전이 바뀌어 이 실행은 제한 해제를 할 수 없습니다. 분석을 다시 실행하세요.',
 };
 
-function LimitedDisclosureBanner({ status }) {
+function LimitedDisclosureBanner({ status }: { status: LimitedDisclosureStatus | undefined }) {
   if (!status) return null;
   const text = LIMITED_DISCLOSURE_MESSAGES[status]
     ?? '제한 해제를 적용하지 못해 일반(집계) 결과를 표시합니다. 다시 실행하세요.';
@@ -1077,7 +1147,7 @@ const TABS = [
 export function ResultPanel({
   catalog, committedRecipe, committedResult, recipeChanged,
   onExport, exportState, actionsLocked, exportUnsupported,
-}) {
+}: ResultPanelProps) {
   const catalogByKey = new Map((catalog?.variables ?? []).map((v) => [v.key, v]));
   // 범주형 "기타" 병합 안내용 — 실행에 쓰인 변수 개수(서버 응답이 아니라 레시피만 본다).
   const variableCount = committedRecipe?.variableKeys?.length ?? 0;
