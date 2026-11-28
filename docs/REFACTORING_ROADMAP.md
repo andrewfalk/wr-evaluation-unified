@@ -450,6 +450,67 @@
 
 릴리스·버전 범프는 없다. **다음** = 계획 세션의 독립 확인 → (사용자 지시 시) C9 구간 D(영상 분석 화면).
 
+**C9 구간 D — 영상 분석 화면(P2-75a ~ P2-75D-docs) 현황(2026-11-28)** — 머지 PR #497 ~ #504 + 이 기록(계획 9개 그대로, 순서도 그대로). 정본 계획은 저장소 밖 `phase2-c9-plan.md`의 "구간 D"(사용자 승인 2026-11-28 — 결정: 먼저 통째로 TS로 옮기고 그다음 쪼갠다 · 화면 문구는 바꾸지 않는다 · **영상 분석 화면은 화면 조각까지만 나누고 상태(`useState` 16개)와 서버 흐름(핸들러)은 본체에 둔다** · **이 구간에는 고치는 PR이 없다**).
+
+**결과**
+1. **특성화(P2-75a)** — 새 골든 4개(`src/core/components/__tests__/__goldens__/video-*.json`)와 도우미 `src/testing/videoStepHarness.tsx`(환자 상태를 들고 그린다 — `shared`는 환자 `data.shared`와 같은 참조라 되돌리기가 `indexOf(entry)`로 찾는다, `updatePatient`·`updateShared`는 앱과 같은 모양, 단계마다 콜백·바뀐 상태·DOM·폼 상태).
+   - 예시 분석 경로(`vi.mock` 없음, 실제 모듈 등록·예시 분석): 공정·클립 입력 → 분석 → 직업 단위·작업 단위 검토 · flat 후보 · 근거 펼침 · 대상 작업 선택 · 적용 5건(`updatePatient` 뒤 modules·적용 이력) · 되돌리기 · 입력 변경으로 결과 비움, 저장된 결과로 다시 열기·모듈 조합.
+   - 서버 경로: `videoAnalysisClient`는 실제 모듈 위에 서버 호출 함수만 덮어쓰고(공용 상수는 진짜), 분석 실행·서버 적용은 함수 하나씩 mock(경로는 확장자 없이 — 서비스가 `.ts`가 된 뒤에도 듣는다). 업로드 중·뒤·실패 · 탐지 중·뒤 · 대상자 선택 · 분석 중·뒤·실패 · 골격 검수(불러오는 중·열림·자료 없음·종료 실패·종료) · 서버 적용 중·뒤·실패 · 미동기 환자 · 시험 모드 · 썸네일을 남긴 채 언마운트(리뷰 반영).
+2. **TS 이동(P2-75b-ts · P2-75g-ts)** — `VideoAnalysisStep.jsx`(1,467줄) → `.tsx`, `src/core/services/videoServerApply`·`videoProvenance`·`videoAnalysisRun` `.js` → `.ts`. esbuild 비교(`jsx` preserve·automatic × `verbatimModuleSyntax` 켬·끔) **모두 차이 0줄**, `@ts-nocheck` 3개 해제. 새 `any`·`@ts-expect-error`·`eslint-disable`·`!` 0.
+   - 실제 strict 오류(이름만 바꿨을 때): 본체 **288건**(계획 어림 265 — 매개변수 타입 없음 131 · 인덱스 53 · 속성 53 · 구조분해 35) · 서비스 세 파일 75(Provenance 36 · Run 29 · ServerApply 10) + 그 타입이 바뀌며 소비자 본체에서 난 2 = 77. 타입 뒤 0(완화 설정도 0). 단언은 `as` 37(본체) · 18(서비스 — JS 함수의 옵션 타입이 기본값 `[]` 때문에 `never[]`로 좁혀져 겹침이 없는 `patientServerRepository` 호출 1곳은 `as unknown as`).
+   - 화면·서버 응답 타입은 읽는 필드만 적은 지역 타입이다(런타임 검증 없음). 계약상 필수인 `confidence` 등은 계약과 같게 적었다.
+3. **파일로 나눔(P2-75c · P2-75d)** — 순수 헬퍼 30개와 상수 6개를 `src/core/services/videoStep*.ts`로: `videoStepState`(상태 편집·`MOCK_BUNDLE`) · `videoStepEvidence`(근거·집계) · `videoStepCandidates`(참고 후보) · `videoStepTypes`(타입만). 런타임 import는 한 방향(candidates → evidence → `videoProvenance` → state), state는 영상 서비스를 import하지 않는다. 하위 화면 `EvidencePanel`·`FlatCandidateList`는 `src/core/components/video/`로. 선언 단위 esbuild 비교로 옮긴 선언 38개 모두 같음·새 선언 0. 본체는 옮긴 이름을 그대로 다시 내보낸다(헬퍼·하위 화면 테스트 무변경).
+4. **화면 조각(P2-75e · P2-75f)** — 셋업 열 `video/SetupColumn.tsx`(props 24 = 상태·파생값 14 + 핸들러 10, 이름은 본체 그대로), 렌더 함수 3개 → `video/ReviewRows.tsx`의 `SuggestionRow`·`CandidateRow`·`JobScopeProcessBreakdown`(본문 그대로, `<li key>`의 key만 호출부로 — 같은 값·같은 순서, 행이 클로저로 읽던 본체 값 9개는 `review` 묶음), 직업 단위 검토 `JobScopeReview` · 작업 단위 검토 `TaskScopeReview` · 적용 이력 `AppliedHistory`, 화면 상태·props 타입 `video/types.ts`. `renderSkeletonReview`는 `FlatCandidateList`에 넘기는 render prop이라 본체 함수로 남겼다. 옮긴 JSX는 공백 외에 의도한 줄만 달라졌다(줄 단위 대조). effect 3개와 선언 순서, 의존 배열 일부를 뺀 effect 2개, 렌더 중 ref 대입, `updateVA` 클로저는 **본체에 그대로**.
+5. **중복 제거(P2-75h)** — `MOCK_BUNDLE`(`videoServerApply` 상수 · `videoProvenance` 기본 인자 — 값 `'mock-6.0-2'` 세 곳 같음)과 `requestedFeaturesForModules`(`videoAnalysisRun`의 사본 — 본문 글자까지 같음)를 `videoStepState` 한 곳으로. esbuild 줄 차이는 그 세 곳뿐, 순환 0.
+
+**R2b에 실릴 flagged(C9 구간 D)**는 0건이다(고치는 PR 없음, 화면 동작 변화 없음).
+
+**수치**
+| 항목 | 앞 | 뒤 |
+|---|---|---|
+| `VideoAnalysisStep` 줄 수 | 1,467 | 592(조각 `video/` 8파일 26 ~ 178줄, 헬퍼 `videoStep*` 4파일 107 ~ 219줄) |
+| `ts-progress` | TS 174 files / 21,837 lines(49.4%) | 190 / 24,391(54.3%) |
+| `@ts-nocheck` 기준선 | 44 | 41 |
+| ESLint 동결 | 16파일 34건(영상 4) | 15파일 30건(영상 0) |
+| lint 경고 | 69 | 69 |
+| 루트 테스트 | 4,967 | 4,971 |
+| 서버 테스트 | 1,871 | 1,871 |
+
+- 래칫 `inlineStyleHex` 8 · `coreToAppImports` 10(`useWorkspaceLifetime`은 본체에서만 — 조각은 `src/app`을 import하지 않는다) · `webStorageFiles` 6 · `cssRawHex` 230 · `untaggedSetPatients` 0 그대로.
+- 기존 골든·픽스처는 구간 내내 바뀌지 않았다(골든은 새로 만든 4개뿐, P2-75b 이후 한 번도 갱신하지 않음). 기존 테스트는 확장자를 적은 import 10줄만 바뀌었다(본체 5 · 서비스 5).
+- `packages/**`·`server/**`·`electron/**`·`api/**`·CSS·클래스 이름 변경 0. `videoAnalysisClient.js`는 그대로.
+
+**계획과 다르게 한 점**
+- P2-75b-ts: **임시 타입 선언 `SkeletonOverlay.d.ts`·`TargetPicker.d.ts`**(JS 파일 무변경) — 두 JS 컴포넌트가 구조분해 기본값(`activeSegments = []`·`frameUrl = null`)으로 prop 타입을 `never[]`·`null`로 좁혀 추론해 TS 호출부가 붙지 않았다. 구간 B의 계획 해석 1("기본값 없는 선택 prop" → 옆에 `X.d.ts`)을 원인이 비슷한 이 경우에 넓혀 적용했다(한 PR 2개).
+- P2-75c: 계획의 세 파일(근거·후보·상태 편집)에 **타입만 담는 `videoStepTypes.ts`**를 더했다. 근거 구간 타입은 서비스가 `components/`를 import하지 않도록 같은 모양의 `EvidenceSegment`로.
+- P2-75f: 본체의 상태·props 타입도 `video/types.ts`로 옮겼다(`VideoAnalysisStepProps`는 본체가 다시 내보냄). **본체 450줄 기준은 맞추지 못했다** — 상태·파생값·핸들러(본체에 두기로 한 흐름)만 370줄, import·다시 내보내기가 65줄이다. 머리 구역(제목·안내·시범 운영 배너·상태바, 약 50줄)은 계획의 조각 목록에 없어 꺼내지 않았다.
+- P2-75g-ts: 서비스를 확장자까지 적던 테스트 import는 계획(K7b)의 4곳이 아니라 **5곳**(`components/__tests__/videoAnalysisStep.test.js`의 `videoProvenance.js` 포함). 소비자 쪽 타입만 몇 곳 맞췄다(`VideoFeatureValue.confidence` 필수 — 계약과 같음 · `PatientData.modules` 필수 · `serverConfig` prop 타입 · 서버 적용 환자 단언 대상) — 변환 결과 무변경.
+- P2-75a: 특성화 테스트의 `buildJobFeatures` 호출 인자를 `Parameters<typeof buildJobFeatures>`로 단언해, 본체가 TS가 된 뒤에도 테스트를 고치지 않게 했다.
+
+**특성화가 도달하지 못한 상태**(접은 조각 0 — 검토·이력 JSX는 모두 골든이 덮는다): ① 미동기 환자의 '적용' 막힘 문구(적용 버튼이 잠겨 있어 핸들러의 그 분기에 닿지 않는다) ② `videoAnalysis`가 없는 `shared`(앱은 불러올 때 기본값을 채워 도달하지 않는다 — 아래 후속) ③ 화면이 내려간 뒤의 취소(분석·적용 서비스가 mock) ④ 골격 검수의 실제 프레임(`SkeletonOverlay` 안).
+
+**특성화에서 드러난 지금 동작(고치지 않음)**: 클립 삭제는 같은 렌더의 `shared`로 `updateShared`를 두 번 부른다(파생값 비우기 + 삭제 — K28 `updateVA` 클로저) · 실패한 골격 자료(`{ error }`)는 캐시로 보지 않아 다른 행에서 열면 다시 요청한다 · 미동기 환자는 인트라넷이어도 예시 분석으로 돌고 적용 버튼만 잠긴다.
+
+**후속(이 구간에서 하지 않음 — 결정 4)**
+- K28의 어색한 동작: `updateVA`가 렌더 시점 `shared`를 잡아 분석·업로드 중 다른 편집을 덮어쓸 수 있다 · 렌더 중 ref 대입(`detectionRef.current = detection`) · 의존 배열 일부를 뺀 effect 2개(ESLint가 그 두 `eslint-disable-line`을 "쓰지 않는 지시문"으로 경고한다 — lint 경고 69에 포함) · `analysisError` 한 칸을 업로드·탐지·선택·분석 네 흐름이 같이 쓴다 · 되돌리기는 참조 동일성(`indexOf(entry)`)으로 찾는다.
+- `shared.videoAnalysis`가 없으면 본체의 대체 객체가 렌더마다 새로 만들어져 `[va.jobFeatures]` effect가 끝없이 돈다(앱은 정규화로 도달하지 않음 — 테스트를 쓰다 확인).
+- `applySuggestion`의 `applyBlocked` 분기는 버튼이 잠겨 있어 화면에서 닿지 않는다.
+- 임시 타입 선언 `SkeletonOverlay.d.ts`·`TargetPicker.d.ts`는 두 컴포넌트를 TS로 옮길 때 지운다.
+- `videoAnalysisClient.js`(`@ts-nocheck`)의 TS 이동, `patientServerRepository.js`가 TS가 되면 `videoServerApply`의 `as unknown as` 1곳을 지운다.
+- 본체 줄 수를 더 줄이려면 머리 구역 조각이나 상태·흐름 훅 분리(결정 3을 다시 정할 때)가 필요하다.
+
+**테스트 도구 함정**
+- vitest는 v1.6.1이다(`Mock<Args, Ret>` 꼴).
+- 분할 도구는 본체의 `export … from` 줄을 "사용"으로 세어, 옮긴 컴포넌트만 쓰던 import를 본체에 남긴다 — TS AST로 안 쓰는 import를 찾아 지웠다(main도 0).
+
+**확인하지 못한 것**
+- **영상 분석 화면(웹 로컬)**: 영상 분석 단계는 서버 설정(`videoAnalysisEnabled`)이 있어야 단계 목록에 생겨 웹 로컬 모드에서 열리지 않는다 — **테스트와 골든으로만 확인**. 웹 로컬에서 앱이 뜨고 콘솔 오류가 없는 것, dev 서버에서 본체 모듈이 import되는 것만 봤다.
+- 서버 경로(업로드·탐지·실제 분석·서버 적용 — 영상 분석 서버 필요), 설치본.
+
+릴리스·버전 범프는 없다.
+
+**C9 마감(2026-11-28)** — 계획 46개(구간 A 12 · B 14 · C 11 · D 9) 가운데 **45개를 머지**했다: 구간 A #461 ~ #472(12) · 구간 B #473 ~ #485(13 — P2-80은 재현되지 않아 PR 없음) · 구간 C #486 ~ #496(11) · 구간 D #497 ~ #504 + 이 기록(9). 큰 화면 아홉 개의 본체 줄 수: `VideoAnalysisStep` 1,467 → 592 · `AdminConsoleModal` 1,338 → 80 · `ResultPanel` 1,262 → 225 · `RecipePanel` 1,030 → 276 · `StatisticsWorkbench` 749 → 476 · `Dashboard` 671 → 514 · `PresetManageModal` 530 → 409 · `SettingsModal` 373 → 190 · `BatchImportModal` 305 → 233. `@ts-nocheck` 51 → 41, ESLint 동결 56 → 30, `ts-progress` 30.6% → 54.3%, 래칫 값은 하나도 늘지 않았다. 동작이 바뀐 PR은 4개(P2-87 · P2-83b 동작 맞춤 · P2-83c · P2-83e)이고 나머지는 특성화·이동·분할·구조 PR이다. **R2b flagged는 3건**(P2-87 · P2-83c · P2-83e). 임시 타입 선언은 3개(`charts/ScatterPlot.d.ts` · `SkeletonOverlay.d.ts` · `TargetPicker.d.ts`) — 해당 JS를 TS로 옮길 때 지운다. **다음** = 계획 세션의 독립 확인 → (사용자 지시 시) C10(스타일 나누기).
+
 **게이트 B 숙제(게이트 A 구현 중 생김, 2026-11-14) — ✅ 종결(P2-40d, #339)**: ① 전제 정정 — 위자드 초안을 컨테이너로 옮겨도 "나중에 추가된 환자"는 나중 사건이라 같은 경합이 남는다(게이트 B 계획 B5). 판정 시점을 "삭제 전이가 적용되는 순간의 목록"으로 정의했다(초안은 옮기지 않음). ② 삭제 뒤처리 전체(2단계 layout effect·`deleteTick`·`setActiveId` updater 둘째 인자) 제거. 아래는 그때의 기록 — ① P2-39a Codex 3회차 차단 1건(사용자 결정: 머지하고 숙제로): 위자드 초안 비우기가 "활성 환자 null에 반응해 다음 커밋에 환자를 추가하는 layout effect"가 있으면 빈 목록으로 판정할 수 있다. 초안(`useIntakeWizard`의 `useState`)이 환자 목록과 다른 상태라 판정을 몇 커밋 미뤄도 같은 경합이 남는다. 현재 제품 코드의 `useLayoutEffect`는 3곳뿐(`DiagnosisForm` 높이 조절·`usePatientCrud`의 ref 갱신·삭제 뒤처리)이고 환자를 추가하는 것은 없어 **현재 코드에서는 도달 경로가 없다**. 근본 해결 = 위자드 초안을 컨테이너 상태로 옮겨 삭제 전이와 같은 전이에서 판정. ② **`usePatientCrud`의 삭제 뒤처리 전체를 제거 대상으로**: 2단계 layout effect(stage `apply`·`intake`)·`deleteTick` 커밋 배리어·컨테이너 `setActiveId` updater가 둘째 인자로 최신 목록을 받는 비표준 모양 — 게이트 B에서 활성 환자·초안을 같은 상태 전이로 계산하면 셋 다 없어진다(`onReduced` 2곳 제거와 같은 작업).
 
 
@@ -741,6 +802,7 @@ shared/contracts/{aiAnalysis,aiPrompt,aiModels}.ts  # AI 입력 계약(.strict) 
 17. **C9 구간 A — 작은 화면 넷(P2-84a ~ P2-88A-docs) 완료(#461 ~ #471 + 이 기록, 2026-11-28)** — Phase 2 절 "C9 구간 A 현황". 대시보드·설정·프리셋 저장·일괄 가져오기 창을 골든으로 얼린 뒤 TS로 옮기고(esbuild 차이 0) `dashboard/`·`settings/`·`preset/`로 나눴다. 모듈의 대시보드 이름·색은 매니페스트 선택 키 `shortName`·`color`. R2b에는 flagged 1건(P2-87 설정 창 기본 인트라넷 주소에 포트 — '연결 확인' 결과 표시 변화는 운영 미확인)이 더 실린다. **다음** = 계획 세션의 독립 확인 → (사용자 지시 시) C9 구간 B(통계 화면).
 18. **C9 구간 B — 통계 화면(P2-76a ~ P2-80B-docs) 완료(#473 ~ #484 + 이 기록, 2026-11-28)** — Phase 2 절 "C9 구간 B 현황". 통계 결과 패널·레시피 패널·작업대를 골든으로 얼린 뒤 TS로 옮기고(esbuild 차이 0, 쓰지 않던 import 바인딩 한 줄은 빌드 산출물 동일로 닫음) `result/`·`recipe/`·`recipeBuild.ts`로 나눴고, 작업대 레시피 초안은 `useReducer`(`useRecipeDraft`)로. 동결 56 → 34. P2-80은 재현되지 않아 PR 없음 — R2b flagged 추가 0. **다음** = 계획 세션의 독립 확인 → (사용자 지시 시) C9 구간 C(관리자 화면).
 19. **C9 구간 C — 관리자 화면(P2-81a ~ P2-83C-docs) 완료(#486 ~ #495 + 이 기록, 2026-11-28)** — Phase 2 절 "C9 구간 C 현황". 관리자 콘솔 탭 9개를 골든 12개로 얼린 뒤(끊김을 따르는 fetch 래퍼 포함) TS로 옮기고(esbuild 차이 0, strict 오류 실측 189) `admin/`로 나눴으며(본체 1,338 → 80줄), 서버 호출 25곳은 `adminRepository.ts`(표준 요청 클라이언트 — shim과 같은 요청 확인)로. 늦은 목록 응답은 순번 가드 `useLatestGuard`로 버린다(동작 맞춤). `WorkspaceScreen`·`useOpsStatus`도 TS로. R2b에는 flagged 2건(P2-83c 가입 거절 확인창·환자 재배정·처리 중 잠금 · P2-83e 배너가 운영 상태 탭으로 열고 알림 처리 뒤 바로 갱신)이 더 실린다 — 화면은 미확인(테스트로만). **다음** = 계획 세션의 독립 확인 → (사용자 지시 시) C9 구간 D(영상 분석 화면).
+20. **C9 구간 D — 영상 분석 화면(P2-75a ~ P2-75D-docs) 완료(#497 ~ #504 + 이 기록, 2026-11-28) · C9 마감** — Phase 2 절 "C9 구간 D 현황"·"C9 마감". 영상 분석 화면을 예시 분석 경로·서버 경로 골든 4개로 얼린 뒤 본체와 서비스 세 파일을 TS로 옮기고(esbuild 차이 0, strict 오류 실측 본체 288 · 서비스 75 + 소비자 2) 순수 헬퍼는 `services/videoStep*.ts`, 하위 화면·화면 조각은 `components/video/`로 나눴다(본체 1,467 → 592줄 — 상태·흐름은 본체에 두기로 해 450줄 기준은 못 맞춤). 고치는 PR 없음, R2b flagged 추가 0. 임시 타입 선언 2개(`SkeletonOverlay.d.ts`·`TargetPicker.d.ts`). C9 전체 45개 머지(계획 46 — P2-80 재현 안 됨). **다음** = 계획 세션의 독립 확인 → (사용자 지시 시) C10(스타일 나누기).
 
 ---
 

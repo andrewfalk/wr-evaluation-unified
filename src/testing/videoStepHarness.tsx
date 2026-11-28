@@ -30,7 +30,7 @@ interface StepProps {
   onServerApplied?: (patient: unknown) => void;
 }
 
-// 본체는 지금 JS(@ts-nocheck)이고 뒤 PR에서 TSX가 된다 — 어느 쪽이든 같은 모양으로 그리려고 props 모양을 여기 적는다.
+// 본체는 P2-75a 때 JS였다(P2-75b-ts에서 TSX) — 어느 쪽이든 같은 모양으로 그리려고 props 모양을 여기 적는다.
 const Step = VideoAnalysisStep as unknown as ComponentType<StepProps>;
 
 export interface HarnessCall {
