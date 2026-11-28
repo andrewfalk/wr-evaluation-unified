@@ -3,19 +3,12 @@
 // 서버 경로(clip→job→apply, audit·영속화)로, 그 외는 로컬로 처리한다(§8.2/§8.12).
 // 실제 추론은 M2에서 서버 셸에 연결된다.
 import { useMemo, useState, useRef, useEffect } from 'react';
-import { generateMockFeatures, displayCandidateReason } from '../services/videoMock';
+import { generateMockFeatures } from '../services/videoMock';
 import {
   REPETITION_FEATURE_KEYS, REPETITION_PROFILES, HAND_WRIST_FEATURE_KEYS, REPETITION_BAND_FEATURE_KEYS,
 } from '../services/videoFeatureProfiles';
 import { gateFeaturesByViewpoint } from '../services/videoViewpointConfig';
-import { contributionValue } from '../services/videoAggregate';
-import {
-  getModuleSuggestions,
-  getModuleCandidates,
-  collectCandidateFeatures,
-  applyFeatureToModule,
-  rollbackAppliedInput,
-} from '../services/videoProvenance';
+import { collectCandidateFeatures, applyFeatureToModule, rollbackAppliedInput } from '../services/videoProvenance';
 import { DEFAULT_CONFIDENCE_THRESHOLDS } from '../services/videoConfidenceConfig';
 import { isVideoAnalysisSupported, createClip, uploadClip, sampleDetectClip, selectTarget, fetchSampleFrame, fetchOverlay, closeReview } from '../services/videoAnalysisClient';
 import { applyVideoFeatureViaServer } from '../services/videoServerApply';
@@ -24,29 +17,34 @@ import { useWorkspaceLifetime } from '../../app/useWorkspaceLifetime';
 import { SkeletonOverlay } from './SkeletonOverlay';
 import { getModule } from '../moduleRegistry';
 import { resolveAnalysisJobIds, buildAppliedRecipe } from '@wr/contracts/index';
-import type { ReactNode } from 'react';
 import type {
-  AppliedInputEntry, FeatureEvidence, InferenceDevice, ModuleTask, ProcessEvidence, ProcessFeatures,
-  SharedJob, SuppressedCandidate, UploadState, VideoAnalysisData, VideoClip, VideoFeatureMap, VideoProcess,
+  AppliedInputEntry, FeatureEvidence, InferenceDevice, ProcessEvidence, ProcessFeatures, SuppressedCandidate, UploadState,
+  VideoAnalysisData, VideoClip, VideoFeatureMap, VideoProcess,
 } from '../services/videoStepTypes';
 import {
-  buildVideoStatus, fmtNum, effectiveShare, buildJobFeatures, buildJobEvidence, buildProcessEvidence, resolveSourceJobs,
-  segmentsForJob, sourceJobLabel,
+  buildVideoStatus, buildJobFeatures, buildJobEvidence, buildProcessEvidence, resolveSourceJobs, segmentsForJob, sourceJobLabel,
 } from '../services/videoStepEvidence';
-import { candidateMinutesPerDay, excludeTaskScopeCandidates } from '../services/videoStepCandidates';
+import { excludeTaskScopeCandidates } from '../services/videoStepCandidates';
 import {
-  MOCK_BUNDLE, requestedFeaturesForModules, tasksForJob, resolveTargetTaskId,
+  MOCK_BUNDLE, requestedFeaturesForModules,
   shareTotalsByJob, clearDerived, addProcessVA, editProcessVA, removeProcessVA, addClipVA, editClipVA, removeClipVA, resolveApplyMode,
 } from '../services/videoStepState';
 import { EvidencePanel } from './video/EvidencePanel';
 import { FlatCandidateList } from './video/FlatCandidateList';
 import { SetupColumn } from './video/SetupColumn';
-import type { AnalysisEvidenceState, DetectionState } from './video/types';
+import { JobScopeReview } from './video/JobScopeReview';
+import { TaskScopeReview } from './video/TaskScopeReview';
+import { AppliedHistory } from './video/AppliedHistory';
+import type {
+  AnalysisEvidenceState, ApplyContext, DetectionState, ModuleSuggestion, OverlayState, PatientData, RequestError, ReviewRowContext,
+  ServerAnalysisResult, SourceRecipe, VideoAnalysisStepProps,
+} from './video/types';
 
 // 순수 헬퍼와 타입은 services/videoStep*.ts로(P2-75c), 하위 화면은 video/로(P2-75d) 옮겼다 — 테스트 등이 이 파일에서 가져가므로
 // 지금 이름 그대로 다시 내보낸다.
 export { EvidencePanel } from './video/EvidencePanel';
 export { FlatCandidateList } from './video/FlatCandidateList';
+export type { VideoAnalysisStepProps } from './video/types';
 export {
   buildVideoStatus, fmtNum, effectiveShare, buildJobFeatures, buildJobEvidence, buildProcessEvidence, resolveSourceJobs,
   segmentsForJob, contribFormula, sourceJobLabel,
@@ -63,64 +61,6 @@ export type {
   VideoProcess, VideoClip, VideoFeatureValue, VideoFeatureMap, ProcessFeatures, JobFeatures, CandidateFeature, AppliedInputEntry,
   VideoAnalysisData, ContributionEvidence, EvidenceContribution, FeatureEvidence, EvidenceByFeatureKey, ProcessEvidence, SourceJob,
 } from '../services/videoStepTypes';
-
-// ── 이 화면의 상태·props 타입(P2-75b-ts) ──
-interface OverlayState {
-  loading?: boolean;
-  data?: object;
-  error?: string;
-  closed?: boolean;
-}
-
-type SourceRecipe = Parameters<typeof buildAppliedRecipe>[0][number];
-type ModuleSuggestion = ReturnType<typeof getModuleSuggestions>[number];
-type ModuleCandidate = ReturnType<typeof getModuleCandidates>[number];
-type ApplyContext = { sharedJobId: string } | { taskId: string | number | null };
-
-/** runServerAnalysis의 결과(그 파일의 JSDoc에는 recipesByJobId가 빠져 있다). */
-interface ServerAnalysisResult {
-  processFeatures: ProcessFeatures[];
-  processEvidence: ProcessEvidence[];
-  missingActiveTime: Record<string, string[]>;
-  bundleVersion: string | null;
-  recipesByJobId?: Record<string, SourceRecipe> | null;
-  errors: Array<{ message: string }>;
-}
-
-/** 요청 오류(requestJson)는 status·data만 갖는다. */
-type RequestError = Error & { data?: { code?: string; error?: { code?: string } } };
-
-interface SharedData {
-  videoAnalysis?: VideoAnalysisData;
-  jobs?: SharedJob[];
-  doctorName?: string;
-  [key: string]: unknown;
-}
-
-interface PatientData {
-  shared: SharedData & { videoAnalysis: VideoAnalysisData };
-  modules?: Record<string, { tasks?: ModuleTask[] } | undefined>;
-  [key: string]: unknown;
-}
-
-interface ActivePatient {
-  id?: string;
-  sync?: { serverId?: string; syncStatus?: string };
-  data?: PatientData;
-}
-
-export interface VideoAnalysisStepProps {
-  shared: SharedData | null | undefined;
-  updateShared: (next: SharedData) => void;
-  updatePatient: (updater: (data: PatientData) => PatientData) => void;
-  activePatient: ActivePatient | null | undefined;
-  activeModules?: string[];
-  session?: { user?: { name?: string } } | null;
-  settings?: unknown;
-  fixtureMode?: boolean;
-  serverConfig?: unknown;
-  onServerApplied?: (serverPatient: unknown) => void;
-}
 
 // ── 컴포넌트 ──────────────────────────────────────────────────────────────
 export function VideoAnalysisStep({ shared, updateShared, updatePatient, activePatient, activeModules = [], session, settings, fixtureMode = false, serverConfig = null, onServerApplied }: VideoAnalysisStepProps) {
@@ -536,127 +476,12 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
     );
   };
 
-  // 제안 1건 행(job-scope·task-scope 공용). rowKey로 근거/overlay 패널을 행마다 고유하게 키잉.
-  // ctx=적용 컨텍스트({sharedJobId} | {taskId}), applyDisabled=대상 task 없음 등 추가 비활성.
-  const renderSuggestionRow = (s: ModuleSuggestion, { moduleId, ctx, processIds, analysisProfile, jobEv, rowKey, applyDisabled = false, applyDisabledTitle }: {
-    moduleId: string; ctx: ApplyContext; processIds: string[]; analysisProfile: string | undefined;
-    jobEv: FeatureEvidence | undefined; rowKey: string; applyDisabled?: boolean; applyDisabledTitle?: string;
-  }) => {
-    const refOnly = s.autoSuggestAllowed === false; // 저신뢰 게이팅(§8.8 D3a) — 자동제안 금지·적용 비활성
-    const expanded = expandedEvidence === rowKey;
-    const skeleton = renderSkeletonReview(rowKey, jobEv);
-    return (
-      <li key={rowKey} className="va-suggest-card">
-        <div className="va-suggest-head">
-          <code className="va-suggest-key">{s.featureKey}</code>
-          <span className="va-suggest-value">→ {String(fmtNum(s.suggestedValue))} {s.unit || ''}</span>
-          <span className={`va-flag-pill ${s.confidence >= 0.8 ? 'tone-positive' : 'tone-warning'}`}>신뢰도 {Math.round(s.confidence * 100)}%</span>
-          {refOnly && <span className="va-flag-pill tone-warning" title="저신뢰 — 수기 확인 필요">참고만</span>}
-          {s.requiresManualReview && <span className="va-flag-pill tone-info">수기확인</span>}
-        </div>
-        <div className="va-suggest-actions">
-          <button type="button" className="btn btn-secondary btn-sm"
-            data-readonly-allow
-            onClick={() => setExpandedEvidence(expanded ? null : rowKey)}>
-            {expanded ? '근거 닫기' : '왜 이 값?'}
-          </button>
-          {/* 시범 운영(정책 B): 적용 시 선택 메모 → provenance editReason. 제안이 어긋날 때 사유 축적(B2 신호). */}
-          {!refOnly && !applyDisabled && (
-            <input type="text" className="va-note-input" placeholder="수정 사유(선택)"
-              value={applyNotes[rowKey] || ''}
-              onChange={(e) => setApplyNotes((m) => ({ ...m, [rowKey]: e.target.value }))} />
-          )}
-          <button type="button" className="btn btn-primary btn-sm" disabled={busy || applyBlocked || refOnly || applyDisabled}
-            title={applyDisabled ? applyDisabledTitle : undefined}
-            onClick={() => applySuggestion(moduleId, ctx, s, processIds, analysisProfile, (applyNotes[rowKey] || '').trim() || undefined)}>
-            적용
-          </button>
-        </div>
-        {(expanded || skeleton) && (
-          <div className="va-suggest-details">
-            {expanded && renderEvidencePanel(jobEv, s.unit)}
-            {skeleton}
-          </div>
-        )}
-      </li>
-    );
+  // 검토 행(SuggestionRow·CandidateRow)이 읽는 본체 값 — 렌더 함수 시절 클로저로 읽던 것 그대로(P2-75f).
+  const reviewRow: ReviewRowContext = {
+    expandedEvidence, setExpandedEvidence, applyNotes, setApplyNotes, busy, applyBlocked, applySuggestion, renderEvidencePanel,
+    renderSkeletonReview,
   };
 
-  // candidate(관찰값) 행 — apply 없음. featureKey별 formatter(원값+unit 출력 금지). 작업 단위 표시.
-  const renderCandidateRow = (c: ModuleCandidate, { activeMinutesPerDay, jobEv, rowKey }: {
-    activeMinutesPerDay: number | null; jobEv: FeatureEvidence | undefined; rowKey: string;
-  }) => {
-    const expanded = expandedEvidence === rowKey;
-    let label: ReactNode;
-    let displayJobEv = jobEv;
-    if (c.featureKey === 'trunkFlexionOver45Duration') {
-      const pct = Math.round((Number(c.value) || 0) * 100);
-      const mins = candidateMinutesPerDay(c.value, activeMinutesPerDay);
-      label = <>척추 45°↑ 굴곡: 클립의 {pct}%{mins != null ? ` · 약 ${mins} 분/일` : <span className="va-hint"> (활동시간 입력 시 분/일 표시)</span>}</>;
-      // 근거 패널 contribFormula가 ratio를 분/일로 오표시하지 않도록 perDayValue를 computed minutes로 패치
-      // (원본 transient state 변형 금지 — shallow clone).
-      if (jobEv && mins != null) {
-        displayJobEv = { ...jobEv, contributions: (jobEv.contributions || []).map((ct) => ({ ...ct, perDayValue: mins })) };
-      }
-    } else {
-      // generic candidate(trunkPostureG·neckCombinedFlexRot 등): 원값 + (evidence.intrinsicUnit) 표시.
-      const unit = jobEv?.contributions?.[0]?.evidence?.intrinsicUnit || '';
-      label = <>{c.reason ? `${displayCandidateReason(c.reason)}: ` : ''}{String(fmtNum(c.value))}{unit ? ` ${unit}` : ''}</>;
-    }
-    const skeleton = renderSkeletonReview(rowKey, jobEv);
-    return (
-      <li key={rowKey} className="va-suggest-card">
-        <div className="va-suggest-head">
-          <code className="va-suggest-key">{c.featureKey}</code>
-          <span className="va-suggest-value">{label}</span>
-          <span className="va-flag-pill tone-warning" title="관찰값 — 자동입력 안 함">참고만</span>
-          {typeof c.confidence === 'number' && (
-            <span className={`va-flag-pill ${c.confidence >= 0.8 ? 'tone-positive' : 'tone-neutral'}`}>신뢰도 {Math.round(c.confidence * 100)}%</span>
-          )}
-        </div>
-        <div className="va-suggest-actions">
-          <button type="button" className="btn btn-secondary btn-sm"
-            data-readonly-allow
-            onClick={() => setExpandedEvidence(expanded ? null : rowKey)}>
-            {expanded ? '근거 닫기' : '왜 이 값?'}
-          </button>
-        </div>
-        {(expanded || skeleton) && (
-          <div className="va-suggest-details">
-            {expanded && renderEvidencePanel(displayJobEv, c.featureKey === 'trunkFlexionOver45Duration' ? 'minutes_per_day' : null)}
-            {skeleton}
-          </div>
-        )}
-      </li>
-    );
-  };
-
-  // 6.0-17: job-scope 제안(직업 합계) 아래 공정별 분해 서브행 — 적용 없는 읽기 전용 표시.
-  // 기여값 = contributionValue(집계와 동일 산식, 재구현 금지). va.processFeatureAggregationMode가
-  // 없는 구 데이터는 기여값 계산을 생략(fail-safe)하고 원값만 표시 + fallback 안내.
-  const renderJobScopeProcessBreakdown = (s: ModuleSuggestion, { jobProcesses }: { jobProcesses: VideoProcess[] }) => {
-    const mode = va.processFeatureAggregationMode;
-    const rows = jobProcesses.map((p) => {
-      const pf = (va.processFeatures || []).find((f) => f.processId === p.id);
-      const raw = pf?.features?.[s.featureKey]?.value;
-      if (raw == null) return null;
-      const contrib = mode ? contributionValue(s.featureKey, raw as number, effectiveShare(mode, p.shiftSharePercent)) : null;
-      return (
-        <div key={p.id} className="va-subrow">
-          {p.name}: {contrib != null
-            ? <>{fmtNum(contrib)} {s.unit || ''} <span className="va-hint">(원값 {fmtNum(raw)} {s.unit || ''})</span></>
-            : <>{fmtNum(raw)} {s.unit || ''}</>}
-        </div>
-      );
-    }).filter(Boolean);
-    if (rows.length === 0) return null;
-    return (
-      <li key={`${s.featureKey}:breakdown`} className="va-suggest-breakdown">
-        {!mode && <div className="va-hint">이전 분석은 공정 기여값 정보 없음 — 재분석 시 표시</div>}
-        {rows}
-      </li>
-    );
-  };
 
   return (
     <div className="panel">
@@ -707,7 +532,7 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
         {analysisError && <p className="muted" style={{ color: 'var(--color-danger)' }}>분석 오류: {analysisError}</p>}
         {Object.keys(missingActiveTime).length > 0 && (
           <p className="muted" style={{ color: 'var(--color-warning)' }}>
-            ⚠ 일부 공정의 활동시간(분/일)이 비어 있어 per-day 제안을 만들지 못했습니다. 공정 "활동시간"을 입력 후 다시 분석하세요.
+            ⚠ 일부 공정의 활동시간(분/일)이 비어 있어 per-day 제안을 만들지 못했습니다. 공정 &quot;활동시간&quot;을 입력 후 다시 분석하세요.
           </p>
         )}
 
@@ -729,106 +554,15 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
 
         {/* 3) 제안 검토 (job-scope) */}
         {hasAnalysis && (
-          <div className="va-suggest-group">
-            <div className="va-suggest-group-title">직업 단위 (무릎·어깨)</div>
-            {jobScopeModules.length === 0 && <p className="va-hint">자동 매핑 지원 직업단위 모듈(무릎·어깨)이 활성화되어 있지 않습니다.</p>}
-            {(va.jobFeatures || []).map((jf) => (
-              <div key={jf.sharedJobId} className="va-review-block">
-                <b className="va-review-block-title">{jobName(jf.sharedJobId)}</b>
-                {jobScopeModules.map((moduleId) => {
-                  const suggestions = getModuleSuggestions(jf.features, moduleId);
-                  if (suggestions.length === 0) return null;
-                  const jobProcesses = va.processes.filter((p) => p.sharedJobId === jf.sharedJobId);
-                  const procIds = jobProcesses.map((p) => p.id);
-                  const analysisProfile = jobProcesses[0]?.analysisProfile;
-                  return (
-                    <ul key={moduleId} className="va-suggest-list">
-                      {suggestions.map((s) => [
-                        renderSuggestionRow(s, {
-                          moduleId,
-                          ctx: { sharedJobId: jf.sharedJobId },
-                          processIds: procIds,
-                          analysisProfile,
-                          jobEv: analysisEvidence.jobEvidenceBySharedJobId[jf.sharedJobId]?.[s.featureKey],
-                          rowKey: `${jf.sharedJobId}:${s.featureKey}`,
-                        }),
-                        renderJobScopeProcessBreakdown(s, { jobProcesses }),
-                      ])}
-                    </ul>
-                  );
-                })}
-              </div>
-            ))}
-          </div>
+          <JobScopeReview va={va} jobScopeModules={jobScopeModules} jobName={jobName} analysisEvidence={analysisEvidence} review={reviewRow} />
         )}
 
         {/* 3-task) 제안 검토 (task-scope — 경추·척추, 공정≈task 1:1). 모듈별 독립 + 대상 task 선택. */}
         {hasAnalysis && taskScopeModules.length > 0 && (
-          <div className="va-suggest-group">
-            <div className="va-suggest-group-title">작업 단위 (척추·경추)</div>
-            {va.processes.map((p) => {
-              const pf = (va.processFeatures || []).find((f) => f.processId === p.id);
-              if (!pf) return null;
-              const blocks = taskScopeModules.map((moduleId) => {
-                const suggestions = getModuleSuggestions(pf.features, moduleId);
-                const candidates = getModuleCandidates(pf.features, moduleId); // 관찰값(apply 없음)
-                if (suggestions.length === 0 && candidates.length === 0) return null; // candidate만 있어도 표시
-                const mod = getModule(moduleId);
-                const procEv = analysisEvidence.processEvidenceByProcessId[p.id] || {};
-                // 이 직업의 해당 모듈 task 목록(적용 대상). 경추·척추는 작업 갯수·이름이 달라 모듈별로 독립.
-                // spine은 미연결 레거시 task fallback 허용(taskFallbackUnlinked).
-                const tasks = tasksForJob(activePatient?.data?.modules?.[moduleId], p.sharedJobId,
-                  { fallbackUnlinked: !!mod?.videoMappingConfig?.taskFallbackUnlinked });
-                const targetKey = `${p.id}:${moduleId}`;
-                // 선택값이 현재 후보에 실제 존재할 때만 유효(stale 선택 → 적용 잘못 활성 방지).
-                const targetTaskId = resolveTargetTaskId(tasks, taskTargets[targetKey]);
-                const noTarget = !targetTaskId;
-                return (
-                  <ul key={moduleId} className="va-suggest-list">
-                    {/* 대상 작업 선택은 apply가 있는 auto 제안에만 의미 — candidate만 있는 블록엔 경고/선택 생략 */}
-                    {suggestions.length > 0 && (
-                      <div className="va-target-pick">
-                        <b>{mod?.name || moduleId}</b> 대상 작업:{' '}
-                        {tasks.length === 0 ? <span className="va-target-empty">없음 — {mod?.name} 탭에서 작업을 추가한 뒤 적용 가능</span>
-                          : tasks.length === 1 ? (tasks[0].name || '작업')
-                            : (
-                              <select value={targetTaskId || ''} onChange={(e) => setTaskTargets((m) => ({ ...m, [targetKey]: e.target.value }))}>
-                                <option value="">(작업 선택)</option>
-                                {tasks.map((t) => <option key={t.id} value={t.id}>{t.name || t.id}</option>)}
-                              </select>
-                            )}
-                      </div>
-                    )}
-                    {suggestions.length === 0 && candidates.length > 0 && (
-                      <div className="va-target-pick"><b>{mod?.name || moduleId}</b> 관찰값</div>
-                    )}
-                    {suggestions.map((s) => renderSuggestionRow(s, {
-                      moduleId,
-                      ctx: { taskId: targetTaskId },
-                      processIds: [p.id],
-                      analysisProfile: p.analysisProfile,
-                      jobEv: procEv[s.featureKey],
-                      rowKey: `${p.id}:${moduleId}:${s.featureKey}`,
-                      applyDisabled: noTarget,
-                      applyDisabledTitle: '적용할 대상 작업을 먼저 선택하세요',
-                    }))}
-                    {candidates.map((c) => renderCandidateRow(c, {
-                      activeMinutesPerDay: p.activeMinutesPerDay,
-                      jobEv: procEv[c.featureKey],
-                      rowKey: `${p.id}:${moduleId}:cand:${c.featureKey}`,
-                    }))}
-                  </ul>
-                );
-              });
-              if (blocks.every((b) => b === null)) return null;
-              return (
-                <div key={p.id} className="va-review-block">
-                  <b className="va-review-block-title">{p.name}</b> <span className="va-hint">({jobName(p.sharedJobId)})</span>
-                  {blocks}
-                </div>
-              );
-            })}
-          </div>
+          <TaskScopeReview
+            va={va} taskScopeModules={taskScopeModules} activePatient={activePatient} taskTargets={taskTargets}
+            setTaskTargets={setTaskTargets} analysisEvidence={analysisEvidence} jobName={jobName} review={reviewRow}
+          />
         )}
 
         {/* 4) candidate (참고만) — task-scope 모듈(경추·척추) candidate는 위 "작업 단위"에서 표시하므로 제외.
@@ -850,24 +584,7 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
 
         {/* 5) 적용 이력 + 되돌리기 (전체폭) */}
         {(va.appliedInputs || []).length > 0 && (
-          <div className="va-history">
-            <div className="va-col-title">적용 이력</div>
-            {serverMode && (
-              <p className="muted">서버에 적용한 항목의 되돌리기는 아직 지원되지 않습니다. 모듈 탭에서 직접 수정하세요.</p>
-            )}
-            <ul style={{ listStyle: 'none', paddingLeft: 0 }}>
-              {va.appliedInputs.map((e, i) => (
-                <li key={i} style={{ margin: '4px 0' }}>
-                  <code>{e.targetPath.split('.').slice(-2).join('.')}</code> = {String(e.appliedValue)}
-                  <span className="muted" style={{ marginLeft: 6 }}>(이전: {String(e.previousValue)})</span>
-                  {/* 서버 모드: 로컬 rollback은 서버(done) 상태와 갈라지므로 미노출(§8.12, Codex). */}
-                  {!serverMode && (
-                    <button type="button" className="btn btn-secondary btn-xs" style={{ marginLeft: 8 }} onClick={() => rollback(e)}>되돌리기</button>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </div>
+          <AppliedHistory va={va} serverMode={serverMode} rollback={rollback} />
         )}
       </section>
     </div>

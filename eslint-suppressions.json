@@ -29,11 +29,6 @@
       "count": 1
     }
   },
-  "src/core/components/VideoAnalysisStep.tsx": {
-    "react/no-unescaped-entities": {
-      "count": 2
-    }
-  },
   "src/core/components/charts/CurveChart.jsx": {
     "no-unused-vars": {
       "count": 1
