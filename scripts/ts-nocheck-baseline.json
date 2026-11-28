@@ -6,7 +6,6 @@
   "src/core/components/AssessmentTab.jsx",
   "src/core/components/BatchImportModal.jsx",
   "src/core/components/ChangePasswordModal.jsx",
-  "src/core/components/Dashboard.jsx",
   "src/core/components/DiagnosisForm.jsx",
   "src/core/components/IntakeWizard.jsx",
   "src/core/components/LoginModal.jsx",

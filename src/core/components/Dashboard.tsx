@@ -1,16 +1,30 @@
-// @ts-nocheck
 import { useMemo, useState } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { computeDashboardStats, getDoctorPatientCounts, getDoctorOptionsFromRoster, UNASSIGNED_GROUP_KEY } from '../utils/dashboardStats';
 import { getAllModules } from '../moduleRegistry';
 import { isMyPatient, getOwnerGroupKey } from '../utils/patientOwnership';
 import { isRedactedPatientRecord } from '../services/patientRecords';
 import { isPatientComplete } from '../utils/patientCompletion';
+import type { PatientRecord } from '../types/patient';
 
 import { hasIntranetSession } from '../../platform/dataMode';
-const MODULE_LABELS = { knee: '무릎', spine: '허리', shoulder: '어깨', elbow: '팔꿈치', wrist: '손목', cervical: '목' };
-const MODULE_COLORS = { knee: 'var(--accent)', spine: '#f59e0b', shoulder: 'var(--color-safe)', elbow: '#8b5cf6', wrist: '#ec4899', cervical: '#06b6d4' };
+const MODULE_LABELS: Record<string, string> = { knee: '무릎', spine: '허리', shoulder: '어깨', elbow: '팔꿈치', wrist: '손목', cervical: '목' };
+const MODULE_COLORS: Record<string, string> = { knee: 'var(--accent)', spine: '#f59e0b', shoulder: 'var(--color-safe)', elbow: '#8b5cf6', wrist: '#ec4899', cervical: '#06b6d4' };
 
-const BarChart = ({ data, color, title, caption }) => {
+interface BarDatum {
+  key: string;
+  label: string;
+  count: number;
+}
+
+interface BarChartProps {
+  data: BarDatum[];
+  color: string;
+  title: ReactNode;
+  caption: ReactNode;
+}
+
+const BarChart = ({ data, color, title, caption }: BarChartProps) => {
   const gridSteps = 5;
   const yMax = Math.ceil(Math.max(...data.map(m => m.count), 5) / gridSteps) * gridSteps;
   const step = yMax / gridSteps;
@@ -29,13 +43,13 @@ const BarChart = ({ data, color, title, caption }) => {
         </div>
         <div className="dashboard-chart-body">
           {Array.from({ length: gridSteps + 1 }, (_, i) => (
-            <div className="dashboard-grid-line" key={i} style={{ '--line-top': `${(i / gridSteps) * 100}%` }} />
+            <div className="dashboard-grid-line" key={i} style={{ '--line-top': `${(i / gridSteps) * 100}%` } as CSSProperties} />
           ))}
           <div className="dashboard-bars">
             {data.map(m => (
               <div className="dashboard-bar-wrapper" key={m.key}>
                 {m.count > 0 && <span className="dashboard-bar-label">{m.count}</span>}
-                <div className="dashboard-bar" style={{ '--bar-height': `${(m.count / yMax) * 100}%`, '--bar-color': color }}>
+                <div className="dashboard-bar" style={{ '--bar-height': `${(m.count / yMax) * 100}%`, '--bar-color': color } as CSSProperties}>
                   {m.count > 0 && <span className="dashboard-bar-tooltip">{m.count}건</span>}
                 </div>
               </div>
@@ -56,7 +70,12 @@ const GENDER_OPTIONS = [
   { key: 'female', label: '여' },
 ];
 
-const GenderToggle = ({ value, onChange }) => (
+interface GenderToggleProps {
+  value: string;
+  onChange: (key: string) => void;
+}
+
+const GenderToggle = ({ value, onChange }: GenderToggleProps) => (
   <div className="card-gender-toggle">
     {GENDER_OPTIONS.map(opt => (
       <button
@@ -71,7 +90,13 @@ const GenderToggle = ({ value, onChange }) => (
   </div>
 );
 
-const GenderToggleCard = ({ title, data, renderBody }) => {
+interface GenderToggleCardProps<T> {
+  title: ReactNode;
+  data: Record<string, T> | undefined;
+  renderBody: (value: T | undefined, gender: string) => ReactNode;
+}
+
+const GenderToggleCard = <T,>({ title, data, renderBody }: GenderToggleCardProps<T>) => {
   const [g, setG] = useState('all');
   return (
     <div className="dashboard-stat-card metric-card pattern-surface dashboard-card-with-toggle">
@@ -84,8 +109,14 @@ const GenderToggleCard = ({ title, data, renderBody }) => {
   );
 };
 
-const Top5List = (items) => {
-  const filled = [...(items || [])];
+interface Top5Item {
+  key: string;
+  name?: string;
+  count: number;
+}
+
+const Top5List = (items: Top5Item[] | null | undefined) => {
+  const filled: Array<Top5Item | null> = [...(items || [])];
   while (filled.length < 5) filled.push(null);
   return (
     <div className="stat-job-grid">
@@ -110,7 +141,14 @@ const Top5List = (items) => {
   );
 };
 
-const GenderDonut = ({ segments }) => {
+interface DonutSegment {
+  key: string;
+  label: string;
+  value: number;
+  color: string;
+}
+
+const GenderDonut = ({ segments }: { segments: DonutSegment[] }) => {
   const size = 130;
   const stroke = 26;
   const radius = (size - stroke) / 2;
@@ -186,7 +224,21 @@ const SEG_COLORS = {
   unassessed: 'var(--text-muted)',
 };
 
-const StackedBarChart = ({ data, title, caption = '' }) => {
+interface StackedBarDatum {
+  key: string;
+  label: string;
+  highCount: number;
+  lowCount: number;
+  unassessedCount: number;
+}
+
+interface StackedBarChartProps {
+  data: StackedBarDatum[];
+  title: ReactNode;
+  caption?: ReactNode;
+}
+
+const StackedBarChart = ({ data, title, caption = '' }: StackedBarChartProps) => {
   const maxTotal = Math.max(...data.map(d => d.highCount + d.lowCount + d.unassessedCount), 5);
   const gridSteps = 5;
   const stepValue = Math.ceil(maxTotal / gridSteps);
@@ -213,7 +265,7 @@ const StackedBarChart = ({ data, title, caption = '' }) => {
         </div>
         <div className="dashboard-chart-body">
           {Array.from({ length: gridSteps + 1 }, (_, i) => (
-            <div className="dashboard-grid-line" key={i} style={{ '--line-top': `${(i / gridSteps) * 100}%` }} />
+            <div className="dashboard-grid-line" key={i} style={{ '--line-top': `${(i / gridSteps) * 100}%` } as CSSProperties} />
           ))}
           <div className="dashboard-bars">
             {data.map(d => {
@@ -222,7 +274,7 @@ const StackedBarChart = ({ data, title, caption = '' }) => {
                 <div className="dashboard-bar-wrapper" key={d.key}>
                   {d.highCount > 0 && <span className="stacked-bar-high-label">{d.highCount}</span>}
                   {d.lowCount > 0 && <span className="stacked-bar-low-label">{d.lowCount}</span>}
-                  <div className="stacked-bar" style={{ '--bar-height': `${(total / yMax) * 100}%` }}>
+                  <div className="stacked-bar" style={{ '--bar-height': `${(total / yMax) * 100}%` } as CSSProperties}>
                     {d.unassessedCount > 0 && <div className="stacked-segment" style={{ flex: d.unassessedCount, background: SEG_COLORS.unassessed }} />}
                     {d.lowCount > 0 && <div className="stacked-segment" style={{ flex: d.lowCount, background: SEG_COLORS.low }} />}
                     {d.highCount > 0 && <div className="stacked-segment" style={{ flex: d.highCount, background: SEG_COLORS.high }} />}
@@ -247,6 +299,80 @@ const StackedBarChart = ({ data, title, caption = '' }) => {
   );
 };
 
+interface DashboardSessionUser {
+  id?: string;
+  role?: string;
+  name?: string;
+  displayName?: string;
+  loginId?: string;
+}
+
+interface DashboardSession {
+  mode?: string | null;
+  user?: DashboardSessionUser | null;
+}
+
+interface DoctorRoster {
+  doctors?: Array<{ userId?: string; name?: string | null; count?: number }>;
+  unassignedCount?: number;
+}
+
+interface EvalDatum extends StackedBarDatum {
+  patientCount: number;
+}
+
+interface RecentActivityItem {
+  id: string;
+  patientNo: string;
+  name: string;
+  jobName: string;
+  registrationDate: string;
+  completionDate: string;
+  moduleIds: string[];
+  status: string;
+  processingDays: number | null;
+  totalDiagnoses: number;
+  highCount: number;
+  lowCount: number;
+}
+
+// computeDashboardStats(utils/dashboardStats.js, JS)가 돌려주는 값 가운데 이 화면이 읽는 필드.
+interface DashboardStats {
+  totalPatients: number;
+  completedCount: number;
+  inProgressCount: number;
+  avgProcessingDays: number | null;
+  moduleUsage: Record<string, number>;
+  moduleHighLow: Record<string, { high?: number; low?: number } | undefined>;
+  topJobs: Array<{ name: string; count: number }>;
+  totalHighCount: number;
+  totalLowCount: number;
+  totalUnassessedCount: number;
+  monthlyRegistrations: BarDatum[];
+  weeklyRegistrations: BarDatum[];
+  dailyRegistrations: BarDatum[];
+  monthlyEvaluations: EvalDatum[];
+  weeklyEvaluations: EvalDatum[];
+  dailyEvaluations: EvalDatum[];
+  recentActivity: RecentActivityItem[];
+  genderBreakdown: { male: number; female: number; unknown: number };
+  avgAgeByGender: Record<string, number | null>;
+  ageGroupDistribution: Record<string, Record<string, number>>;
+  topJobsByGender: Record<string, Top5Item[]>;
+  topDiagnosesByGender: Record<string, Top5Item[]>;
+}
+
+export interface DashboardProps {
+  patients: PatientRecord[] | null | undefined;
+  onSelectPatient?: (id: string) => void;
+  session?: DashboardSession | null;
+  scope?: string;
+  onScopeChange?: (scope: string) => void;
+  canUseScope?: boolean;
+  doctorRoster?: DoctorRoster | null;
+  isScopeLoading?: boolean;
+}
+
 const Dashboard = ({
   patients,
   onSelectPatient,
@@ -256,7 +382,7 @@ const Dashboard = ({
   canUseScope = false,
   doctorRoster,
   isScopeLoading = false,
-}) => {
+}: DashboardProps) => {
   const [period, setPeriod] = useState('monthly');
   const [showJobStats, setShowJobStats] = useState(false);
 
@@ -288,8 +414,9 @@ const Dashboard = ({
     });
   }, [nonRedactedPatients, scope, userId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // JS 추론으로 moduleUsage·moduleHighLow가 `{}`(색인 없음)라 바로 단언할 수 없어 unknown을 거친다.
   const stats = useMemo(
-    () => computeDashboardStats(scopedPatients),
+    () => computeDashboardStats(scopedPatients) as unknown as DashboardStats,
     [scopedPatients]
   );
 
@@ -307,23 +434,23 @@ const Dashboard = ({
   // 'all' 전용: 의사별 환자 수 Top 5
   const doctorCounts = useMemo(
     () => scope === 'all' && canUseScope
-      ? getDoctorPatientCounts(scopedPatients, { roster: doctorRoster })
+      ? getDoctorPatientCounts(scopedPatients, { roster: doctorRoster } as Parameters<typeof getDoctorPatientCounts>[1])
       : null,
     [scopedPatients, scope, canUseScope, doctorRoster]
   );
 
-  const PERIOD_META = {
+  const PERIOD_META: Record<string, { caption: string; label: string }> = {
     monthly: { caption: '최근 6개월', label: '월간' },
     weekly:  { caption: '최근 8주',   label: '주간' },
     daily:   { caption: '최근 7일',   label: '일간' },
   };
 
-  const regData  = {
+  const regData: Record<string, BarDatum[]>  = {
     monthly: stats.monthlyRegistrations,
     weekly: stats.weeklyRegistrations,
     daily: stats.dailyRegistrations
   };
-  const evalData = {
+  const evalData: Record<string, EvalDatum[]> = {
     monthly: stats.monthlyEvaluations,
     weekly: stats.weeklyEvaluations,
     daily: stats.dailyEvaluations
@@ -461,7 +588,7 @@ const Dashboard = ({
           <div className="stat-assessment-grid">
             {(() => {
               const assessed = stats.totalHighCount + stats.totalLowCount;
-              const pct = n => assessed > 0 ? Math.round(n / assessed * 100) : 0;
+              const pct = (n: number) => assessed > 0 ? Math.round(n / assessed * 100) : 0;
               return [
                 { label: '높음', count: stats.totalHighCount, color: 'var(--color-safe)', pct: pct(stats.totalHighCount), showPct: true },
                 { label: '낮음', count: stats.totalLowCount, color: '#f59e0b', pct: pct(stats.totalLowCount), showPct: true },
@@ -546,7 +673,7 @@ const Dashboard = ({
           title={<>연령대 분포 <span style={{ display: 'block', fontSize: '0.8em', fontWeight: 400, opacity: 0.7, whiteSpace: 'nowrap' }}>(재해일자 기준)</span></>}
           data={stats.ageGroupDistribution}
           renderBody={(buckets) => {
-            const b = buckets || { '30대↓': 0, '40대': 0, '50대': 0, '60대': 0, '70대↑': 0 };
+            const b: Record<string, number> = buckets || { '30대↓': 0, '40대': 0, '50대': 0, '60대': 0, '70대↑': 0 };
             const max = Math.max(1, ...Object.values(b));
             const order = ['30대↓', '40대', '50대', '60대', '70대↑'];
             return (
