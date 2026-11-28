@@ -1,5 +1,6 @@
 // 관리자 콘솔 — 디바이스 탭. P2-82a에서 AdminConsoleModal.tsx의 선언을 본문 그대로 옮겼다.
 import { useState, useEffect } from 'react';
+import { useLatestGuard } from '../../hooks/useLatestGuard';
 import { fetchDevices, postDeviceAction } from '../../services/adminRepository';
 import { resolveApiBaseUrl } from '../../../platform/dataMode';
 import { deviceActionErrorMessage, devicesPerPc } from '../adminAuditNotes';
@@ -25,18 +26,21 @@ export function DevicesTab({ session }: TabProps) {
   const [loading, setLoading] = useState(false);
   const [actioning, setActioning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const beginLoad = useLatestGuard();
   const baseUrl = resolveApiBaseUrl({ session });
 
   const load = async () => {
+    const isLatest = beginLoad();
     setLoading(true);
     setError(null);
     try {
       const data = await fetchDevices({ baseUrl, session }) as { devices: DeviceRow[] };
+      if (!isLatest()) return;
       setDevices(data.devices);
     } catch (e) {
-      setError((e as Error).message);
+      if (isLatest()) setError((e as Error).message);
     } finally {
-      setLoading(false);
+      if (isLatest()) setLoading(false);
     }
   };
 

@@ -1,5 +1,6 @@
 // 관리자 콘솔 — 감사 로그 탭. P2-82a에서 AdminConsoleModal.tsx의 선언을 본문 그대로 옮겼다.
 import { useState, useEffect } from 'react';
+import { useLatestGuard } from '../../hooks/useLatestGuard';
 import { fetchAuditLog } from '../../services/adminRepository';
 import { resolveApiBaseUrl } from '../../../platform/dataMode';
 import { emrAuditNote } from '../adminAuditNotes';
@@ -47,9 +48,11 @@ export function AuditTab({ session }: TabProps) {
   const [targetFilter, setTargetFilter]     = useState('');
   const [loading, setLoading]               = useState(false);
   const [error, setError]                   = useState<string | null>(null);
+  const beginLoad = useLatestGuard();
   const baseUrl = resolveApiBaseUrl({ session });
 
   const load = async (p = 1) => {
+    const isLatest = beginLoad();
     setLoading(true);
     setError(null);
     try {
@@ -57,13 +60,14 @@ export function AuditTab({ session }: TabProps) {
       if (actionFilter) params.set('action', actionFilter);
       if (targetFilter) params.set('targetType', targetFilter);
       const data = await fetchAuditLog({ baseUrl, session }, params) as AuditPage;
+      if (!isLatest()) return;
       setItems(data.items);
       setTotal(data.total);
       setPage(p);
     } catch (e) {
-      setError((e as Error).message);
+      if (isLatest()) setError((e as Error).message);
     } finally {
-      setLoading(false);
+      if (isLatest()) setLoading(false);
     }
   };
 

@@ -1,5 +1,6 @@
 // 관리자 콘솔 — 가입 요청 탭. P2-82a에서 AdminConsoleModal.tsx의 선언을 본문 그대로 옮겼다.
 import { useState, useEffect } from 'react';
+import { useLatestGuard } from '../../hooks/useLatestGuard';
 import { approveSignupRequest, fetchSignupRequests, rejectSignupRequest } from '../../services/adminRepository';
 import { resolveApiBaseUrl } from '../../../platform/dataMode';
 import { RoleBadge, fmt } from './shared';
@@ -28,19 +29,22 @@ export function SignupRequestsTab({ session }: TabProps) {
   const [error, setError]               = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState('pending');
   const [approvalResult, setApprovalResult] = useState<ApprovalResult | null>(null);
+  const beginLoad = useLatestGuard();
   const baseUrl = resolveApiBaseUrl({ session });
 
   const load = async () => {
+    const isLatest = beginLoad();
     setLoading(true);
     setError(null);
     try {
       const params = new URLSearchParams({ status: statusFilter });
       const data = await fetchSignupRequests({ baseUrl, session }, params) as { requests: SignupRow[] };
+      if (!isLatest()) return;
       setItems(data.requests);
     } catch (err) {
-      setError((err as Error).message);
+      if (isLatest()) setError((err as Error).message);
     } finally {
-      setLoading(false);
+      if (isLatest()) setLoading(false);
     }
   };
 

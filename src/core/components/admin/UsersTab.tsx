@@ -1,5 +1,6 @@
 // 관리자 콘솔 — 사용자 관리 탭. P2-82a에서 AdminConsoleModal.tsx의 선언을 본문 그대로 옮겼다.
 import { useState, useEffect } from 'react';
+import { useLatestGuard } from '../../hooks/useLatestGuard';
 import { createAdminUser, fetchAdminUsers, postUserStatus, resetUserPassword } from '../../services/adminRepository';
 import { resolveApiBaseUrl } from '../../../platform/dataMode';
 import { validatePassword, RoleBadge, fmt } from './shared';
@@ -19,19 +20,22 @@ export function UsersTab({ session }: TabProps) {
   const [resetTarget, setResetTarget]       = useState<string | null>(null);
   const [resetPw, setResetPw]               = useState('');
   const [resetError, setResetError]         = useState<string | null>(null);
+  const beginLoad = useLatestGuard();
   const baseUrl = resolveApiBaseUrl({ session });
   const selfId  = session?.user?.id;
 
   const load = async () => {
+    const isLatest = beginLoad();
     setLoading(true);
     setError(null);
     try {
       const data = await fetchAdminUsers({ baseUrl, session }) as UsersResponse;
+      if (!isLatest()) return;
       setUsers(data.users);
     } catch (e) {
-      setError((e as Error).message);
+      if (isLatest()) setError((e as Error).message);
     } finally {
-      setLoading(false);
+      if (isLatest()) setLoading(false);
     }
   };
 

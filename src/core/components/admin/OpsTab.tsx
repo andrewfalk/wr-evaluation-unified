@@ -1,5 +1,6 @@
 // 관리자 콘솔 — 운영 상태 탭. P2-82b에서 AdminConsoleModal.tsx의 선언을 본문 그대로 옮겼다.
 import { useState, useEffect } from 'react';
+import { useLatestGuard } from '../../hooks/useLatestGuard';
 import { ackBackupAlert, fetchBackupStatus, resolveBackupAlert } from '../../services/adminRepository';
 import { resolveApiBaseUrl } from '../../../platform/dataMode';
 import { fmt } from './shared';
@@ -43,18 +44,21 @@ export function OpsTab({ session }: TabProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError]   = useState<string | null>(null);
   const [acting, setActing] = useState<string | null>(null); // runId currently being ack/resolved
+  const beginLoad = useLatestGuard();
   const baseUrl = resolveApiBaseUrl({ session });
 
   const load = async () => {
+    const isLatest = beginLoad();
     setLoading(true);
     setError(null);
     try {
       const result = await fetchBackupStatus({ baseUrl, session }) as OpsStatus | null;
+      if (!isLatest()) return;
       setData(result);
     } catch (e) {
-      setError((e as Error).message || '불러오기 실패');
+      if (isLatest()) setError((e as Error).message || '불러오기 실패');
     } finally {
-      setLoading(false);
+      if (isLatest()) setLoading(false);
     }
   };
 
