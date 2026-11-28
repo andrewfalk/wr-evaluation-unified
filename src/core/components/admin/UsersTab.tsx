@@ -20,6 +20,7 @@ export function UsersTab({ session }: TabProps) {
   const [resetTarget, setResetTarget]       = useState<string | null>(null);
   const [resetPw, setResetPw]               = useState('');
   const [resetError, setResetError]         = useState<string | null>(null);
+  const [resetting, setResetting]           = useState(false);
   const beginLoad = useLatestGuard();
   const baseUrl = resolveApiBaseUrl({ session });
   const selfId  = session?.user?.id;
@@ -78,18 +79,22 @@ export function UsersTab({ session }: TabProps) {
   };
 
   const handleResetPassword = async () => {
+    if (resetting) return; // 처리 중에는 버튼도 Enter도 다시 보내지 않는다
     setResetError(null);
     const pwError = validatePassword(resetPw);
     if (pwError) {
       setResetError(pwError);
       return;
     }
+    setResetting(true);
     try {
       await resetUserPassword({ baseUrl, session }, resetTarget as string, resetPw);
       setResetTarget(null);
       setResetPw('');
     } catch (e) {
       setResetError((e as Error).message);
+    } finally {
+      setResetting(false);
     }
   };
 
@@ -186,7 +191,7 @@ export function UsersTab({ session }: TabProps) {
             <div className="admin-inline-modal-actions">
               <button className="btn btn-secondary btn-sm"
                 onClick={() => { setResetTarget(null); setResetPw(''); setResetError(null); }}>취소</button>
-              <button className="btn btn-primary btn-sm" onClick={handleResetPassword}>초기화</button>
+              <button className="btn btn-primary btn-sm" onClick={handleResetPassword} disabled={resetting}>초기화</button>
             </div>
           </div>
         </div>
