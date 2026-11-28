@@ -1,0 +1,497 @@
+{
+  "initial": {
+    "list": [
+      {
+        "name": "가조립원",
+        "category": "서비스업",
+        "extra": [],
+        "modules": "🏃",
+        "badge": "유사도 5"
+      },
+      {
+        "name": "나조립원",
+        "category": "서비스업",
+        "extra": [
+          "라인"
+        ],
+        "modules": "🏃",
+        "badge": "유사도 5"
+      },
+      {
+        "name": "다조립원",
+        "category": "서비스업",
+        "extra": [],
+        "modules": "🏃",
+        "badge": "유사도 5"
+      },
+      {
+        "name": "조립원 검사",
+        "category": "제조업",
+        "extra": [
+          "조직 공유 · 합성 동료 (참고용)"
+        ],
+        "modules": "🏃",
+        "badge": "유사도 5"
+      },
+      {
+        "name": "조립원 반장",
+        "category": "제조업",
+        "extra": [],
+        "modules": "🏃 ⚕️",
+        "badge": "유사도 5"
+      }
+    ],
+    "dom": [
+      "<div class=\"modal-overlay\">",
+      "  <div class=\"modal preset-manage-modal\">",
+      "    <div class=\"modal-section-header\">",
+      "      <h2>",
+      "        \"프리셋 저장\"",
+      "      <p class=\"modal-section-description\">",
+      "        \"현재 입력한 직무 부담 데이터를 직업 프리셋으로 저장합니다.\"",
+      "    <div class=\"settings-section modal-section pattern-surface\">",
+      "      <div class=\"settings-section-title\">",
+      "        \"기본 정보\"",
+      "      <div class=\"form-row\">",
+      "        <div class=\"form-group form-group-wide\">",
+      "          <label>",
+      "            \"직종명\"",
+      "          <input placeholder=\"직종명을 입력하세요\" value=\"조립원\" />",
+      "      <div class=\"form-row\">",
+      "        <div class=\"form-group\">",
+      "          <label>",
+      "            \"카테고리\"",
+      "          <div class=\"preset-category-row\">",
+      "            <input placeholder=\"카테고리를 직접 입력하세요\" value=\"미분류\" />",
+      "            <button class=\"btn btn-xs btn-secondary\">",
+      "              \"목록선택\"",
+      "      <div class=\"form-row\">",
+      "        <div class=\"form-group form-group-wide\">",
+      "          <label>",
+      "            \"설명 (선택)\"",
+      "          <input placeholder=\"작업 맥락이나 특징을 간단히 적어주세요\" value=\"\" />",
+      "      <div class=\"settings-diagnostic-card preset-match-card\">",
+      "        <div class=\"settings-section-title preset-inline-title\">",
+      "          \"비슷한 프리셋이 있습니다\"",
+      "        <div class=\"preset-list\">",
+      "          <div class=\"preset-list-item preset-similar-item\">",
+      "            <div class=\"preset-list-info preset-list-info-column\">",
+      "              <span class=\"preset-list-name\">",
+      "                \"가조립원\"",
+      "              <span class=\"preset-list-category\">",
+      "                \"서비스업\"",
+      "              <span class=\"preset-list-modules\">",
+      "                \"🏃\"",
+      "            <span class=\"preset-badge\">",
+      "              \"유사도 5\"",
+      "          <div class=\"preset-list-item preset-similar-item\">",
+      "            <div class=\"preset-list-info preset-list-info-column\">",
+      "              <span class=\"preset-list-name\">",
+      "                \"나조립원\"",
+      "              <span class=\"preset-list-category\">",
+      "                \"서비스업\"",
+      "              <span class=\"preset-list-description\">",
+      "                \"라인\"",
+      "              <span class=\"preset-list-modules\">",
+      "                \"🏃\"",
+      "            <span class=\"preset-badge\">",
+      "              \"유사도 5\"",
+      "          <div class=\"preset-list-item preset-similar-item\">",
+      "            <div class=\"preset-list-info preset-list-info-column\">",
+      "              <span class=\"preset-list-name\">",
+      "                \"다조립원\"",
+      "              <span class=\"preset-list-category\">",
+      "                \"서비스업\"",
+      "              <span class=\"preset-list-modules\">",
+      "                \"🏃\"",
+      "            <span class=\"preset-badge\">",
+      "              \"유사도 5\"",
+      "          <div class=\"preset-list-item preset-similar-item\">",
+      "            <div class=\"preset-list-info preset-list-info-column\">",
+      "              <span class=\"preset-list-name\">",
+      "                \"조립원 검사\"",
+      "              <span class=\"preset-list-category\">",
+      "                \"제조업\"",
+      "              <span class=\"preset-list-modules\">",
+      "                \"🏃\"",
+      "              <span class=\"preset-list-description\">",
+      "                \"조직 공유 · 합성 동료 (참고용)\"",
+      "            <span class=\"preset-badge\">",
+      "              \"유사도 5\"",
+      "          <div class=\"preset-list-item preset-similar-item\">",
+      "            <div class=\"preset-list-info preset-list-info-column\">",
+      "              <span class=\"preset-list-name\">",
+      "                \"조립원 반장\"",
+      "              <span class=\"preset-list-category\">",
+      "                \"제조업\"",
+      "              <span class=\"preset-list-modules\">",
+      "                \"🏃 ⚕️\"",
+      "            <span class=\"preset-badge\">",
+      "              \"유사도 5\"",
+      "        <div class=\"settings-inline-hint\">",
+      "          \"같은 직종명이거나 입력한 카테고리, 설명과 키워드가 겹치는 프리셋을 먼저 보여줍니다.\"",
+      "    <div class=\"settings-section modal-section pattern-surface\">",
+      "      <div class=\"settings-section-title\">",
+      "        \"저장할 모듈 데이터\"",
+      "      <div class=\"preset-module-section \">",
+      "        <label class=\"preset-module-header\">",
+      "          <input type=\"checkbox\" checked=\"\" />",
+      "          <span class=\"preset-module-icon\">",
+      "            \"🏃\"",
+      "          <span>",
+      "            \"무릎 신체부담\"",
+      "        <div class=\"preset-field-preview\">",
+      "          <div class=\"preset-preview-row\">",
+      "            <span class=\"preset-preview-label\">",
+      "              \"중량물 (kg/일)\"",
+      "            <span class=\"preset-preview-value\">",
+      "              \"1500\"",
+      "          <div class=\"preset-preview-row\">",
+      "            <span class=\"preset-preview-label\">",
+      "              \"쪼그려앉기 (분/일)\"",
+      "            <span class=\"preset-preview-value\">",
+      "              \"120\"",
+      "          <div class=\"preset-preview-row\">",
+      "            <span class=\"preset-preview-label\">",
+      "              \"계단오르내리기\"",
+      "            <span class=\"preset-preview-value\">",
+      "              \"Y\"",
+      "          <div class=\"preset-preview-row\">",
+      "            <span class=\"preset-preview-label\">",
+      "              \"무릎 비틀림\"",
+      "            <span class=\"preset-preview-value\">",
+      "              \"N\"",
+      "          <div class=\"preset-preview-row\">",
+      "            <span class=\"preset-preview-label\">",
+      "              \"출발/정지 반복\"",
+      "            <span class=\"preset-preview-value\">",
+      "              \"Y\"",
+      "          <div class=\"preset-preview-row\">",
+      "            <span class=\"preset-preview-label\">",
+      "              \"좁은 공간\"",
+      "            <span class=\"preset-preview-value\">",
+      "              \"N\"",
+      "          <div class=\"preset-preview-row\">",
+      "            <span class=\"preset-preview-label\">",
+      "              \"무릎 접촉/충격\"",
+      "            <span class=\"preset-preview-value\">",
+      "              \"N\"",
+      "          <div class=\"preset-preview-row\">",
+      "            <span class=\"preset-preview-label\">",
+      "              \"뛰어내리기\"",
+      "            <span class=\"preset-preview-value\">",
+      "              \"N\"",
+      "      <div class=\"preset-module-section \">",
+      "        <label class=\"preset-module-header\">",
+      "          <input type=\"checkbox\" checked=\"\" />",
+      "          <span class=\"preset-module-icon\">",
+      "            \"⚕️\"",
+      "          <span>",
+      "            \"척추 작업목록\"",
+      "        <div class=\"preset-field-preview\">",
+      "          <div class=\"preset-task-card\">",
+      "            <div class=\"preset-task-title\">",
+      "              \"박스 들기\"",
+      "            <div class=\"preset-task-meta\">",
+      "              <span class=\"preset-task-chip\">",
+      "                \"G3\"",
+      "              <span class=\"preset-task-chip\">",
+      "                \"15kg\"",
+      "              <span class=\"preset-task-chip\">",
+      "                \"40회\"",
+      "              <span class=\"preset-task-chip\">",
+      "                \"2sec\"",
+      "              <span class=\"preset-task-chip\">",
+      "                \"보정 1.2\"",
+      "    <div class=\"modal-actions\">",
+      "      <button class=\"btn btn-secondary\">",
+      "        \"취소\"",
+      "      <button class=\"btn btn-primary\">",
+      "        \"프리셋 저장\""
+    ]
+  },
+  "toSelectMode": {
+    "list": [
+      {
+        "name": "가조립원",
+        "category": "서비스업",
+        "extra": [],
+        "modules": "🏃",
+        "badge": "유사도 5"
+      },
+      {
+        "name": "나조립원",
+        "category": "서비스업",
+        "extra": [
+          "라인"
+        ],
+        "modules": "🏃",
+        "badge": "유사도 5"
+      },
+      {
+        "name": "다조립원",
+        "category": "서비스업",
+        "extra": [],
+        "modules": "🏃",
+        "badge": "유사도 5"
+      },
+      {
+        "name": "조립원 검사",
+        "category": "제조업",
+        "extra": [
+          "조직 공유 · 합성 동료 (참고용)"
+        ],
+        "modules": "🏃",
+        "badge": "유사도 5"
+      },
+      {
+        "name": "조립원 반장",
+        "category": "제조업",
+        "extra": [],
+        "modules": "🏃 ⚕️",
+        "badge": "유사도 5"
+      }
+    ],
+    "saveDisabled": false
+  },
+  "category:제조업": {
+    "list": [
+      {
+        "name": "조립원 검사",
+        "category": "제조업",
+        "extra": [
+          "조직 공유 · 합성 동료 (참고용)"
+        ],
+        "modules": "🏃",
+        "badge": "유사도 10"
+      },
+      {
+        "name": "조립원 반장",
+        "category": "제조업",
+        "extra": [],
+        "modules": "🏃 ⚕️",
+        "badge": "유사도 10"
+      },
+      {
+        "name": "조립원(라인)",
+        "category": "제조업",
+        "extra": [
+          "라인 작업"
+        ],
+        "modules": "🏃",
+        "badge": "유사도 10"
+      },
+      {
+        "name": "가조립원",
+        "category": "서비스업",
+        "extra": [],
+        "modules": "🏃",
+        "badge": "유사도 5"
+      },
+      {
+        "name": "나조립원",
+        "category": "서비스업",
+        "extra": [
+          "라인"
+        ],
+        "modules": "🏃",
+        "badge": "유사도 5"
+      }
+    ],
+    "saveDisabled": false
+  },
+  "description:라인 작업": {
+    "list": [
+      {
+        "name": "조립원(라인)",
+        "category": "제조업",
+        "extra": [
+          "라인 작업"
+        ],
+        "modules": "🏃",
+        "badge": "유사도 15"
+      },
+      {
+        "name": "조립원 검사",
+        "category": "제조업",
+        "extra": [
+          "조직 공유 · 합성 동료 (참고용)"
+        ],
+        "modules": "🏃",
+        "badge": "유사도 12"
+      },
+      {
+        "name": "조립원 반장",
+        "category": "제조업",
+        "extra": [],
+        "modules": "🏃 ⚕️",
+        "badge": "유사도 12"
+      },
+      {
+        "name": "나조립원",
+        "category": "서비스업",
+        "extra": [
+          "라인"
+        ],
+        "modules": "🏃",
+        "badge": "유사도 8"
+      },
+      {
+        "name": "가조립원",
+        "category": "서비스업",
+        "extra": [],
+        "modules": "🏃",
+        "badge": "유사도 7"
+      }
+    ],
+    "saveDisabled": false
+  },
+  "jobName:용접": {
+    "list": [
+      {
+        "name": "조립원(라인)",
+        "category": "제조업",
+        "extra": [
+          "라인 작업"
+        ],
+        "modules": "🏃",
+        "badge": "유사도 10"
+      },
+      {
+        "name": "용접원",
+        "category": "건설업",
+        "extra": [
+          "라인 작업 보조"
+        ],
+        "modules": "🏃",
+        "badge": "유사도 9"
+      },
+      {
+        "name": "조립 보조",
+        "category": "제조업",
+        "extra": [
+          "조직 공유 · 알 수 없음 (참고용)"
+        ],
+        "modules": "🏃",
+        "badge": "유사도 7"
+      },
+      {
+        "name": "조립원 검사",
+        "category": "제조업",
+        "extra": [
+          "조직 공유 · 합성 동료 (참고용)"
+        ],
+        "modules": "🏃",
+        "badge": "유사도 7"
+      },
+      {
+        "name": "조립원 반장",
+        "category": "제조업",
+        "extra": [],
+        "modules": "🏃 ⚕️",
+        "badge": "유사도 7"
+      }
+    ],
+    "saveDisabled": false
+  },
+  "jobName:empty": {
+    "list": [
+      {
+        "name": "조립원(라인)",
+        "category": "제조업",
+        "extra": [
+          "라인 작업"
+        ],
+        "modules": "🏃",
+        "badge": "유사도 10"
+      },
+      {
+        "name": "조립 보조",
+        "category": "제조업",
+        "extra": [
+          "조직 공유 · 알 수 없음 (참고용)"
+        ],
+        "modules": "🏃",
+        "badge": "유사도 7"
+      },
+      {
+        "name": "조립원 검사",
+        "category": "제조업",
+        "extra": [
+          "조직 공유 · 합성 동료 (참고용)"
+        ],
+        "modules": "🏃",
+        "badge": "유사도 7"
+      },
+      {
+        "name": "조립원 반장",
+        "category": "제조업",
+        "extra": [],
+        "modules": "🏃 ⚕️",
+        "badge": "유사도 7"
+      },
+      {
+        "name": "포장원",
+        "category": "제조업",
+        "extra": [],
+        "modules": "🏃",
+        "badge": "유사도 7"
+      }
+    ],
+    "saveDisabled": true
+  },
+  "category:empty+description:empty": {
+    "list": [],
+    "saveDisabled": true
+  },
+  "intranet": {
+    "list": [
+      {
+        "name": "가조립원",
+        "category": "서비스업",
+        "extra": [
+          "조직 공유 · 알 수 없음 (참고용)"
+        ],
+        "modules": "🏃",
+        "badge": "유사도 5"
+      },
+      {
+        "name": "나조립원",
+        "category": "서비스업",
+        "extra": [
+          "라인",
+          "조직 공유 · 알 수 없음 (참고용)"
+        ],
+        "modules": "🏃",
+        "badge": "유사도 5"
+      },
+      {
+        "name": "다조립원",
+        "category": "서비스업",
+        "extra": [
+          "조직 공유 · 알 수 없음 (참고용)"
+        ],
+        "modules": "🏃",
+        "badge": "유사도 5"
+      },
+      {
+        "name": "조립원 검사",
+        "category": "제조업",
+        "extra": [
+          "조직 공유 · 합성 동료 (참고용)"
+        ],
+        "modules": "🏃",
+        "badge": "유사도 5"
+      },
+      {
+        "name": "조립원 반장",
+        "category": "제조업",
+        "extra": [
+          "조직 공유 · 알 수 없음 (참고용)"
+        ],
+        "modules": "🏃 ⚕️",
+        "badge": "유사도 5"
+      }
+    ]
+  }
+}
