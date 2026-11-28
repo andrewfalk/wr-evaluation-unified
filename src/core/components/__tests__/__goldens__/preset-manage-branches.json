@@ -1431,6 +1431,11 @@
     ]
   },
   "closing": {
+    "callCountAfter": {
+      "insideModal": 0,
+      "cancelButton": 1,
+      "overlay": 2
+    },
     "calls": [
       "onClose",
       "onClose"

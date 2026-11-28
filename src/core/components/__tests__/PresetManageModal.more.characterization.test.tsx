@@ -232,10 +232,15 @@ describe('P2-88a — 프리셋 저장 창', () => {
     // 오버레이 클릭은 닫기, 취소 버튼도 닫기
     {
       const view = renderModal({});
+      // 클릭마다 그때까지의 호출 수를 적어, 어느 클릭이 닫기를 불렀는지 구분한다(Codex 1회차 권고).
+      const afterEach: Record<string, number> = {};
       act(() => { fireEvent.click(view.container.querySelector('.preset-manage-modal') as HTMLElement); });
+      afterEach.insideModal = view.calls.length;
       act(() => { fireEvent.click(buttonByText(view.container, '취소')); });
+      afterEach.cancelButton = view.calls.length;
       act(() => { fireEvent.click(view.container.querySelector('.modal-overlay') as HTMLElement); });
-      result.closing = { calls: view.calls };
+      afterEach.overlay = view.calls.length;
+      result.closing = { callCountAfter: afterEach, calls: view.calls };
       view.unmount();
     }
 
