@@ -29,6 +29,9 @@ export function SignupRequestsTab({ session }: TabProps) {
   const [error, setError]               = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState('pending');
   const [approvalResult, setApprovalResult] = useState<ApprovalResult | null>(null);
+  // 승인·거절 뒤 다시 불러오기는 이 값을 올려 effect가 **지금 필터**로 부르게 한다 — 클릭 때의 load(그때 필터)를 부르면
+  // 그사이 필터를 바꾼 경우 순번 가드가 지금 필터의 응답을 버린다.
+  const [reloadTick, setReloadTick] = useState(0);
   const beginLoad = useLatestGuard();
   const baseUrl = resolveApiBaseUrl({ session });
 
@@ -48,13 +51,13 @@ export function SignupRequestsTab({ session }: TabProps) {
     }
   };
 
-  useEffect(() => { load(); }, [statusFilter]);
+  useEffect(() => { load(); }, [statusFilter, reloadTick]);
 
   const handleApprove = async (id: string) => {
     try {
       const data = await approveSignupRequest({ baseUrl, session }, id) as ApprovalResult;
       setApprovalResult(data);
-      load();
+      setReloadTick(t => t + 1);
     } catch (err) {
       setError((err as Error).message);
     }
@@ -64,7 +67,7 @@ export function SignupRequestsTab({ session }: TabProps) {
     if (!confirm('이 신청을 거절하시겠습니까?')) return;
     try {
       await rejectSignupRequest({ baseUrl, session }, id);
-      load();
+      setReloadTick(t => t + 1);
     } catch (err) {
       setError((err as Error).message);
     }

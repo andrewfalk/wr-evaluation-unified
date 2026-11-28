@@ -98,4 +98,44 @@ describe('관리자 콘솔 — 늦게 온 목록 응답', () => {
     expect(content().textContent).not.toContain('old_action');
     expect(router.count('GET /api/admin/audit')).toBe(3);
   });
+
+  it('가입 승인을 처리하는 동안 필터를 바꾸면, 승인 뒤 다시 불러오기는 지금 필터로 하고 그 목록이 남는다', async () => {
+    const approveGate = deferred();
+    const firstRejected = deferred();
+    let rejectedCalls = 0;
+    const router = createFetchRouter({
+      'GET /api/admin/audit': { total: 0, items: [] },
+      'GET /api/admin/signup-requests': async (req: Req) => {
+        if (req.query.status === 'rejected') {
+          rejectedCalls += 1;
+          if (rejectedCalls === 1) await firstRejected.promise; // 필터를 바꿀 때의 요청 — 가장 늦게 온다
+          return { body: { requests: [signup('req-r', '합성 거절됨')] } };
+        }
+        return { body: { requests: [signup('req-p', '합성 대기')] } };
+      },
+      'POST /api/admin/signup-requests/:id/approve': async () => {
+        await approveGate.promise;
+        return { body: { name: '합성 대기', loginId: 'synthetic-req-p', tempPassword: 'tmp-tmp-01' } };
+      },
+    });
+    globalThis.fetch = router.fetch as typeof fetch;
+    const { view, content } = renderModal();
+    await flush();
+    fireEvent.click(buttonByText(view.container, '가입 요청'));
+    await flush();
+    fireEvent.click(buttonByText(content(), '승인'));                                   // 승인 응답 대기
+    await flush();
+    fireEvent.change(content().querySelector('select') as HTMLSelectElement, { target: { value: 'rejected' } });
+    await flush();
+    approveGate.release();                                                             // 승인 완료 → 다시 불러오기
+    await flush();
+    firstRejected.release();                                                           // 필터 바꿀 때의 응답이 마지막에
+    await flush();
+    expect((content().querySelector('select') as HTMLSelectElement).value).toBe('rejected');
+    expect(content().textContent).toContain('합성 거절됨');
+    expect(content().textContent).not.toContain('synthetic-req-p합성 대기');
+    expect(router.calls.filter((c: { url: string }) => c.url.includes('signup-requests?')).map((c: { url: string }) => c.url.split('?')[1]))
+      .toEqual(['status=pending', 'status=rejected', 'status=rejected']);
+    expect(router.unhandled).toEqual([]);
+  });
 });
