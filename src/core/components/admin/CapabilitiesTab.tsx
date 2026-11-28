@@ -1,5 +1,6 @@
 // 관리자 콘솔 — 통계 권한 탭. P2-82b에서 AdminConsoleModal.tsx의 선언을 본문 그대로 옮겼다.
 import { useState, useEffect } from 'react';
+import { useLatestGuard } from '../../hooks/useLatestGuard';
 import { createCapabilityGrant, fetchAdminUsers, fetchCapabilityCatalog, fetchCapabilityGrants, revokeCapabilityGrant } from '../../services/adminRepository';
 import { resolveApiBaseUrl } from '../../../platform/dataMode';
 import { fmt } from './shared';
@@ -43,9 +44,11 @@ export function CapabilitiesTab({ session }: TabProps) {
   const [formError, setFormError]     = useState<string | null>(null);
   const [creating, setCreating]       = useState(false);
   const [actioning, setActioning]     = useState<string | null>(null);
+  const beginLoad = useLatestGuard();
   const baseUrl = resolveApiBaseUrl({ session });
 
   const load = async () => {
+    const isLatest = beginLoad();
     setLoading(true);
     setError(null);
     try {
@@ -54,13 +57,14 @@ export function CapabilitiesTab({ session }: TabProps) {
         fetchCapabilityGrants({ baseUrl, session }),
         fetchAdminUsers({ baseUrl, session }),
       ]) as [{ capabilities?: CapabilityEntry[] }, { grants?: GrantRow[] }, { users?: UserRow[] }];
+      if (!isLatest()) return;
       setCatalog(catalogData.capabilities || []);
       setGrants(grantsData.grants || []);
       setUsers(usersData.users || []);
     } catch (e) {
-      setError((e as Error).message);
+      if (isLatest()) setError((e as Error).message);
     } finally {
-      setLoading(false);
+      if (isLatest()) setLoading(false);
     }
   };
 

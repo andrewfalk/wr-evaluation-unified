@@ -1,5 +1,6 @@
 // 관리자 콘솔 — 환자 배정 탭. P2-82b에서 AdminConsoleModal.tsx의 선언을 본문 그대로 옮겼다.
 import { useState, useRef, useEffect } from 'react';
+import { useLatestGuard } from '../../hooks/useLatestGuard';
 import { assignPatient, fetchAdminUsers, fetchPatientsPage } from '../../services/adminRepository';
 import { resolveApiBaseUrl } from '../../../platform/dataMode';
 import type { TabProps, UserRow, UsersResponse } from './shared';
@@ -35,6 +36,7 @@ export function PatientAssignmentTab({ session, onPatientAssignmentChanged }: Pa
   const [actioning, setActioning] = useState<string | null>(null);
   const [search, setSearch]       = useState('');
   const controllerRef             = useRef<AbortController | null>(null);
+  const beginLoad = useLatestGuard();
   const baseUrl = resolveApiBaseUrl({ session });
 
   // Load doctors once on mount.
@@ -52,6 +54,7 @@ export function PatientAssignmentTab({ session, onPatientAssignmentChanged }: Pa
     const controller = new AbortController();
     controllerRef.current = controller;
     const { signal } = controller;
+    const isLatest = beginLoad();
 
     setLoading(true);
     setError(null);
@@ -66,6 +69,8 @@ export function PatientAssignmentTab({ session, onPatientAssignmentChanged }: Pa
         if (all.length >= (data.total ?? 0)) break;
         offset += LIMIT;
       }
+      // 끊김은 요청 중에만 알 수 있다 — 응답을 다 받은 뒤 그 사이에 새 불러오기가 시작됐거나 탭을 떠났으면 버린다.
+      if (!isLatest()) return;
       setServerPatients(all);
       setPending({});
     } catch (err) {

@@ -1,5 +1,6 @@
 // 관리자 콘솔 — 추론 디바이스 탭. P2-82b에서 AdminConsoleModal.tsx의 선언을 본문 그대로 옮겼다.
 import { useState, useEffect } from 'react';
+import { useLatestGuard } from '../../hooks/useLatestGuard';
 import { fetchOrgSettings, patchOrgSettings } from '../../services/adminRepository';
 import { resolveApiBaseUrl } from '../../../platform/dataMode';
 import type { TabProps } from './shared';
@@ -29,21 +30,24 @@ export function InferenceDeviceTab({ session }: TabProps) {
   const [saving, setSaving]   = useState(false);
   const [error, setError]     = useState<string | null>(null);
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
+  const beginLoad = useLatestGuard();
   const baseUrl = resolveApiBaseUrl({ session });
 
   const load = async () => {
+    const isLatest = beginLoad();
     setLoading(true);
     setError(null);
     setSavedMsg(null);
     try {
       const data = await fetchOrgSettings({ baseUrl, session }) as OrgSettings;
+      if (!isLatest()) return;
       setDevice(data.inferenceDevice);
       setDraft(data.inferenceDevice);
       setGpu(data.gpu || null);
     } catch (e) {
-      setError((e as Error).message);
+      if (isLatest()) setError((e as Error).message);
     } finally {
-      setLoading(false);
+      if (isLatest()) setLoading(false);
     }
   };
 

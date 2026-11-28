@@ -1,5 +1,6 @@
 // 관리자 콘솔 — 프리셋 공유 탭. P2-82b에서 AdminConsoleModal.tsx의 선언을 본문 그대로 옮겼다.
 import { useState, useEffect } from 'react';
+import { useLatestGuard } from '../../hooks/useLatestGuard';
 import { fetchAdminPresets, postPresetVisibility } from '../../services/adminRepository';
 import { resolveApiBaseUrl } from '../../../platform/dataMode';
 import type { TabProps } from './shared';
@@ -32,22 +33,25 @@ export function PresetsTab({ session }: TabProps) {
   const [visFilter, setVisFilter] = useState('all');
   const [pending, setPending] = useState<string | null>(null);   // 'organization' | 'private' awaiting confirm
   const [acting, setActing]   = useState(false);
+  const beginLoad = useLatestGuard();
   const baseUrl = resolveApiBaseUrl({ session });
   // Superadmin (no org bound) sees presets across all orgs → show org column.
   const isSuperadmin = !session?.user?.organizationId;
 
   const load = async () => {
+    const isLatest = beginLoad();
     setLoading(true);
     setError(null);
     setSelected(new Set());
     setPending(null);
     try {
       const data = await fetchAdminPresets({ baseUrl, session }) as { presets?: PresetRow[] };
+      if (!isLatest()) return;
       setPresets(data.presets || []);
     } catch (e) {
-      setError((e as Error).message);
+      if (isLatest()) setError((e as Error).message);
     } finally {
-      setLoading(false);
+      if (isLatest()) setLoading(false);
     }
   };
 
