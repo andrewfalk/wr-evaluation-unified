@@ -391,6 +391,65 @@
 
 릴리스·버전 범프는 없다. **다음** = 계획 세션의 독립 확인 → (사용자 지시 시) C9 구간 C(관리자 화면).
 
+**C9 구간 C — 관리자 화면(P2-81a ~ P2-83C-docs) 현황(2026-11-28)** — 머지 PR #486 ~ #495 + 이 기록(계획 11개 그대로, 순서도 그대로). 정본 계획은 저장소 밖 `phase2-c9-plan.md`의 "구간 C"(사용자 승인 2026-11-28 — 결정: 먼저 통째로 TS로 옮기고 그다음 쪼갠다 · 화면 문구는 바꾸지 않는다 · 어색한 동작은 쪼갠 뒤 따로, 재현 테스트를 먼저 · 관리자 탭은 `useAsync`가 아니라 순번 가드 훅으로 늦은 응답만 버린다).
+
+**결과**
+1. **특성화(P2-81a·b)** — 관리자 콘솔 탭 9개를 `vi.mock` 없이 그리고 서버는 `fetchRouter`로 흉내 내, 새 골든 12개(`src/core/components/__tests__/__goldens__/admin-*.json`)에 얼렸다. 탭마다 열 때의 요청, 목록 DOM, 동작마다 요청(메서드·주소·본문·**헤더**)과 그 뒤 화면, 실패 문구, "불러오기 실패 → 행 동작(성공·실패)" 순서에서 오류 칸이 어떻게 보이는지(탭마다 다르다)를 적었다. 기존 `emrAudit` 테스트의 단언도 새 묶음에 넣었다.
+   - 도우미 `src/testing/adminConsoleHarness.tsx`: 단계마다 그 사이의 요청과 탭 화면(`serializeDom`·`formState`)을 기록, 응답을 붙잡아 두는 `deferred()`로 로딩·처리 중 화면도 적는다.
+   - **끊김을 따르는 fetch 래퍼** `src/testing/abortableFetch.ts`(+ 단위 5건): `fetchRouter.js`는 signal을 보지 않아 끊긴 요청도 정상 응답으로 돌아온다. 래퍼는 안쪽 fetch를 감싸 브라우저처럼 `AbortError`로 거부하고, 요청마다 signal 상태(`none`·`live`·`aborted`)를 적는다. 환자 배정 탭의 "새 검색이 앞 요청을 끊는 것"·"탭을 떠나면 끊는 것"을 이것으로 얼렸다(검색 디바운스는 가짜 타이머).
+2. **TS 이동(P2-81c-ts · P2-83d-ts)** — `AdminConsoleModal.jsx`(1,338줄) → `.tsx`, `src/app/screens/WorkspaceScreen.jsx` → `.tsx`, `src/core/hooks/useOpsStatus.js` → `.ts`. esbuild 비교(`jsx` preserve·automatic × `verbatimModuleSyntax` 켬·끔) **모두 차이 0줄**, `@ts-nocheck` 1개 해제. 새 `any`·`@ts-expect-error`·`eslint-disable`·`!` 0.
+   - 실제 strict 오류: 관리자 화면 **189건**(계획 어림 177 — 대부분 상태 타입 없음·응답 필드 접근), `WorkspaceScreen` 5 + 1, `useOpsStatus` 3. 타입을 붙인 뒤 0. 단언은 `as` 25(관리자 — `catch`의 오류 22 포함) · 7(셸 두 파일)곳.
+   - 서버 응답·세션은 화면이 읽는 필드만 적은 지역 타입이다(런타임 검증 없음).
+3. **파일로 나눔(P2-82a·b)** — 탭 9개와 공용 조각(`validatePassword`·`fmt`·`StatusBadge`·`RoleBadge`·공용 타입)을 `src/core/components/admin/`(`*Tab.tsx` 9개 + `shared.tsx`)로. 선언 단위 esbuild 비교로 옮긴 값 선언 34개(22 + 12) 모두 같음·새 선언 0. `AdminConsoleModal.tsx`는 탭 목록과 본체만 남았다.
+4. **서버 호출 모으기(P2-83a)** — 25곳을 `src/core/services/adminRepository.ts`의 함수 23개로(경로·메서드·본문·`signal` 그대로, 응답은 `unknown` → 탭이 지역 타입으로 단언). 사용자 목록 함수 하나를 세 탭이 각자 부른다(요청 수 그대로). 요청은 호환 shim 대신 표준 `src/core/api/client`의 `requestJson`으로 — 착수 때 두 경로가 **같은 요청**(헤더·401 refresh 재시도·CSRF 재시도·오류 모양)을 만드는지 임시 테스트로 먼저 확인했다(계획의 미검증 항목). 탭 파일의 경로 문자열 0.
+
+**동작 맞춤 · 고치기 PR 3개** — 모두 재현 테스트를 먼저 쓰고 고치기 전 코드에서 실패하는 것을 확인했다. 재현되지 않아 고치지 않은 항목은 없다.
+- **P2-83b(동작 맞춤)** 순번 가드 `src/core/hooks/useLatestGuard.ts`(+ 단위 4건, StrictMode 포함 — 마운트 표시를 cleanup에서 내리고 setup에서 되살린다)를 탭 9개의 불러오기에 넣었다. 불러오기를 연달아 시작했을 때 늦게 온 앞 응답·탭을 떠난 뒤 응답이 화면을 바꾸지 않는다(K18-⑥ — 가입 요청 필터를 빨리 바꾸면 옛 목록이 덮던 것). 환자 배정은 AbortController를 그대로 두고 성공 경로에도 같은 가드. 오류 칸·로딩·처리 중 표시·요청 횟수는 그대로(골든 12개 불변). 리뷰에서 찾은 순서 문제(가입 승인·거절 뒤 재조회가 클릭 때 필터를 써 가드가 지금 필터 응답을 버림)는 재조회를 지금 필터로 부르게 고쳤다. 평소에 보이는 변화가 없어 R2b 안내 항목으로 세지 않는다.
+- **P2-83c(flagged)** ① 가입 거절 확인창을 플랫폼 확인창(`src/platform/dialogs`의 `showConfirm`)으로 ② 환자 배정 성공 뒤 그 환자의 처리 중 표시를 되돌림(K18-④) ③ 가입 승인·거절·비밀번호 초기화에 처리 중 잠금(재현됨 — 두 번 누르면 요청이 2~3번 나갔다). 처리 중 표시는 **행별**이다(리뷰 반영 — 한 행이 끝나거나 시작해도 다른 행의 잠금을 풀지 않는다). 골든은 `admin-assignment.json`의 ② hunk만 갱신.
+- **P2-83e(flagged, 앱 셸 배선)** ① 운영 경고 배너를 누르면 관리자 콘솔이 운영 상태 탭으로 열린다(K18-②) — 열 탭 값은 `src/app/useModalState.ts`의 상태 하나(모달 맵 11칸의 모양은 그대로), 닫을 때 되돌려 계정 메뉴로 열면 지금처럼 감사 로그 탭 ② 운영 상태 탭에서 알림을 확인·해결하면 배너를 바로 다시 판정한다(K18-③) — `useOpsStatus`의 `refresh` → `useEditingController`(`refreshOpsStatus`) → `ModalHost` → 모달 `onOpsStatusChanged`. 재현은 앱 스모크(`src/App.opsBanner.smoke.test.tsx`). G9m 스모크·`ModalHost.test`·`appHookOrder` 골든 불변.
+
+**R2b에 실릴 flagged(C9 구간 C — 2건)**: P2-83c · P2-83e. **R2b 안내서 항목(C9 구간 C)**: ① "설치본에서 가입 신청 거절 확인창이 다른 확인창들과 같은 앱 대화상자로 뜹니다(웹은 그대로)" ② "관리자 콘솔의 환자 배정에서 배정 직후 같은 환자를 곧바로 다시 배정할 수 있습니다" ③ "가입 승인·거절·비밀번호 초기화 버튼은 처리하는 동안 잠깐 잠깁니다(두 번 눌러도 한 번만 처리)" ④ "운영 경고 배너를 누르면 관리자 콘솔이 운영 상태 탭으로 열립니다" ⑤ "운영 상태 탭에서 알림을 확인·해결하면 배너가 바로 갱신됩니다(지금은 다음 확인까지 최대 5분 남음)". 관리자 화면·배너는 로그인한 인트라넷 관리자 계정에서만 보여 **화면으로 확인하지 못했다**(테스트와 골든으로만).
+
+**수치**
+| 항목 | 앞 | 뒤 |
+|---|---|---|
+| `AdminConsoleModal` 줄 수 | 1,338 | 80(탭 파일 9개 115 ~ 201줄, `shared.tsx` 66) |
+| `ts-progress` | TS 159 files / 19,711 lines(45.1%) | 174 / 21,837(49.4%) |
+| `@ts-nocheck` 기준선 | 45 | 44 |
+| ESLint 동결 | 16파일 34건 | 16파일 34건 |
+| lint 경고 | 69 | 69 |
+| 루트 테스트 | 4,931 | 4,967 |
+| 서버 테스트 | 1,871 | 1,871 |
+
+- 래칫 `inlineStyleHex` 8 · `coreToAppImports` 10 · `webStorageFiles` 6 · `cssRawHex` 230 · `untaggedSetPatients` 0 · `appShellLines` 92 그대로. `src/app` 제품 파일 400줄 이하(`WorkspaceScreen` 256).
+- 기존 골든·픽스처는 구간 내내 바뀌지 않았다(골든은 새로 만든 12개뿐 — 그 가운데 `admin-assignment.json`만 P2-83c가 ② hunk 4개를 갱신). 기존 테스트는 `AdminConsoleModal.emrAudit.test.jsx`의 import 확장자 1줄(P2-81c-ts)·mock 대상 경로 2줄(P2-83a), `useOpsStatus.test.jsx`의 반환값 단언 1줄(P2-83e — 새 칸 `refresh`)만 바뀌었다.
+- `packages/**`·`server/**`·`electron/**`·`api/**`·CSS 변경 0. 임시 타입 선언(`.d.ts`) 0.
+
+**계획과 다르게 한 점**
+- P2-82a: 공용 타입(`AdminSession`·`TabProps`·`UserRow`·`UsersResponse`)도 `admin/shared.tsx`로 — 사용자 목록 타입을 세 탭이 함께 쓴다.
+- P2-83a: 저장소 함수는 25곳에 23개(사용자 목록 하나를 세 탭이 쓰고, 통계 권한의 세 요청은 각자 함수). `httpClient` shim은 지우지 않았다(P2-100).
+- P2-83b: 환자 배정 탭의 의사 목록(마운트 때 한 번)에는 가드를 넣지 않았다(새로 부르는 일이 없고 언마운트 뒤 상태 변경은 화면에 영향이 없다).
+- P2-83c ③: 처리 중 잠금을 행별(처리 중 id 묶음)로 했고, 같은 이유로 환자 배정의 처리 중 표시도 행별로 바꿨다(Codex 리뷰 차단 2건 — 한 행의 시작·끝이 다른 행의 잠금을 풀었다; 배정 실패 경로의 같은 모양은 이전부터였다).
+- P2-83d-ts: `WorkspaceScreen`의 JSDoc 캐스트 `/** @type … */ (식)`를 `as`로 바꾸되 식 안의 옛 주석은 남겼다 — esbuild가 식 안 주석을 출력에 남겨, 지우면 출력이 154줄 달라진다.
+- P2-83e: 열 탭 값은 모달 맵에 칸을 더하지 않고 `useModalState` 안의 상태 하나로 두었다(모달 맵 11칸 단언·effect 없는 훅 조건 그대로).
+
+**특성화에서 드러난 지금 동작(고치지 않음, 분할안 영향 없음)**: 사용자 생성 실패의 폼 오류 칸은 다음 생성 시도까지 남는다 · 가입 승인·거절은 시작할 때 오류 칸을 지우지 않는다(성공하면 재조회가 지운다) · 감사 로그 개수를 바꾸면 요청 없이 쪽 단추만 새 개수로 계산된다 · 통계 권한 부여는 시작할 때 불러오기 오류 칸을 지우지 않는다 · 환자 배정은 새로 부를 때마다 지난 요청의 컨트롤러를 끊는다(이미 끝난 요청이어도).
+
+**후속(이 구간에서 하지 않음)**
+- 환자 배정 뒤 재조회는 클릭 때의 검색어로 부른다 — 배정 처리 중 검색어를 바꾸면 그 검색 요청을 끊고 옛 검색어 결과를 보인다(이 구간 전부터 같은 모양, 가드가 바꾸지 않음).
+- `abortableFetch`(테스트 도구)는 `init`의 `signal: null`이 Request의 signal을 해제하는 경계를 따르지 않는다(관리자 화면은 Request·`signal: null`을 쓰지 않아 영향 없음).
+- `useOpsStatus`는 아직 shim(`services/httpClient`)으로 요청한다(P2-100에서 함께).
+
+**테스트 도구 함정**
+- gitleaks의 generic-api-key 규칙이 테스트의 합성 비밀번호(`password`·`tempPassword` 키 + 하이픈 섞인 값)를 잡는다 — 엔트로피가 낮은 합성 값을 쓴다.
+- jsdom의 전역 `confirm`은 구현이 없어 `false`처럼 돈다 — "확인창에서 취소" 재현은 전역 `confirm`을 `true`로 stub해야 고치기 전에 실패한다.
+
+**확인하지 못한 것**
+- 관리자 화면과 운영 경고 배너(로그인한 인트라넷 관리자 전용 — 테스트·골든으로만). 웹 로컬 모드에서 앱이 뜨고 콘솔 오류가 없는 것만 봤다.
+- 설치본에서의 가입 거절 확인창(셸 대화상자 — 브리지 stub 테스트로만).
+
+릴리스·버전 범프는 없다. **다음** = 계획 세션의 독립 확인 → (사용자 지시 시) C9 구간 D(영상 분석 화면).
+
 **게이트 B 숙제(게이트 A 구현 중 생김, 2026-11-14) — ✅ 종결(P2-40d, #339)**: ① 전제 정정 — 위자드 초안을 컨테이너로 옮겨도 "나중에 추가된 환자"는 나중 사건이라 같은 경합이 남는다(게이트 B 계획 B5). 판정 시점을 "삭제 전이가 적용되는 순간의 목록"으로 정의했다(초안은 옮기지 않음). ② 삭제 뒤처리 전체(2단계 layout effect·`deleteTick`·`setActiveId` updater 둘째 인자) 제거. 아래는 그때의 기록 — ① P2-39a Codex 3회차 차단 1건(사용자 결정: 머지하고 숙제로): 위자드 초안 비우기가 "활성 환자 null에 반응해 다음 커밋에 환자를 추가하는 layout effect"가 있으면 빈 목록으로 판정할 수 있다. 초안(`useIntakeWizard`의 `useState`)이 환자 목록과 다른 상태라 판정을 몇 커밋 미뤄도 같은 경합이 남는다. 현재 제품 코드의 `useLayoutEffect`는 3곳뿐(`DiagnosisForm` 높이 조절·`usePatientCrud`의 ref 갱신·삭제 뒤처리)이고 환자를 추가하는 것은 없어 **현재 코드에서는 도달 경로가 없다**. 근본 해결 = 위자드 초안을 컨테이너 상태로 옮겨 삭제 전이와 같은 전이에서 판정. ② **`usePatientCrud`의 삭제 뒤처리 전체를 제거 대상으로**: 2단계 layout effect(stage `apply`·`intake`)·`deleteTick` 커밋 배리어·컨테이너 `setActiveId` updater가 둘째 인자로 최신 목록을 받는 비표준 모양 — 게이트 B에서 활성 환자·초안을 같은 상태 전이로 계산하면 셋 다 없어진다(`onReduced` 2곳 제거와 같은 작업).
 
 
@@ -681,6 +740,7 @@ shared/contracts/{aiAnalysis,aiPrompt,aiModels}.ts  # AI 입력 계약(.strict) 
 16. **C8 구간 B — 표기 통일(P2-72c-ts ~ P2-72i) 완료(#455 ~ #459 + 이 기록, 2026-11-28)** — Phase 2 절 "C8 구간 B 현황", ADR 0001 "추가 결정(2026-11-27)". 화면의 직력 표기(`직력1`·`(미입력)`·기간 `-`)와 출력의 빈 직종명(`직업 미입력`)을 각각 한 곳(`jobLabels.ts`·`phrases.ts`)으로 맞췄고, 결과 패널 4개·`BasicInfoForm`·`jobHistory`·척추 `sectionText`가 TS가 됐다. C8(쌍둥이 정리) 전체 완료 — R2b flagged는 C8에서 3건(P2-74c·72f·72h). **다음** = 계획 세션의 독립 확인 → (사용자 지시 시) C9.
 17. **C9 구간 A — 작은 화면 넷(P2-84a ~ P2-88A-docs) 완료(#461 ~ #471 + 이 기록, 2026-11-28)** — Phase 2 절 "C9 구간 A 현황". 대시보드·설정·프리셋 저장·일괄 가져오기 창을 골든으로 얼린 뒤 TS로 옮기고(esbuild 차이 0) `dashboard/`·`settings/`·`preset/`로 나눴다. 모듈의 대시보드 이름·색은 매니페스트 선택 키 `shortName`·`color`. R2b에는 flagged 1건(P2-87 설정 창 기본 인트라넷 주소에 포트 — '연결 확인' 결과 표시 변화는 운영 미확인)이 더 실린다. **다음** = 계획 세션의 독립 확인 → (사용자 지시 시) C9 구간 B(통계 화면).
 18. **C9 구간 B — 통계 화면(P2-76a ~ P2-80B-docs) 완료(#473 ~ #484 + 이 기록, 2026-11-28)** — Phase 2 절 "C9 구간 B 현황". 통계 결과 패널·레시피 패널·작업대를 골든으로 얼린 뒤 TS로 옮기고(esbuild 차이 0, 쓰지 않던 import 바인딩 한 줄은 빌드 산출물 동일로 닫음) `result/`·`recipe/`·`recipeBuild.ts`로 나눴고, 작업대 레시피 초안은 `useReducer`(`useRecipeDraft`)로. 동결 56 → 34. P2-80은 재현되지 않아 PR 없음 — R2b flagged 추가 0. **다음** = 계획 세션의 독립 확인 → (사용자 지시 시) C9 구간 C(관리자 화면).
+19. **C9 구간 C — 관리자 화면(P2-81a ~ P2-83C-docs) 완료(#486 ~ #495 + 이 기록, 2026-11-28)** — Phase 2 절 "C9 구간 C 현황". 관리자 콘솔 탭 9개를 골든 12개로 얼린 뒤(끊김을 따르는 fetch 래퍼 포함) TS로 옮기고(esbuild 차이 0, strict 오류 실측 189) `admin/`로 나눴으며(본체 1,338 → 80줄), 서버 호출 25곳은 `adminRepository.ts`(표준 요청 클라이언트 — shim과 같은 요청 확인)로. 늦은 목록 응답은 순번 가드 `useLatestGuard`로 버린다(동작 맞춤). `WorkspaceScreen`·`useOpsStatus`도 TS로. R2b에는 flagged 2건(P2-83c 가입 거절 확인창·환자 재배정·처리 중 잠금 · P2-83e 배너가 운영 상태 탭으로 열고 알림 처리 뒤 바로 갱신)이 더 실린다 — 화면은 미확인(테스트로만). **다음** = 계획 세션의 독립 확인 → (사용자 지시 시) C9 구간 D(영상 분석 화면).
 
 ---
 
