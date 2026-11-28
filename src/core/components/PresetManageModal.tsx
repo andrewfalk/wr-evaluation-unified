@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react';
-import type { ReactNode } from 'react';
 import { getModule } from '../moduleRegistry';
 import {
   buildPresetIdentity,
@@ -9,46 +8,19 @@ import {
   getPresetOwnerName,
   getPresetVisibility,
   isOwnPreset,
-  normalizePresetIdentityPart,
 } from '../services/presetRepository';
 
 import { hasIntranetSession } from '../../platform/dataMode';
 import type { SessionLike } from '../../platform/dataMode';
-import type { ModuleManifest, PresetTaskListFieldDef } from '../modules/manifest';
-
-/** 프리셋(직접 만든 것·내장) — 이 창이 직접 읽는 필드. 나머지는 presetRepository(JS)의 함수가 읽는다. */
-export interface PresetRecord {
-  id?: string;
-  _customId?: string;
-  _customRevision?: unknown;
-  revision?: unknown;
-  source?: string;
-  jobName?: string;
-  modules?: Record<string, unknown>;
-}
+import { PresetFieldPreview } from './preset/PresetFieldPreview';
+import { getKeywordMatchScore, getPresetDraft, normalizeSearchText } from './preset/presetSearch';
+import type { PresetRecord } from './preset/presetSearch';
 
 /** 환자 — 이 창이 읽는 데이터 필드(부모는 PatientRecord를 넘긴다). */
 interface PresetPatientData {
   shared: { jobs?: Array<{ id: string; jobName?: string }> };
   modules?: Record<string, unknown>;
   activeModules?: string[];
-}
-
-interface PresetDraft {
-  jobName: string;
-  category: string;
-  description: string;
-}
-
-/** 척추 작업 카드(모듈이 칩을 주지 않을 때 그리는 값). */
-interface PresetTask {
-  name?: string;
-  posture?: string;
-  weight?: number | null;
-  frequency?: number | null;
-  timeValue?: number | string;
-  timeUnit?: string;
-  correctionFactor?: number | string;
 }
 
 export interface PresetManageModalProps {
@@ -63,80 +35,6 @@ export interface PresetManageModalProps {
   session: SessionLike | null | undefined;
 }
 const CATEGORY_OPTIONS = ['건설업', '제조업', '사회복지업', '서비스업', '운수업', '농림어업', '기타'];
-
-function getPresetDraft(preset: PresetRecord | null | undefined): PresetDraft {
-  return {
-    jobName: preset?.jobName || '',
-    category: getPresetCategory(preset) || DEFAULT_CATEGORY,
-    description: getPresetDescription(preset),
-  };
-}
-
-function normalizeSearchText(value: unknown): string {
-  return normalizePresetIdentityPart(value).toLowerCase();
-}
-
-function tokenize(value: unknown): string[] {
-  return normalizeSearchText(value)
-    .split(/\s+/)
-    .filter(token => token.length >= 2);
-}
-
-function formatPresetFieldValue(value: unknown, type: string): ReactNode {
-  if (Array.isArray(value)) {
-    return value.join(', ');
-  }
-  if (value && typeof value === 'object') {
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return '[객체]';
-    }
-  }
-  if (type === 'boolean') {
-    return value ? 'Y' : 'N';
-  }
-  return value as ReactNode;
-}
-
-function getKeywordMatchScore(preset: PresetRecord, draft: PresetDraft): number {
-  const presetJob = normalizeSearchText(preset.jobName);
-  const presetCategory = normalizeSearchText(getPresetCategory(preset));
-  const presetDescription = normalizeSearchText(getPresetDescription(preset));
-  const presetBlob = [presetJob, presetCategory, presetDescription].join(' ');
-
-  const draftJob = normalizeSearchText(draft.jobName);
-  const draftCategory = normalizeSearchText(draft.category);
-  const draftDescription = normalizeSearchText(draft.description);
-  const draftTokens = new Set([
-    ...tokenize(draft.jobName),
-    ...tokenize(draft.category),
-    ...tokenize(draft.description),
-  ]);
-
-  let score = 0;
-
-  if (draftJob) {
-    if (presetJob === draftJob) score += 6;
-    else if (presetJob.includes(draftJob) || draftJob.includes(presetJob)) score += 4;
-  }
-
-  if (draftCategory) {
-    if (presetCategory === draftCategory) score += 4;
-    else if (presetCategory.includes(draftCategory) || draftCategory.includes(presetCategory)) score += 2;
-  }
-
-  if (draftDescription) {
-    if (presetDescription === draftDescription) score += 3;
-    else if (presetDescription.includes(draftDescription) || draftDescription.includes(presetDescription)) score += 2;
-  }
-
-  for (const token of draftTokens) {
-    if (presetBlob.includes(token)) score += 1;
-  }
-
-  return score;
-}
 
 export function PresetManageModal({ jobId, patient, presets, editingPreset = null, onSave, onClose, session }: PresetManageModalProps) {
   const job = ((patient.data as PresetPatientData).shared.jobs || []).find(item => item.id === jobId);
@@ -304,75 +202,6 @@ export function PresetManageModal({ jobId, patient, presets, editingPreset = nul
       removedModuleIds,
       replaceModules: Boolean(editingPreset),
     });
-  };
-
-  const renderReadableFieldPreview = (moduleId: string, options: { storedOnly?: boolean } = {}) => {
-    const mod: ModuleManifest | undefined = getModule(moduleId);
-    const data = getModuleSnapshot(moduleId) as Record<string, unknown> | null;
-    if (!mod?.presetConfig || !data) return null;
-
-    const { storedOnly = false } = options;
-    const { fields } = mod.presetConfig;
-
-    // 작업 목록형(taskList 필드 — spine·cervical)을 먼저 본다. 저장된 값에 그 목록이 없으면 아무것도 그리지 않는다.
-    const taskListField = fields.find(field => field.type === 'taskList') as PresetTaskListFieldDef | undefined;
-    if (taskListField) {
-      const tasks = data[taskListField.key] as PresetTask[] | undefined;
-      if (!tasks) return null;
-      return (
-        <div className="preset-field-preview">
-          {storedOnly && (
-            <div className="preset-preview-source">{"\uAE30\uC874 \uD504\uB9AC\uC14B\uC5D0 \uC800\uC7A5\uB41C \uAC12\uC744 \uADF8\uB300\uB85C \uC720\uC9C0 \uC911\uC785\uB2C8\uB2E4."}</div>
-          )}
-          {tasks.map((task, index) => (
-            <div key={index} className="preset-task-card">
-              <div className="preset-task-title">{task.name}</div>
-              <div className="preset-task-meta">
-                {/* \uCE69 \uBB38\uAD6C\uB294 \uBAA8\uB4C8\uC774 \uC8FC\uACE0(presetConfig taskList \uD544\uB4DC\uC758 chips \u2014 \uACBD\uCD94, FX-3), \uC5C6\uC73C\uBA74 \uCC99\uCD94 \uC791\uC5C5 \uCE69\uC744 \uADF8\uB9B0\uB2E4. */}
-                {taskListField.chips ? taskListField.chips(task as Readonly<Record<string, unknown>>).map((chip, chipIndex) => (
-                  <span key={chipIndex} className="preset-task-chip">{chip}</span>
-                )) : (
-                  <>
-                    {task.posture && <span className="preset-task-chip">{task.posture}</span>}
-                    {task.weight !== undefined && task.weight !== null && (
-                      <span className="preset-task-chip">{`${task.weight}kg`}</span>
-                    )}
-                    {task.frequency !== undefined && task.frequency !== null && (
-                      <span className="preset-task-chip">{`${task.frequency}\uD68C`}</span>
-                    )}
-                    {task.timeValue ? (
-                      <span className="preset-task-chip">{`${task.timeValue}${task.timeUnit || ''}`}</span>
-                    ) : null}
-                    {task.correctionFactor ? (
-                      <span className="preset-task-chip">{`\uBCF4\uC815 ${task.correctionFactor}`}</span>
-                    ) : null}
-                  </>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      );
-    }
-
-    return (
-      <div className="preset-field-preview">
-        {storedOnly && (
-          <div className="preset-preview-source">{"\uAE30\uC874 \uD504\uB9AC\uC14B\uC5D0 \uC800\uC7A5\uB41C \uAC12\uC744 \uADF8\uB300\uB85C \uC720\uC9C0 \uC911\uC785\uB2C8\uB2E4."}</div>
-        )}
-        {fields.map(field => {
-          const value = data[field.key];
-          if (value === undefined || value === '' || value === null) return null;
-          const display = formatPresetFieldValue(value, field.type);
-          return (
-            <div key={field.key} className="preset-preview-row">
-              <span className="preset-preview-label">{field.label}</span>
-              <span className="preset-preview-value">{display}</span>
-            </div>
-          );
-        })}
-      </div>
-    );
   };
 
   return (
@@ -557,9 +386,9 @@ export function PresetManageModal({ jobId, patient, presets, editingPreset = nul
                     <span className="preset-module-note">{"\uAE30\uC874 \uD504\uB9AC\uC14B \uB370\uC774\uD130 \uC720\uC9C0"}</span>
                   )}
                 </label>
-                {checked && hasData && renderReadableFieldPreview(moduleId, {
-                  storedOnly: !hasCurrentData && hasStoredData,
-                })}
+                {checked && hasData && (
+                  <PresetFieldPreview moduleId={moduleId} data={getModuleSnapshot(moduleId)} storedOnly={!hasCurrentData && hasStoredData} />
+                )}
               </div>
             );
           })}
