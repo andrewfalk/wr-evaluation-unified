@@ -1,7 +1,7 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { requestMultipart, requestBlob, configureHttpClient } from '../httpClient.js';
 import { uploadClip, fetchSampleFrame } from '../videoAnalysisClient.js';
-import { canDetectClip } from '../../components/VideoAnalysisStep.jsx';
+import { canDetectClip } from '../../components/VideoAnalysisStep';
 
 // 제어 가능한 XMLHttpRequest 목. send() 후 테스트가 finish()로 응답을 흘린다.
 class MockXHR {

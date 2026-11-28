@@ -29,7 +29,7 @@
       "count": 1
     }
   },
-  "src/core/components/VideoAnalysisStep.jsx": {
+  "src/core/components/VideoAnalysisStep.tsx": {
     "react/no-unescaped-entities": {
       "count": 4
     }

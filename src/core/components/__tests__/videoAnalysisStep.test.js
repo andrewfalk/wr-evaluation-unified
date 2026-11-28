@@ -24,7 +24,7 @@ import {
   buildVideoStatus,
   flatCandidateRowRef,
   hasAnyFlatEvidence,
-} from '../VideoAnalysisStep.jsx';
+} from '../VideoAnalysisStep';
 import { getAggregationMethod } from '../../services/videoAggregate.js';
 import { getModuleSuggestions, getModuleCandidates, collectCandidateFeatures } from '../../services/videoProvenance.js';
 import { gateFeaturesByViewpoint } from '../../services/videoViewpointConfig.js';

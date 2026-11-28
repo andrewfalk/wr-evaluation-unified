@@ -5,7 +5,7 @@
 // innerHTML 전체나 사용자 입력값(value)은 검사하지 않는다.
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
-import { VideoAnalysisStep } from '../VideoAnalysisStep.jsx';
+import { VideoAnalysisStep } from '../VideoAnalysisStep';
 import { CANDIDATE_REASONS, displayCandidateReason } from '../../services/videoMock.js';
 
 afterEach(cleanup);
