@@ -1,15 +1,50 @@
 import { isPurposeCompatible } from '@wr/analytics-core/common';
+import type { CatalogVariable, StatsFilter } from '@wr/contracts/stats';
+
+type CatalogByKey = Map<string, CatalogVariable>;
+
+/** 작업대의 레시피 초안 — 모드·목적 전환과 카탈로그 정리가 읽고 다음 값을 돌려주는 필드. */
+export interface RecipeDraft {
+  analysisMode: string;
+  analysisPurpose: string;
+  variableKeys: string[];
+  outcomeKey: string | null;
+  eventLevel: string;
+  standardizePredictors: boolean;
+  interactionTerms: Array<[string, string]>;
+  splineKeys: string[];
+  stratifyByKey: string | null;
+  requestedMethod: string | null;
+  filterDraft: StatsFilter[];
+  appliedFilters: StatsFilter[];
+}
+
+/** 전환으로 정리된 내역(사용자 안내용). */
+export interface TransitionNotice {
+  removedVariables: string[];
+  removedFilters: StatsFilter[];
+}
+
+export interface TransitionPlan {
+  patch: RecipeDraft;
+  notice: TransitionNotice | null;
+}
+
+export interface PrunePlan {
+  patch: Partial<RecipeDraft>;
+  removed: string[];
+}
 
 // 예측 필터 화이트리스트의 등록일 키 — RecipePanel(필터 후보)과 이 파일(전환 시 정리)이 같이 쓴다.
 export const PREDICTION_REGISTERED_AT_KEY = 'case.meta.registeredAt';
 
 /** 예측 모드에서 허용되는 필터인가 — predictor 역할이거나 등록일만(서버 PREDICTION_FILTER_LEAKAGE). */
-export function isPredictionFilterAllowed(filter, catalogByKey) {
+export function isPredictionFilterAllowed(filter: StatsFilter, catalogByKey: CatalogByKey): boolean {
   const v = catalogByKey.get(filter.key);
   return v?.predictionRole === 'predictor' || filter.key === PREDICTION_REGISTERED_AT_KEY;
 }
 
-function sameKeys(a, b) {
+function sameKeys(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((k, i) => k === b[i]);
 }
 
@@ -27,9 +62,9 @@ function sameKeys(a, b) {
  * 반환: { patch, notice } — patch는 각 state의 다음 값, notice는 사용자에게 알릴 제거 내역
  * ({ removedVariables:[label], removedFilters:[filter] }) 또는 null.
  */
-export function planModePurposeTransition(prev, nextMode, nextPurpose, catalogByKey) {
+export function planModePurposeTransition(prev: RecipeDraft, nextMode: string, nextPurpose: string, catalogByKey: CatalogByKey): TransitionPlan {
   const modeChanged = nextMode !== prev.analysisMode;
-  const incompatible = (key) => {
+  const incompatible = (key: string) => {
     const v = catalogByKey.get(key);
     return !!v && !isPurposeCompatible(v, nextPurpose);
   };
@@ -60,16 +95,16 @@ export function planModePurposeTransition(prev, nextMode, nextPurpose, catalogBy
     }
   }
 
-  let requestedMethod;
+  let requestedMethod: string | null;
   if (nextMode === 'prediction') requestedMethod = 'l2_logistic';
   else if (modeChanged || variablesChanged) requestedMethod = null;
   else requestedMethod = prev.requestedMethod;
 
   let filterDraft = prev.filterDraft;
   let appliedFilters = prev.appliedFilters;
-  const removedFilters = [];
+  const removedFilters: StatsFilter[] = [];
   if (nextMode === 'prediction') {
-    const keep = (f) => isPredictionFilterAllowed(f, catalogByKey);
+    const keep = (f: StatsFilter) => isPredictionFilterAllowed(f, catalogByKey);
     for (const f of prev.filterDraft) if (!keep(f)) removedFilters.push(f);
     // appliedFilters에만 있는 필터도 제거하되 안내는 중복 없이 한 번만.
     for (const f of prev.appliedFilters) {
@@ -109,10 +144,10 @@ export function planModePurposeTransition(prev, nextMode, nextPurpose, catalogBy
  * 그대로 호출하면 정상 변수·필터가 전부 지워진다. 구 키를 새 키로 치환하지 않는다.
  * 반환: { patch, removed } — 바뀐 게 없으면 null.
  */
-export function pruneStaleSelections(prev, catalogByKey) {
-  const stale = (key) => !catalogByKey.has(key);
-  const removedKeys = [];
-  const note = (k) => { if (!removedKeys.includes(k)) removedKeys.push(k); };
+export function pruneStaleSelections(prev: RecipeDraft, catalogByKey: ReadonlyMap<string, unknown>): PrunePlan | null {
+  const stale = (key: string) => !catalogByKey.has(key);
+  const removedKeys: string[] = [];
+  const note = (k: string) => { if (!removedKeys.includes(k)) removedKeys.push(k); };
 
   const variableKeys = prev.variableKeys.filter((k) => { if (stale(k)) { note(k); return false; } return true; });
   const interactionTerms = prev.interactionTerms.filter(([a, b]) => {

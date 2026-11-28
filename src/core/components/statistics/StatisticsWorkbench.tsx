@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { fetchStatsCatalog, previewStatsAnalysis, runStatsAnalysis, exportStatsAggregate } from '../../services/statsRepository';
 import { useStatsRunPolling } from '../../hooks/useStatsRunPolling';
@@ -9,8 +8,50 @@ import { InspectorReportPanel } from './InspectorReportPanel';
 import { useViewportWidth } from './useViewportWidth';
 import { describeStatsApiError, getUnknownVariableKeys, REMOVED_VARIABLES, UNKNOWN_VARIABLE_FALLBACK } from './describeStatsError';
 import { planModePurposeTransition, pruneStaleSelections } from './workbenchTransitions';
+import type { RecipeDraft } from './workbenchTransitions';
+import type { RecipePreviewState, RecipeTransitionNotice } from './RecipePanel';
+import type { AnalyzeResponse, CatalogResponse, CatalogVariable, StatsFilter } from '@wr/contracts/stats';
 import './statistics-workbench.css';
 import '../charts/charts.css';
+
+type CatalogByKey = Map<string, CatalogVariable>;
+
+/** 작업대가 미리보기·실행에 보내는 레시피(서버 계약의 입력 모양 — 기본값 필드는 보내지 않는다). */
+export interface WorkbenchRecipe {
+  grain: string;
+  variableKeys: string[];
+  filters: StatsFilter[];
+  analysisPurpose: string;
+  formulaPolicies: Record<string, string>;
+  analysisMode: string;
+  requestedMethod?: string;
+  regression?: {
+    outcomeKey: string;
+    standardizePredictors: boolean;
+    interactionTerms: Array<[string, string]>;
+    splineKeys: string[];
+    eventLevel?: string;
+  };
+  prediction?: { outcomeKey: string; eventLevel: string };
+  descriptive?: { stratifyByKey: string };
+}
+
+/** 서버 오류 객체에서 이 화면이 읽는 필드(statsRepository가 던지는 오류). */
+interface StatsErrorLike {
+  status?: number;
+  data?: { code?: string };
+}
+
+export interface StatisticsWorkbenchProps {
+  session: unknown;
+  serverConfig: unknown;
+  statsAvailable: boolean;
+  refetchConfig: () => void;
+  configRefreshing: boolean;
+  /** 설정 재조회 실패 문구(없으면 비어 있다) — 화면은 글자로만 쓴다. */
+  configRefreshError: unknown;
+  onClose: () => void;
+}
 
 // PR3-A — 이변량 모드는 정렬하지 않는다(계획서 §클라이언트배선): variableKeys 순서가
 // x/y 역할을 정하므로 [a,b]와 [b,a]는 서로 다른 조건이어야 한다. requestedMethod도
@@ -34,9 +75,11 @@ import '../charts/charts.css';
 // Table1 — stratifyByKey도 조건 키에 포함한다. 빠뜨리면 그룹 변수만 바꿨을 때
 // preview가 재실행되지 않는다(위 outcomeKey/grain이 겪은 것과 동일한 함정).
 function buildConditionKey(
-  grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters,
-  outcomeKey, standardizePredictors, interactionTerms, splineKeys, eventLevel, stratifyByKey,
-) {
+  grain: string, analysisMode: string, variableKeys: string[], requestedMethod: string | null, analysisPurpose: string,
+  formulaPolicies: Record<string, string>, appliedFilters: StatsFilter[],
+  outcomeKey: string | null, standardizePredictors: boolean, interactionTerms: Array<[string, string]>, splineKeys: string[],
+  eventLevel: string, stratifyByKey: string | null,
+): string {
   return JSON.stringify({
     grain,
     analysisMode,
@@ -60,16 +103,18 @@ function buildConditionKey(
 // 거부한다). CatalogPanel은 역할과 무관하게 체크를 허용하므로(계획서 §6단계
 // "역할별로 필터링한다"), 실제로 recipe에 담을 집합은 여기서 역할로 다시 걸러
 // 잘못된 역할의 변수가 조용히 400을 유발하지 않게 한다.
-function predictionEffectiveVariableKeys(variableKeys, outcomeKey, catalogByKey) {
+function predictionEffectiveVariableKeys(variableKeys: string[], outcomeKey: string | null, catalogByKey: CatalogByKey): string[] {
   const predictorKeys = variableKeys.filter((k) => k !== outcomeKey && catalogByKey.get(k)?.predictionRole === 'predictor');
   if (!outcomeKey || catalogByKey.get(outcomeKey)?.predictionRole !== 'outcome') return predictorKeys;
   return [outcomeKey, ...predictorKeys];
 }
 
 function buildRecipe(
-  grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters,
-  outcomeKey, standardizePredictors, interactionTerms, splineKeys, eventLevel, catalogByKey, stratifyByKey,
-) {
+  grain: string, analysisMode: string, variableKeys: string[], requestedMethod: string | null, analysisPurpose: string,
+  formulaPolicies: Record<string, string>, appliedFilters: StatsFilter[],
+  outcomeKey: string | null, standardizePredictors: boolean, interactionTerms: Array<[string, string]>, splineKeys: string[],
+  eventLevel: string, catalogByKey: CatalogByKey, stratifyByKey: string | null,
+): WorkbenchRecipe {
   return {
     grain,
     variableKeys: analysisMode === 'prediction' ? predictionEffectiveVariableKeys(variableKeys, outcomeKey, catalogByKey) : variableKeys,
@@ -116,7 +161,10 @@ function buildRecipe(
 // 자체가 안 나가 availableMethods를 받아올 수 없다(1차 초안의 순환의존 버그가
 // 클라이언트에서 재발했던 지점, 계획서 §"이슈1"). method 실행 가능 여부는 오직
 // canExecute(실행 버튼)에서만 본다.
-function isRecipeComplete(analysisMode, variableKeys, formulaPolicies, catalogByKey, appliedFilters, outcomeKey, eventLevel, stratifyByKey) {
+function isRecipeComplete(
+  analysisMode: string, variableKeys: string[], formulaPolicies: Record<string, string>, catalogByKey: CatalogByKey,
+  appliedFilters: StatsFilter[], outcomeKey: string | null, eventLevel: string, stratifyByKey: string | null,
+): boolean {
   if (analysisMode === 'bivariate') {
     if (variableKeys.length !== 2 || variableKeys[0] === variableKeys[1]) return false;
   } else if (analysisMode === 'correlation_matrix') {
@@ -155,7 +203,7 @@ function isRecipeComplete(analysisMode, variableKeys, formulaPolicies, catalogBy
   return true;
 }
 
-function downloadBlob(blob, filename) {
+function downloadBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -166,8 +214,8 @@ function downloadBlob(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
-function isFeatureUnavailableError(err) {
-  return err?.status === 404 && err?.data?.code === 'NOT_FOUND';
+function isFeatureUnavailableError(err: unknown): boolean {
+  return (err as StatsErrorLike | null | undefined)?.status === 404 && (err as StatsErrorLike | null | undefined)?.data?.code === 'NOT_FOUND';
 }
 
 // PR2 — 통계분석 워크벤치 화면. 계획서(pr2-dreamy-frog.md) §1~§10의 최종 설계를 그대로
@@ -175,8 +223,8 @@ function isFeatureUnavailableError(err) {
 // 조합으로 판정하는 preview 유효성, 재조회와 초기적재의 분리(§4).
 export function StatisticsWorkbench({
   session, serverConfig, statsAvailable, refetchConfig, configRefreshing, configRefreshError, onClose,
-}) {
-  const [catalogState, setCatalogState] = useState({ status: 'loading', data: null, error: null });
+}: StatisticsWorkbenchProps) {
+  const [catalogState, setCatalogState] = useState<{ status: string; data: CatalogResponse | null; error: unknown }>({ status: 'loading', data: null, error: null });
   const [featureUnavailableDetected, setFeatureUnavailableDetected] = useState(false);
 
   // 1차 리뷰가 잡은 결함 — statsAvailable "값"만 보고 배너를 내리면, config가 이미 true로
@@ -228,36 +276,36 @@ export function StatisticsWorkbench({
 
   // ---- draft recipe state ----
   const [grain, setGrain] = useState('case');
-  const [variableKeys, setVariableKeys] = useState([]);
+  const [variableKeys, setVariableKeys] = useState<string[]>([]);
   const [analysisPurpose, setAnalysisPurpose] = useState('association');
-  const [formulaPolicies, setFormulaPolicies] = useState({});
-  const [filterDraft, setFilterDraft] = useState([]);
-  const [appliedFilters, setAppliedFilters] = useState([]);
+  const [formulaPolicies, setFormulaPolicies] = useState<Record<string, string>>({});
+  const [filterDraft, setFilterDraft] = useState<StatsFilter[]>([]);
+  const [appliedFilters, setAppliedFilters] = useState<StatsFilter[]>([]);
   // PR3-A — 이변량 모드 draft state(계획서 §클라이언트배선).
   const [analysisMode, setAnalysisMode] = useState('descriptive');
-  const [requestedMethod, setRequestedMethod] = useState(null);
+  const [requestedMethod, setRequestedMethod] = useState<string | null>(null);
   const [modeChangeBlockedNotice, setModeChangeBlockedNotice] = useState(false);
   // PR4-A1 §5 — 회귀 outcome 선택 상태. predictor는 selectedKeys(=variableKeys)에서
   // outcomeKey를 뺀 나머지로 파생한다(별도 배열을 두면 두 벌 진실원이 생긴다).
-  const [outcomeKey, setOutcomeKey] = useState(null);
+  const [outcomeKey, setOutcomeKey] = useState<string | null>(null);
   // PR4-A2 — 회귀 고급 옵션. interactionTerms는 [predictorA, predictorB] 쌍의
   // 배열, splineKeys는 continuous predictor 키 배열. eventLevel은 categorical
   // outcome에서만 의미 있다(observed 레벨을 클라이언트가 알 방법이 없어 —
   // CatalogVariableSchema에 선언 레벨 필드 자체가 없다 — A1의 referenceLevels와
   // 같은 원칙으로 자유 입력을 받고, 비워두면 서버가 결정적으로 자동 선택한다).
   const [standardizePredictors, setStandardizePredictors] = useState(false);
-  const [interactionTerms, setInteractionTerms] = useState([]);
-  const [splineKeys, setSplineKeys] = useState([]);
+  const [interactionTerms, setInteractionTerms] = useState<Array<[string, string]>>([]);
+  const [splineKeys, setSplineKeys] = useState<string[]>([]);
   const [eventLevel, setEventLevel] = useState('');
   // Table1 — descriptive 전용 그룹 변수 선택 상태(§3-대). variableKeys와 별개 축.
-  const [stratifyByKey, setStratifyByKey] = useState(null);
+  const [stratifyByKey, setStratifyByKey] = useState<string | null>(null);
   // 모드·목적 전환으로 자동 정리된 변수·필터 안내(RecipePanel 상단에 표시, 닫기 가능).
-  const [transitionNotice, setTransitionNotice] = useState(null);
+  const [transitionNotice, setTransitionNotice] = useState<RecipeTransitionNotice | null>(null);
   // 카탈로그 재조회 후 사라진 키를 초안에서 정리했다는 안내.
-  const [catalogPruneNotice, setCatalogPruneNotice] = useState(null);
+  const [catalogPruneNotice, setCatalogPruneNotice] = useState<string[] | null>(null);
   // 서버가 UNKNOWN_VARIABLE로 거부한 키 — 카탈로그 재조회가 **성공할 때까지** 유지한다(재조회가 실패해도
   // 복구 버튼이 사라지지 않게 오류 상태에서 파생하지 않고 별도 state로 둔다).
-  const [recoveryKeys, setRecoveryKeys] = useState([]);
+  const [recoveryKeys, setRecoveryKeys] = useState<string[]>([]);
 
   const draftSetters = {
     analysisMode: setAnalysisMode, analysisPurpose: setAnalysisPurpose, variableKeys: setVariableKeys,
@@ -265,10 +313,10 @@ export function StatisticsWorkbench({
     interactionTerms: setInteractionTerms, splineKeys: setSplineKeys, stratifyByKey: setStratifyByKey,
     requestedMethod: setRequestedMethod, filterDraft: setFilterDraft, appliedFilters: setAppliedFilters,
   };
-  function applyDraftPatch(patch) {
-    for (const [k, v] of Object.entries(patch)) draftSetters[k]?.(v);
+  function applyDraftPatch(patch: Partial<RecipeDraft>) {
+    for (const [k, v] of Object.entries(patch)) (draftSetters as Record<string, ((value: unknown) => void) | undefined>)[k]?.(v);
   }
-  function currentDraft() {
+  function currentDraft(): RecipeDraft {
     return {
       analysisMode, analysisPurpose, variableKeys, outcomeKey, eventLevel, standardizePredictors,
       interactionTerms, splineKeys, stratifyByKey, requestedMethod, filterDraft, appliedFilters,
@@ -285,14 +333,14 @@ export function StatisticsWorkbench({
     const pruned = pruneStaleSelections(currentDraft(), catalogByKey);
     if (!pruned) return;
     applyDraftPatch(pruned.patch);
-    setCatalogPruneNotice(pruned.removed.map((k) => REMOVED_VARIABLES[k] ? `${k} — ${REMOVED_VARIABLES[k]}` : k));
+    setCatalogPruneNotice(pruned.removed.map((k) => (REMOVED_VARIABLES as Record<string, string>)[k] ? `${k} — ${(REMOVED_VARIABLES as Record<string, string>)[k]}` : k));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [catalogState]);
 
   // PR0-B3 Part A — grain을 바꾸면 이전 grain에서 고른 변수·필터·method가 새 grain에는
   // 안 맞을 수 있어 전부 초기화한다(후보 목록을 grain으로 거르는 것과는 별개 — 후보를
   // 숨기는 것만으로는 이미 선택된 상태가 지워지지 않는다).
-  function handleGrainChange(nextGrain) {
+  function handleGrainChange(nextGrain: string) {
     if (nextGrain === grain) return;
     setGrain(nextGrain);
     setVariableKeys([]);
@@ -310,7 +358,7 @@ export function StatisticsWorkbench({
     setStratifyByKey(null);
   }
 
-  function toggleVariable(key) {
+  function toggleVariable(key: string) {
     setVariableKeys((prev) => {
       if (prev.includes(key)) return prev.filter((k) => k !== key);
       const cap = analysisMode === 'bivariate' ? 2 : 20; // 서버 상한(§ recipe 계약) — 조용히 무시
@@ -337,7 +385,7 @@ export function StatisticsWorkbench({
     setStratifyByKey((prev) => (prev === key ? null : prev));
   }
 
-  function handleAnalysisModeChange(nextMode) {
+  function handleAnalysisModeChange(nextMode: string) {
     if (nextMode === 'bivariate' && variableKeys.length > 2) {
       // 계획서 §클라이언트배선 — 3개 이상 선택된 채로 전환 시도하면 자동 축소하지
       // 않고 전환 자체를 막는다(암묵적 선택 손실 방지).
@@ -357,14 +405,14 @@ export function StatisticsWorkbench({
   }
 
   // 분석 목적 메뉴 — 모드 전환과 같은 정리 규칙(workbenchTransitions.js)을 쓴다.
-  function handleAnalysisPurposeChange(nextPurpose) {
+  function handleAnalysisPurposeChange(nextPurpose: string) {
     if (nextPurpose === analysisPurpose) return;
     applyTransition(analysisMode, nextPurpose);
   }
 
   // 모드·목적 전환 공통 경로: 순수 계산(planModePurposeTransition)이 새 모드/목적을 인자로
   // 받아 requestedMethod·비호환 변수·예측 필터·고급 옵션을 한 번에 정리한다.
-  function applyTransition(nextMode, nextPurpose) {
+  function applyTransition(nextMode: string, nextPurpose: string) {
     const { patch, notice } = planModePurposeTransition(currentDraft(), nextMode, nextPurpose, catalogByKey);
     applyDraftPatch(patch);
     setTransitionNotice(notice);
@@ -378,14 +426,14 @@ export function StatisticsWorkbench({
   // categorical 변수로 바뀌어도 레벨 집합이 다를 수 있음) 무조건 초기화한다 —
   // 안 그러면 continuous/boolean outcome으로 바뀐 뒤에도 값이 남아 서버가
   // EVENT_LEVEL_REQUIRES_CATEGORICAL_OUTCOME으로 거부한다(리뷰 지적).
-  function handleOutcomeKeyChange(nextOutcomeKey) {
+  function handleOutcomeKeyChange(nextOutcomeKey: string | null) {
     setOutcomeKey(nextOutcomeKey);
     setInteractionTerms((prev) => prev.filter(([a, b]) => a !== nextOutcomeKey && b !== nextOutcomeKey));
     setSplineKeys((prev) => prev.filter((k) => k !== nextOutcomeKey));
     // PR4-B2 — 예측의 boolean outcome은 eventLevel을 자동 'true'로 채운다(계획서
     // §6단계 "boolean outcome이면 eventLevel 'true'를 자동 설정"). 그 외(회귀,
     // 또는 예측의 categorical outcome)는 비워 사용자가 select로 다시 고르게 한다.
-    const nextVariable = catalogByKey.get(nextOutcomeKey);
+    const nextVariable = catalogByKey.get(nextOutcomeKey as string);
     setEventLevel(analysisMode === 'prediction' && nextVariable?.type === 'boolean' ? 'true' : '');
   }
 
@@ -394,7 +442,7 @@ export function StatisticsWorkbench({
     grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters,
     outcomeKey, standardizePredictors, interactionTerms, splineKeys, eventLevel, stratifyByKey,
   );
-  const [previewState, setPreviewState] = useState({ key: null, status: 'idle', result: null, error: null });
+  const [previewState, setPreviewState] = useState<RecipePreviewState>({ key: null, status: 'idle', result: null, error: null });
   const previewGenRef = useRef(0);
 
   useEffect(() => {
@@ -416,7 +464,7 @@ export function StatisticsWorkbench({
         if (gen !== previewGenRef.current) return;
         setPreviewState((prev) => (prev.key === key ? { key, status: 'ready', result: res, error: null } : prev));
       } catch (err) {
-        if (err?.name === 'AbortError') return;
+        if ((err as Error | null | undefined)?.name === 'AbortError') return;
         if (isFeatureUnavailableError(err)) setFeatureUnavailableDetected(true);
         if (gen !== previewGenRef.current) return;
         // 실패한 요청의 목적을 오류와 같이 보관한다 — 오류 문구는 현재 화면 목적이 아니라 요청 목적 기준이다.
@@ -434,18 +482,18 @@ export function StatisticsWorkbench({
 
   // ---- analyze: committed snapshot(요청 전송 시점) ----
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [analyzeError, setAnalyzeError] = useState(null);
+  const [analyzeError, setAnalyzeError] = useState<unknown>(null);
   // 실패한 실행 요청의 분석 목적(오류 문구용) — 현재 화면의 목적과 다를 수 있다.
-  const [analyzeErrorPurpose, setAnalyzeErrorPurpose] = useState(null);
-  const [committedRecipe, setCommittedRecipe] = useState(null);
-  const [committedResult, setCommittedResult] = useState(null);
+  const [analyzeErrorPurpose, setAnalyzeErrorPurpose] = useState<string | null>(null);
+  const [committedRecipe, setCommittedRecipe] = useState<WorkbenchRecipe | null>(null);
+  const [committedResult, setCommittedResult] = useState<AnalyzeResponse | null>(null);
   const analyzeInFlightRef = useRef(false);
   // 코드리뷰(2026-09-24) — 202로 전환된 요청의 recipe를 committedRecipe에 즉시
   // 반영하면, 이전 결과(committedResult)는 그대로인 채 화면에 새 recipe 라벨만
   // 붙는 불일치가 생긴다(그 요청이 실패/취소되면 계속 남는다). 진행 중인 recipe는
   // 여기 별도로 보관해두고, 폴링이 성공했을 때만 committedRecipe/committedResult를
   // 함께 교체한다 — 리렌더를 유발할 필요가 없으므로 상태가 아니라 ref로 둔다.
-  const pendingRecipeRef = useRef(null);
+  const pendingRecipeRef = useRef<WorkbenchRecipe | null>(null);
   // 코드리뷰(2026-09-24) — POST가 202를 반환하기 전에 화면이 언마운트되면,
   // useStatsRunPolling의 unmount cleanup(stop())은 이미 실행된 뒤라 그 이후
   // 도착하는 runPolling.start() 호출을 정리할 방법이 없다(새 generation으로
@@ -539,12 +587,12 @@ export function StatisticsWorkbench({
   useEffect(() => {
     if (runPolling.status === 'succeeded') {
       setCommittedRecipe(pendingRecipeRef.current);
-      setCommittedResult({ runManifest: runPolling.data.runManifest, result: runPolling.data.result });
+      setCommittedResult({ runManifest: (runPolling.data as unknown as AnalyzeResponse).runManifest, result: (runPolling.data as unknown as AnalyzeResponse).result });
       analyzeInFlightRef.current = false;
       setIsAnalyzing(false);
     } else if (runPolling.status === 'failed' || runPolling.status === 'cancelled' || runPolling.status === 'error') {
       setAnalyzeError(runPolling.error ?? new Error(
-        runPolling.status === 'cancelled' ? '분석이 취소되었습니다.' : `분석 실행 실패(${runPolling.data?.errorCode ?? runPolling.status})`,
+        runPolling.status === 'cancelled' ? '분석이 취소되었습니다.' : `분석 실행 실패(${(runPolling.data as { errorCode?: string } | null)?.errorCode ?? runPolling.status})`,
       ));
       analyzeInFlightRef.current = false;
       setIsAnalyzing(false);
@@ -580,7 +628,7 @@ export function StatisticsWorkbench({
     : false;
 
   // ---- export ----
-  const [exportState, setExportState] = useState({ status: 'idle', error: null });
+  const [exportState, setExportState] = useState<{ status: string; error: unknown }>({ status: 'idle', error: null });
   // PR3-A §"결과 계약 불변조건" — 내보내기 잠금은 activeScreen이나 현재 활성 탭이
   // 아니라 저장된 실행의 analysisMode 기준(committedRecipe)으로 판정한다. 탭을
   // 바꿔도 내보내기 가능 여부는 바뀌면 안 된다. 서버도 manifest.analysisMode 기준으로
@@ -626,7 +674,7 @@ export function StatisticsWorkbench({
         </div>
       </header>
 
-      {(featureUnavailableDetected || configRefreshError) && (
+      {(featureUnavailableDetected || (configRefreshError as string | null | undefined)) && (
         <div className="swb-banner">
           <span>{featureUnavailableDetected ? '기능을 사용할 수 없게 되었습니다.' : `새로고침 실패: ${configRefreshError}`}</span>
           <button type="button" className="swb-btn swb-btn--sm" onClick={refetchConfig} disabled={configRefreshing}>
@@ -723,7 +771,7 @@ export function StatisticsWorkbench({
         </div>
       )}
 
-      {analyzeError && (
+      {(analyzeError as Error | null) && (
         <div className="swb-banner" style={{ whiteSpace: 'pre-wrap' }}>분석 실행 실패: {describeStatsApiError(analyzeError, { catalogByKey, analysisPurpose: analyzeErrorPurpose })}</div>
       )}
 
