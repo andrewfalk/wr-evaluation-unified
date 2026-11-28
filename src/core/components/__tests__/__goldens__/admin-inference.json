@@ -1,0 +1,575 @@
+{
+  "steps": [
+    {
+      "step": "탭 열기 — 응답 전(GPU 확인 중, 칸 잠김)",
+      "requests": [
+        {
+          "method": "GET",
+          "url": "https://admin.synthetic.test/api/admin/org-settings",
+          "headers": {
+            "Content-Type": "application/json",
+            "X-WR-User-Id": "admin-0001",
+            "X-WR-Org-Id": "org-synthetic-1",
+            "X-WR-Auth-Mode": "intranet"
+          },
+          "signal": "none"
+        }
+      ],
+      "dom": [
+        "<div class=\"admin-filter-row\">",
+        "  <button class=\"btn btn-secondary btn-sm\" disabled=\"\">",
+        "    \"로딩 중…\"",
+        "<div class=\"admin-cell-hint\" style=\"margin-bottom: 8px;\">",
+        "  \"GPU 상태 확인 중…\"",
+        "<fieldset style=\"padding: 0px; margin: 0px;\" disabled=\"\">",
+        "  <label style=\"display: block; margin-bottom: 6px;\">",
+        "    <input type=\"radio\" name=\"inferenceDevice\" value=\"auto\" />",
+        "    <b>",
+        "      \"자동 (GPU 우선)\"",
+        "    <div class=\"admin-cell-hint\" style=\"margin-left: 22px;\">",
+        "      \"GPU 사용 가능하면 GPU, 아니면 CPU로 자동 폴백(권장).\"",
+        "  <label style=\"display: block; margin-bottom: 6px;\">",
+        "    <input type=\"radio\" name=\"inferenceDevice\" value=\"cpu\" />",
+        "    <b>",
+        "      \"CPU 강제\"",
+        "    <div class=\"admin-cell-hint\" style=\"margin-left: 22px;\">",
+        "      \"항상 CPU로 추론.\"",
+        "  <label style=\"display: block; margin-bottom: 6px;\">",
+        "    <input type=\"radio\" name=\"inferenceDevice\" value=\"cuda\" />",
+        "    <b>",
+        "      \"GPU 강제 (CUDA)\"",
+        "    <div class=\"admin-cell-hint\" style=\"margin-left: 22px;\">",
+        "      \"GPU(CUDA)로만 추론. 사용 불가 시 분석 실패(에러).\"",
+        "<div style=\"margin-top: 10px;\">",
+        "  <button class=\"btn btn-primary btn-sm\" disabled=\"\">",
+        "    \"저장\""
+      ],
+      "form": []
+    },
+    {
+      "step": "탭 열기 — 응답 뒤(자동, CUDA 미감지 안내, 저장 잠김)",
+      "requests": [],
+      "dom": [
+        "<div class=\"admin-filter-row\">",
+        "  <button class=\"btn btn-secondary btn-sm\">",
+        "    \"새로고침\"",
+        "<div class=\"admin-cell-hint\" style=\"margin-bottom: 8px;\">",
+        "  \"서버 GPU: CUDA provider 미설치/감지 불가 (GPU 확인 실패(합성))\"",
+        "<fieldset style=\"padding: 0px; margin: 0px;\">",
+        "  <label style=\"display: block; margin-bottom: 6px;\">",
+        "    <input type=\"radio\" name=\"inferenceDevice\" value=\"auto\" />",
+        "    <b>",
+        "      \"자동 (GPU 우선)\"",
+        "    <div class=\"admin-cell-hint\" style=\"margin-left: 22px;\">",
+        "      \"GPU 사용 가능하면 GPU, 아니면 CPU로 자동 폴백(권장).\"",
+        "  <label style=\"display: block; margin-bottom: 6px;\">",
+        "    <input type=\"radio\" name=\"inferenceDevice\" value=\"cpu\" />",
+        "    <b>",
+        "      \"CPU 강제\"",
+        "    <div class=\"admin-cell-hint\" style=\"margin-left: 22px;\">",
+        "      \"항상 CPU로 추론.\"",
+        "  <label style=\"display: block; margin-bottom: 6px;\">",
+        "    <input type=\"radio\" name=\"inferenceDevice\" value=\"cuda\" />",
+        "    <b>",
+        "      \"GPU 강제 (CUDA)\"",
+        "    <div class=\"admin-cell-hint\" style=\"margin-left: 22px;\">",
+        "      \"GPU(CUDA)로만 추론. 사용 불가 시 분석 실패(에러).\"",
+        "      <span style=\"color: var(--color-warning);\">",
+        "        \"— 현재 서버에서 CUDA 미감지(선택 시 분석 실패)\"",
+        "<div style=\"margin-top: 10px;\">",
+        "  <button class=\"btn btn-primary btn-sm\" disabled=\"\">",
+        "    \"저장\""
+      ],
+      "form": [
+        "#0 radio name=\"inferenceDevice\" value=\"auto\" checked"
+      ]
+    },
+    {
+      "step": "CPU 고름 — 저장 풀림",
+      "requests": [],
+      "dom": [
+        "<div class=\"admin-filter-row\">",
+        "  <button class=\"btn btn-secondary btn-sm\">",
+        "    \"새로고침\"",
+        "<div class=\"admin-cell-hint\" style=\"margin-bottom: 8px;\">",
+        "  \"서버 GPU: CUDA provider 미설치/감지 불가 (GPU 확인 실패(합성))\"",
+        "<fieldset style=\"padding: 0px; margin: 0px;\">",
+        "  <label style=\"display: block; margin-bottom: 6px;\">",
+        "    <input type=\"radio\" name=\"inferenceDevice\" value=\"auto\" />",
+        "    <b>",
+        "      \"자동 (GPU 우선)\"",
+        "    <div class=\"admin-cell-hint\" style=\"margin-left: 22px;\">",
+        "      \"GPU 사용 가능하면 GPU, 아니면 CPU로 자동 폴백(권장).\"",
+        "  <label style=\"display: block; margin-bottom: 6px;\">",
+        "    <input type=\"radio\" name=\"inferenceDevice\" value=\"cpu\" />",
+        "    <b>",
+        "      \"CPU 강제\"",
+        "    <div class=\"admin-cell-hint\" style=\"margin-left: 22px;\">",
+        "      \"항상 CPU로 추론.\"",
+        "  <label style=\"display: block; margin-bottom: 6px;\">",
+        "    <input type=\"radio\" name=\"inferenceDevice\" value=\"cuda\" />",
+        "    <b>",
+        "      \"GPU 강제 (CUDA)\"",
+        "    <div class=\"admin-cell-hint\" style=\"margin-left: 22px;\">",
+        "      \"GPU(CUDA)로만 추론. 사용 불가 시 분석 실패(에러).\"",
+        "      <span style=\"color: var(--color-warning);\">",
+        "        \"— 현재 서버에서 CUDA 미감지(선택 시 분석 실패)\"",
+        "<div style=\"margin-top: 10px;\">",
+        "  <button class=\"btn btn-primary btn-sm\">",
+        "    \"저장\""
+      ],
+      "form": [
+        "#1 radio name=\"inferenceDevice\" value=\"cpu\" checked"
+      ]
+    },
+    {
+      "step": "저장 — 처리 중(칸 잠김)",
+      "requests": [
+        {
+          "method": "PATCH",
+          "url": "https://admin.synthetic.test/api/admin/org-settings",
+          "body": {
+            "inferenceDevice": "cpu"
+          },
+          "headers": {
+            "Content-Type": "application/json",
+            "X-WR-User-Id": "admin-0001",
+            "X-WR-Org-Id": "org-synthetic-1",
+            "X-WR-Auth-Mode": "intranet"
+          },
+          "signal": "none"
+        }
+      ],
+      "dom": [
+        "<div class=\"admin-filter-row\">",
+        "  <button class=\"btn btn-secondary btn-sm\">",
+        "    \"새로고침\"",
+        "<div class=\"admin-cell-hint\" style=\"margin-bottom: 8px;\">",
+        "  \"서버 GPU: CUDA provider 미설치/감지 불가 (GPU 확인 실패(합성))\"",
+        "<fieldset style=\"padding: 0px; margin: 0px;\" disabled=\"\">",
+        "  <label style=\"display: block; margin-bottom: 6px;\">",
+        "    <input type=\"radio\" name=\"inferenceDevice\" value=\"auto\" />",
+        "    <b>",
+        "      \"자동 (GPU 우선)\"",
+        "    <div class=\"admin-cell-hint\" style=\"margin-left: 22px;\">",
+        "      \"GPU 사용 가능하면 GPU, 아니면 CPU로 자동 폴백(권장).\"",
+        "  <label style=\"display: block; margin-bottom: 6px;\">",
+        "    <input type=\"radio\" name=\"inferenceDevice\" value=\"cpu\" />",
+        "    <b>",
+        "      \"CPU 강제\"",
+        "    <div class=\"admin-cell-hint\" style=\"margin-left: 22px;\">",
+        "      \"항상 CPU로 추론.\"",
+        "  <label style=\"display: block; margin-bottom: 6px;\">",
+        "    <input type=\"radio\" name=\"inferenceDevice\" value=\"cuda\" />",
+        "    <b>",
+        "      \"GPU 강제 (CUDA)\"",
+        "    <div class=\"admin-cell-hint\" style=\"margin-left: 22px;\">",
+        "      \"GPU(CUDA)로만 추론. 사용 불가 시 분석 실패(에러).\"",
+        "      <span style=\"color: var(--color-warning);\">",
+        "        \"— 현재 서버에서 CUDA 미감지(선택 시 분석 실패)\"",
+        "<div style=\"margin-top: 10px;\">",
+        "  <button class=\"btn btn-primary btn-sm\" disabled=\"\">",
+        "    \"저장 중…\""
+      ],
+      "form": [
+        "#1 radio name=\"inferenceDevice\" value=\"cpu\" checked"
+      ]
+    },
+    {
+      "step": "저장 성공 — 문구, 저장 잠김",
+      "requests": [],
+      "dom": [
+        "<div class=\"admin-filter-row\">",
+        "  <button class=\"btn btn-secondary btn-sm\">",
+        "    \"새로고침\"",
+        "<div class=\"admin-cell-hint\" style=\"margin-bottom: 8px;\">",
+        "  \"서버 GPU: CUDA provider 미설치/감지 불가 (GPU 확인 실패(합성))\"",
+        "<fieldset style=\"padding: 0px; margin: 0px;\">",
+        "  <label style=\"display: block; margin-bottom: 6px;\">",
+        "    <input type=\"radio\" name=\"inferenceDevice\" value=\"auto\" />",
+        "    <b>",
+        "      \"자동 (GPU 우선)\"",
+        "    <div class=\"admin-cell-hint\" style=\"margin-left: 22px;\">",
+        "      \"GPU 사용 가능하면 GPU, 아니면 CPU로 자동 폴백(권장).\"",
+        "  <label style=\"display: block; margin-bottom: 6px;\">",
+        "    <input type=\"radio\" name=\"inferenceDevice\" value=\"cpu\" />",
+        "    <b>",
+        "      \"CPU 강제\"",
+        "    <div class=\"admin-cell-hint\" style=\"margin-left: 22px;\">",
+        "      \"항상 CPU로 추론.\"",
+        "  <label style=\"display: block; margin-bottom: 6px;\">",
+        "    <input type=\"radio\" name=\"inferenceDevice\" value=\"cuda\" />",
+        "    <b>",
+        "      \"GPU 강제 (CUDA)\"",
+        "    <div class=\"admin-cell-hint\" style=\"margin-left: 22px;\">",
+        "      \"GPU(CUDA)로만 추론. 사용 불가 시 분석 실패(에러).\"",
+        "      <span style=\"color: var(--color-warning);\">",
+        "        \"— 현재 서버에서 CUDA 미감지(선택 시 분석 실패)\"",
+        "<div style=\"margin-top: 10px;\">",
+        "  <button class=\"btn btn-primary btn-sm\" disabled=\"\">",
+        "    \"저장\"",
+        "  <span class=\"admin-cell-hint\" style=\"margin-left: 8px;\">",
+        "    \"저장되었습니다.\""
+      ],
+      "form": [
+        "#1 radio name=\"inferenceDevice\" value=\"cpu\" checked"
+      ]
+    },
+    {
+      "step": "다시 고르면 저장 문구 지워짐",
+      "requests": [],
+      "dom": [
+        "<div class=\"admin-filter-row\">",
+        "  <button class=\"btn btn-secondary btn-sm\">",
+        "    \"새로고침\"",
+        "<div class=\"admin-cell-hint\" style=\"margin-bottom: 8px;\">",
+        "  \"서버 GPU: CUDA provider 미설치/감지 불가 (GPU 확인 실패(합성))\"",
+        "<fieldset style=\"padding: 0px; margin: 0px;\">",
+        "  <label style=\"display: block; margin-bottom: 6px;\">",
+        "    <input type=\"radio\" name=\"inferenceDevice\" value=\"auto\" />",
+        "    <b>",
+        "      \"자동 (GPU 우선)\"",
+        "    <div class=\"admin-cell-hint\" style=\"margin-left: 22px;\">",
+        "      \"GPU 사용 가능하면 GPU, 아니면 CPU로 자동 폴백(권장).\"",
+        "  <label style=\"display: block; margin-bottom: 6px;\">",
+        "    <input type=\"radio\" name=\"inferenceDevice\" value=\"cpu\" />",
+        "    <b>",
+        "      \"CPU 강제\"",
+        "    <div class=\"admin-cell-hint\" style=\"margin-left: 22px;\">",
+        "      \"항상 CPU로 추론.\"",
+        "  <label style=\"display: block; margin-bottom: 6px;\">",
+        "    <input type=\"radio\" name=\"inferenceDevice\" value=\"cuda\" />",
+        "    <b>",
+        "      \"GPU 강제 (CUDA)\"",
+        "    <div class=\"admin-cell-hint\" style=\"margin-left: 22px;\">",
+        "      \"GPU(CUDA)로만 추론. 사용 불가 시 분석 실패(에러).\"",
+        "      <span style=\"color: var(--color-warning);\">",
+        "        \"— 현재 서버에서 CUDA 미감지(선택 시 분석 실패)\"",
+        "<div style=\"margin-top: 10px;\">",
+        "  <button class=\"btn btn-primary btn-sm\">",
+        "    \"저장\""
+      ],
+      "form": [
+        "#2 radio name=\"inferenceDevice\" value=\"cuda\" checked"
+      ]
+    },
+    {
+      "step": "저장 실패 — 오류 칸, 고른 값 그대로",
+      "requests": [
+        {
+          "method": "PATCH",
+          "url": "https://admin.synthetic.test/api/admin/org-settings",
+          "body": {
+            "inferenceDevice": "cuda"
+          },
+          "headers": {
+            "Content-Type": "application/json",
+            "X-WR-User-Id": "admin-0001",
+            "X-WR-Org-Id": "org-synthetic-1",
+            "X-WR-Auth-Mode": "intranet"
+          },
+          "signal": "none"
+        }
+      ],
+      "dom": [
+        "<div class=\"admin-filter-row\">",
+        "  <button class=\"btn btn-secondary btn-sm\">",
+        "    \"새로고침\"",
+        "<div class=\"admin-error\">",
+        "  \"설정을 저장하지 못했습니다(합성).\"",
+        "<div class=\"admin-cell-hint\" style=\"margin-bottom: 8px;\">",
+        "  \"서버 GPU: CUDA provider 미설치/감지 불가 (GPU 확인 실패(합성))\"",
+        "<fieldset style=\"padding: 0px; margin: 0px;\">",
+        "  <label style=\"display: block; margin-bottom: 6px;\">",
+        "    <input type=\"radio\" name=\"inferenceDevice\" value=\"auto\" />",
+        "    <b>",
+        "      \"자동 (GPU 우선)\"",
+        "    <div class=\"admin-cell-hint\" style=\"margin-left: 22px;\">",
+        "      \"GPU 사용 가능하면 GPU, 아니면 CPU로 자동 폴백(권장).\"",
+        "  <label style=\"display: block; margin-bottom: 6px;\">",
+        "    <input type=\"radio\" name=\"inferenceDevice\" value=\"cpu\" />",
+        "    <b>",
+        "      \"CPU 강제\"",
+        "    <div class=\"admin-cell-hint\" style=\"margin-left: 22px;\">",
+        "      \"항상 CPU로 추론.\"",
+        "  <label style=\"display: block; margin-bottom: 6px;\">",
+        "    <input type=\"radio\" name=\"inferenceDevice\" value=\"cuda\" />",
+        "    <b>",
+        "      \"GPU 강제 (CUDA)\"",
+        "    <div class=\"admin-cell-hint\" style=\"margin-left: 22px;\">",
+        "      \"GPU(CUDA)로만 추론. 사용 불가 시 분석 실패(에러).\"",
+        "      <span style=\"color: var(--color-warning);\">",
+        "        \"— 현재 서버에서 CUDA 미감지(선택 시 분석 실패)\"",
+        "<div style=\"margin-top: 10px;\">",
+        "  <button class=\"btn btn-primary btn-sm\">",
+        "    \"저장\""
+      ],
+      "form": [
+        "#2 radio name=\"inferenceDevice\" value=\"cuda\" checked"
+      ]
+    },
+    {
+      "step": "새로고침 — 편집 되돌림·오류 칸 지워짐, CUDA 사용 가능",
+      "requests": [
+        {
+          "method": "GET",
+          "url": "https://admin.synthetic.test/api/admin/org-settings",
+          "headers": {
+            "Content-Type": "application/json",
+            "X-WR-User-Id": "admin-0001",
+            "X-WR-Org-Id": "org-synthetic-1",
+            "X-WR-Auth-Mode": "intranet"
+          },
+          "signal": "none"
+        }
+      ],
+      "dom": [
+        "<div class=\"admin-filter-row\">",
+        "  <button class=\"btn btn-secondary btn-sm\">",
+        "    \"새로고침\"",
+        "<div class=\"admin-cell-hint\" style=\"margin-bottom: 8px;\">",
+        "  \"서버 GPU: CUDA 사용 가능 ✓\"",
+        "<fieldset style=\"padding: 0px; margin: 0px;\">",
+        "  <label style=\"display: block; margin-bottom: 6px;\">",
+        "    <input type=\"radio\" name=\"inferenceDevice\" value=\"auto\" />",
+        "    <b>",
+        "      \"자동 (GPU 우선)\"",
+        "    <div class=\"admin-cell-hint\" style=\"margin-left: 22px;\">",
+        "      \"GPU 사용 가능하면 GPU, 아니면 CPU로 자동 폴백(권장).\"",
+        "  <label style=\"display: block; margin-bottom: 6px;\">",
+        "    <input type=\"radio\" name=\"inferenceDevice\" value=\"cpu\" />",
+        "    <b>",
+        "      \"CPU 강제\"",
+        "    <div class=\"admin-cell-hint\" style=\"margin-left: 22px;\">",
+        "      \"항상 CPU로 추론.\"",
+        "  <label style=\"display: block; margin-bottom: 6px;\">",
+        "    <input type=\"radio\" name=\"inferenceDevice\" value=\"cuda\" />",
+        "    <b>",
+        "      \"GPU 강제 (CUDA)\"",
+        "    <div class=\"admin-cell-hint\" style=\"margin-left: 22px;\">",
+        "      \"GPU(CUDA)로만 추론. 사용 불가 시 분석 실패(에러).\"",
+        "<div style=\"margin-top: 10px;\">",
+        "  <button class=\"btn btn-primary btn-sm\" disabled=\"\">",
+        "    \"저장\""
+      ],
+      "form": [
+        "#1 radio name=\"inferenceDevice\" value=\"cpu\" checked"
+      ]
+    },
+    {
+      "step": "gpu 없는 응답 — GPU 확인 중으로 돌아감",
+      "requests": [
+        {
+          "method": "GET",
+          "url": "https://admin.synthetic.test/api/admin/org-settings",
+          "headers": {
+            "Content-Type": "application/json",
+            "X-WR-User-Id": "admin-0001",
+            "X-WR-Org-Id": "org-synthetic-1",
+            "X-WR-Auth-Mode": "intranet"
+          },
+          "signal": "none"
+        }
+      ],
+      "dom": [
+        "<div class=\"admin-filter-row\">",
+        "  <button class=\"btn btn-secondary btn-sm\">",
+        "    \"새로고침\"",
+        "<div class=\"admin-cell-hint\" style=\"margin-bottom: 8px;\">",
+        "  \"GPU 상태 확인 중…\"",
+        "<fieldset style=\"padding: 0px; margin: 0px;\">",
+        "  <label style=\"display: block; margin-bottom: 6px;\">",
+        "    <input type=\"radio\" name=\"inferenceDevice\" value=\"auto\" />",
+        "    <b>",
+        "      \"자동 (GPU 우선)\"",
+        "    <div class=\"admin-cell-hint\" style=\"margin-left: 22px;\">",
+        "      \"GPU 사용 가능하면 GPU, 아니면 CPU로 자동 폴백(권장).\"",
+        "  <label style=\"display: block; margin-bottom: 6px;\">",
+        "    <input type=\"radio\" name=\"inferenceDevice\" value=\"cpu\" />",
+        "    <b>",
+        "      \"CPU 강제\"",
+        "    <div class=\"admin-cell-hint\" style=\"margin-left: 22px;\">",
+        "      \"항상 CPU로 추론.\"",
+        "  <label style=\"display: block; margin-bottom: 6px;\">",
+        "    <input type=\"radio\" name=\"inferenceDevice\" value=\"cuda\" />",
+        "    <b>",
+        "      \"GPU 강제 (CUDA)\"",
+        "    <div class=\"admin-cell-hint\" style=\"margin-left: 22px;\">",
+        "      \"GPU(CUDA)로만 추론. 사용 불가 시 분석 실패(에러).\"",
+        "<div style=\"margin-top: 10px;\">",
+        "  <button class=\"btn btn-primary btn-sm\" disabled=\"\">",
+        "    \"저장\""
+      ],
+      "form": [
+        "#2 radio name=\"inferenceDevice\" value=\"cuda\" checked"
+      ]
+    },
+    {
+      "step": "새로고침 실패 — 오류 칸, 값 그대로",
+      "requests": [
+        {
+          "method": "GET",
+          "url": "https://admin.synthetic.test/api/admin/org-settings",
+          "headers": {
+            "Content-Type": "application/json",
+            "X-WR-User-Id": "admin-0001",
+            "X-WR-Org-Id": "org-synthetic-1",
+            "X-WR-Auth-Mode": "intranet"
+          },
+          "signal": "none"
+        }
+      ],
+      "dom": [
+        "<div class=\"admin-filter-row\">",
+        "  <button class=\"btn btn-secondary btn-sm\">",
+        "    \"새로고침\"",
+        "<div class=\"admin-error\">",
+        "  \"설정을 불러오지 못했습니다(합성).\"",
+        "<div class=\"admin-cell-hint\" style=\"margin-bottom: 8px;\">",
+        "  \"GPU 상태 확인 중…\"",
+        "<fieldset style=\"padding: 0px; margin: 0px;\">",
+        "  <label style=\"display: block; margin-bottom: 6px;\">",
+        "    <input type=\"radio\" name=\"inferenceDevice\" value=\"auto\" />",
+        "    <b>",
+        "      \"자동 (GPU 우선)\"",
+        "    <div class=\"admin-cell-hint\" style=\"margin-left: 22px;\">",
+        "      \"GPU 사용 가능하면 GPU, 아니면 CPU로 자동 폴백(권장).\"",
+        "  <label style=\"display: block; margin-bottom: 6px;\">",
+        "    <input type=\"radio\" name=\"inferenceDevice\" value=\"cpu\" />",
+        "    <b>",
+        "      \"CPU 강제\"",
+        "    <div class=\"admin-cell-hint\" style=\"margin-left: 22px;\">",
+        "      \"항상 CPU로 추론.\"",
+        "  <label style=\"display: block; margin-bottom: 6px;\">",
+        "    <input type=\"radio\" name=\"inferenceDevice\" value=\"cuda\" />",
+        "    <b>",
+        "      \"GPU 강제 (CUDA)\"",
+        "    <div class=\"admin-cell-hint\" style=\"margin-left: 22px;\">",
+        "      \"GPU(CUDA)로만 추론. 사용 불가 시 분석 실패(에러).\"",
+        "<div style=\"margin-top: 10px;\">",
+        "  <button class=\"btn btn-primary btn-sm\" disabled=\"\">",
+        "    \"저장\""
+      ],
+      "form": [
+        "#2 radio name=\"inferenceDevice\" value=\"cuda\" checked"
+      ]
+    },
+    {
+      "step": "불러오기 실패 뒤 저장 성공 — 오류 칸 지워짐",
+      "requests": [
+        {
+          "method": "PATCH",
+          "url": "https://admin.synthetic.test/api/admin/org-settings",
+          "body": {
+            "inferenceDevice": "auto"
+          },
+          "headers": {
+            "Content-Type": "application/json",
+            "X-WR-User-Id": "admin-0001",
+            "X-WR-Org-Id": "org-synthetic-1",
+            "X-WR-Auth-Mode": "intranet"
+          },
+          "signal": "none"
+        }
+      ],
+      "dom": [
+        "<div class=\"admin-filter-row\">",
+        "  <button class=\"btn btn-secondary btn-sm\">",
+        "    \"새로고침\"",
+        "<div class=\"admin-cell-hint\" style=\"margin-bottom: 8px;\">",
+        "  \"GPU 상태 확인 중…\"",
+        "<fieldset style=\"padding: 0px; margin: 0px;\">",
+        "  <label style=\"display: block; margin-bottom: 6px;\">",
+        "    <input type=\"radio\" name=\"inferenceDevice\" value=\"auto\" />",
+        "    <b>",
+        "      \"자동 (GPU 우선)\"",
+        "    <div class=\"admin-cell-hint\" style=\"margin-left: 22px;\">",
+        "      \"GPU 사용 가능하면 GPU, 아니면 CPU로 자동 폴백(권장).\"",
+        "  <label style=\"display: block; margin-bottom: 6px;\">",
+        "    <input type=\"radio\" name=\"inferenceDevice\" value=\"cpu\" />",
+        "    <b>",
+        "      \"CPU 강제\"",
+        "    <div class=\"admin-cell-hint\" style=\"margin-left: 22px;\">",
+        "      \"항상 CPU로 추론.\"",
+        "  <label style=\"display: block; margin-bottom: 6px;\">",
+        "    <input type=\"radio\" name=\"inferenceDevice\" value=\"cuda\" />",
+        "    <b>",
+        "      \"GPU 강제 (CUDA)\"",
+        "    <div class=\"admin-cell-hint\" style=\"margin-left: 22px;\">",
+        "      \"GPU(CUDA)로만 추론. 사용 불가 시 분석 실패(에러).\"",
+        "<div style=\"margin-top: 10px;\">",
+        "  <button class=\"btn btn-primary btn-sm\" disabled=\"\">",
+        "    \"저장\"",
+        "  <span class=\"admin-cell-hint\" style=\"margin-left: 8px;\">",
+        "    \"저장되었습니다.\""
+      ],
+      "form": [
+        "#0 radio name=\"inferenceDevice\" value=\"auto\" checked"
+      ]
+    },
+    {
+      "step": "불러오기 실패 뒤 저장 실패 — 오류 칸을 덮어씀",
+      "requests": [
+        {
+          "method": "GET",
+          "url": "https://admin.synthetic.test/api/admin/org-settings",
+          "headers": {
+            "Content-Type": "application/json",
+            "X-WR-User-Id": "admin-0001",
+            "X-WR-Org-Id": "org-synthetic-1",
+            "X-WR-Auth-Mode": "intranet"
+          },
+          "signal": "none"
+        },
+        {
+          "method": "PATCH",
+          "url": "https://admin.synthetic.test/api/admin/org-settings",
+          "body": {
+            "inferenceDevice": "cpu"
+          },
+          "headers": {
+            "Content-Type": "application/json",
+            "X-WR-User-Id": "admin-0001",
+            "X-WR-Org-Id": "org-synthetic-1",
+            "X-WR-Auth-Mode": "intranet"
+          },
+          "signal": "none"
+        }
+      ],
+      "dom": [
+        "<div class=\"admin-filter-row\">",
+        "  <button class=\"btn btn-secondary btn-sm\">",
+        "    \"새로고침\"",
+        "<div class=\"admin-error\">",
+        "  \"설정을 저장하지 못했습니다(합성).\"",
+        "<div class=\"admin-cell-hint\" style=\"margin-bottom: 8px;\">",
+        "  \"GPU 상태 확인 중…\"",
+        "<fieldset style=\"padding: 0px; margin: 0px;\">",
+        "  <label style=\"display: block; margin-bottom: 6px;\">",
+        "    <input type=\"radio\" name=\"inferenceDevice\" value=\"auto\" />",
+        "    <b>",
+        "      \"자동 (GPU 우선)\"",
+        "    <div class=\"admin-cell-hint\" style=\"margin-left: 22px;\">",
+        "      \"GPU 사용 가능하면 GPU, 아니면 CPU로 자동 폴백(권장).\"",
+        "  <label style=\"display: block; margin-bottom: 6px;\">",
+        "    <input type=\"radio\" name=\"inferenceDevice\" value=\"cpu\" />",
+        "    <b>",
+        "      \"CPU 강제\"",
+        "    <div class=\"admin-cell-hint\" style=\"margin-left: 22px;\">",
+        "      \"항상 CPU로 추론.\"",
+        "  <label style=\"display: block; margin-bottom: 6px;\">",
+        "    <input type=\"radio\" name=\"inferenceDevice\" value=\"cuda\" />",
+        "    <b>",
+        "      \"GPU 강제 (CUDA)\"",
+        "    <div class=\"admin-cell-hint\" style=\"margin-left: 22px;\">",
+        "      \"GPU(CUDA)로만 추론. 사용 불가 시 분석 실패(에러).\"",
+        "<div style=\"margin-top: 10px;\">",
+        "  <button class=\"btn btn-primary btn-sm\">",
+        "    \"저장\""
+      ],
+      "form": [
+        "#1 radio name=\"inferenceDevice\" value=\"cpu\" checked"
+      ]
+    }
+  ]
+}
