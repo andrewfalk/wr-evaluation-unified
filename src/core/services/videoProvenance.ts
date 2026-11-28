@@ -4,6 +4,7 @@
 // 모듈별 write/coerce는 각 모듈 videoMappingConfig가 제공(jobExtras vs tasks, String vs number).
 import { getModule } from '../moduleRegistry';
 import { VIDEO_FEATURE_TARGETS } from '@wr/contracts/index';
+import { MOCK_BUNDLE } from './videoStepState';
 import type { AnalysisRecipe, FeatureKey, FeatureMappingTarget } from '@wr/contracts/index';
 import type { AppliedInputEntry, VideoFeatureMap, VideoFeatureValue } from './videoStepTypes';
 
@@ -145,7 +146,7 @@ export function applyFeatureToModule(patient: ProvenancePatient, {
   appliedValue,   // 전문의 확정값(미지정 시 suggestedValue 사용)
   suggestedValue,
   confidence,
-  analysisBundleVersion = 'mock-6.0-2',
+  analysisBundleVersion = MOCK_BUNDLE,
   recipe = null,  // 구조적 recipe(6.0-9, §8.11). 서버 apply 검증 게이트가 대조. 없으면 미기록(하위호환).
   appliedBy = 'unknown',
   processIds = [],
